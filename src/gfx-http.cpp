@@ -71,7 +71,8 @@ QString baseUrl()
 		const QUrl u(env);
 		// https anywhere, or plain http only for a local dev server.
 		const bool local = u.host() == QLatin1String("localhost") || u.host() == QLatin1String("127.0.0.1");
-		if (u.isValid() && (u.scheme() == QLatin1String("https") || (u.scheme() == QLatin1String("http") && local))) {
+		if (u.isValid() &&
+		    (u.scheme() == QLatin1String("https") || (u.scheme() == QLatin1String("http") && local))) {
 			QString s = env;
 			while (s.endsWith(QLatin1Char('/')))
 				s.chop(1);
@@ -119,7 +120,8 @@ static HttpResult perform(const char *method, const QString &url, const QByteArr
 	}
 
 	const std::string urlStr = url.toStdString();
-	const std::string ua = std::string("GoalForgeX-OBS/") + PLUGIN_VERSION + " (OBS " + obs_get_version_string() + ")";
+	const std::string ua =
+		std::string("GoalForgeX-OBS/") + PLUGIN_VERSION + " (OBS " + obs_get_version_string() + ")";
 	char errbuf[CURL_ERROR_SIZE] = {0};
 
 	struct curl_slist *headers = nullptr;

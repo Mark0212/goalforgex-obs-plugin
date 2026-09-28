@@ -138,13 +138,34 @@ void place(obs_sceneitem_t *item, Place where)
 	const float m = 24.0f; // margin from the canvas edge
 	float x = 0.0f, y = 0.0f;
 	switch (where) {
-	case Place::TopLeft: x = m; y = m; break;
-	case Place::TopCenter: x = (cw - iw) / 2.0f; y = m; break;
-	case Place::TopRight: x = cw - iw - m; y = m; break;
-	case Place::Center: x = (cw - iw) / 2.0f; y = (ch - ih) / 2.0f; break;
-	case Place::BottomLeft: x = m; y = ch - ih - m; break;
-	case Place::BottomCenter: x = (cw - iw) / 2.0f; y = ch - ih - m; break;
-	case Place::BottomRight: x = cw - iw - m; y = ch - ih - m; break;
+	case Place::TopLeft:
+		x = m;
+		y = m;
+		break;
+	case Place::TopCenter:
+		x = (cw - iw) / 2.0f;
+		y = m;
+		break;
+	case Place::TopRight:
+		x = cw - iw - m;
+		y = m;
+		break;
+	case Place::Center:
+		x = (cw - iw) / 2.0f;
+		y = (ch - ih) / 2.0f;
+		break;
+	case Place::BottomLeft:
+		x = m;
+		y = ch - ih - m;
+		break;
+	case Place::BottomCenter:
+		x = (cw - iw) / 2.0f;
+		y = ch - ih - m;
+		break;
+	case Place::BottomRight:
+		x = cw - iw - m;
+		y = ch - ih - m;
+		break;
 	}
 	obs_sceneitem_set_alignment(item, OBS_ALIGN_LEFT | OBS_ALIGN_TOP);
 	vec2 pos;
@@ -242,7 +263,8 @@ AddResult addToScene(obs_source_t *sceneSource, const WidgetInfo &w, const QStri
 	obs_data_release(settings);
 	if (!src) {
 		if (error)
-			*error = QStringLiteral("OBS couldn't create a Browser Source. Is the obs-browser plugin installed?");
+			*error = QStringLiteral(
+				"OBS couldn't create a Browser Source. Is the obs-browser plugin installed?");
 		return AddResult::Failed;
 	}
 	obs_data_t *priv = obs_source_get_private_settings(src);

@@ -63,7 +63,8 @@ static QByteArray protect(const QByteArray &plain)
 
 static QByteArray unprotect(const QByteArray &cipher)
 {
-	DATA_BLOB in{static_cast<DWORD>(cipher.size()), reinterpret_cast<BYTE *>(const_cast<char *>(cipher.constData()))};
+	DATA_BLOB in{static_cast<DWORD>(cipher.size()),
+		     reinterpret_cast<BYTE *>(const_cast<char *>(cipher.constData()))};
 	DATA_BLOB ent{static_cast<DWORD>(sizeof(kEntropy) - 1), reinterpret_cast<BYTE *>(const_cast<char *>(kEntropy))};
 	DATA_BLOB out{0, nullptr};
 	if (!CryptUnprotectData(&in, nullptr, &ent, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out))
@@ -171,13 +172,15 @@ bool Auth::acceptLink(const QJsonObject &r, QString *error)
 	c.displayName = acct.value(QStringLiteral("displayName")).toString();
 	if (!c.valid()) {
 		if (error)
-			*error = QStringLiteral("GoalForgeX sent an incomplete response — please try connecting again.");
+			*error =
+				QStringLiteral("GoalForgeX sent an incomplete response — please try connecting again.");
 		return false;
 	}
 	std::lock_guard<std::mutex> lk(m_);
 	c_ = c;
 	access_ = r.value(QStringLiteral("access_token")).toString();
-	accessExpMs_ = QDateTime::currentMSecsSinceEpoch() + static_cast<qint64>(r.value(QStringLiteral("expires_in")).toInt(3600)) * 1000;
+	accessExpMs_ = QDateTime::currentMSecsSinceEpoch() +
+		       static_cast<qint64>(r.value(QStringLiteral("expires_in")).toInt(3600)) * 1000;
 	saveLocked();
 	return true;
 }
@@ -249,7 +252,8 @@ TokenStatus Auth::accessToken(QString *tokenOut, QString *errorOut)
 		}
 		std::lock_guard<std::mutex> lk(m_);
 		access_ = at;
-		accessExpMs_ = QDateTime::currentMSecsSinceEpoch() + static_cast<qint64>(o.value(QStringLiteral("expires_in")).toInt(3600)) * 1000;
+		accessExpMs_ = QDateTime::currentMSecsSinceEpoch() +
+			       static_cast<qint64>(o.value(QStringLiteral("expires_in")).toInt(3600)) * 1000;
 		c_.refreshToken = rt;
 		const QJsonObject acct = o.value(QStringLiteral("account")).toObject();
 		if (!acct.isEmpty())
@@ -260,9 +264,11 @@ TokenStatus Auth::accessToken(QString *tokenOut, QString *errorOut)
 	}
 	if (r.status == 400 && r.errorCode() == QLatin1String("invalid_grant")) {
 		if (errorOut)
-			*errorOut = r.serverMessage().isEmpty()
-					    ? QStringLiteral("This OBS was disconnected from your GoalForgeX account. Click Connect to link it again.")
-					    : r.serverMessage();
+			*errorOut =
+				r.serverMessage().isEmpty()
+					? QStringLiteral(
+						  "This OBS was disconnected from your GoalForgeX account. Click Connect to link it again.")
+					: r.serverMessage();
 		return TokenStatus::NeedsReconnect;
 	}
 	if (errorOut)

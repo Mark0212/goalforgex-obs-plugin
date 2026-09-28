@@ -116,12 +116,9 @@ bool trustedUrl(const QString &s)
 
 enum PlaceIdx { PlaceHeader = 0 };
 const QList<QPair<QString, Place>> kPlaces = {
-	{QStringLiteral("Top left"), Place::TopLeft},
-	{QStringLiteral("Top center"), Place::TopCenter},
-	{QStringLiteral("Top right"), Place::TopRight},
-	{QStringLiteral("Center"), Place::Center},
-	{QStringLiteral("Bottom left"), Place::BottomLeft},
-	{QStringLiteral("Bottom center"), Place::BottomCenter},
+	{QStringLiteral("Top left"), Place::TopLeft},         {QStringLiteral("Top center"), Place::TopCenter},
+	{QStringLiteral("Top right"), Place::TopRight},       {QStringLiteral("Center"), Place::Center},
+	{QStringLiteral("Bottom left"), Place::BottomLeft},   {QStringLiteral("Bottom center"), Place::BottomCenter},
 	{QStringLiteral("Bottom right"), Place::BottomRight},
 };
 
@@ -201,7 +198,8 @@ void GfxDock::buildUi()
 	linkPanel_ = new QFrame(this);
 	auto *lp = new QVBoxLayout(linkPanel_);
 	lp->setContentsMargins(0, 4, 0, 4);
-	auto *lpTitle = new QLabel(QStringLiteral("Approve this OBS in your browser. Check the code matches:"), linkPanel_);
+	auto *lpTitle =
+		new QLabel(QStringLiteral("Approve this OBS in your browser. Check the code matches:"), linkPanel_);
 	lpTitle->setWordWrap(true);
 	codeLbl_ = new QLabel(linkPanel_);
 	QFont f = codeLbl_->font();
@@ -282,7 +280,8 @@ void GfxDock::buildUi()
 	scaleSpin_->setToolTip(QStringLiteral("Size in the scene (100% = the widget's native size)"));
 	scaleSpin_->setKeyboardTracking(false);
 	fitBtn_ = new QPushButton(QStringLiteral("Fit canvas"), mainPanel_);
-	fitBtn_->setToolTip(QStringLiteral("Stretch to fill the whole canvas, keeping proportions (for Alerts and Chat Box)"));
+	fitBtn_->setToolTip(
+		QStringLiteral("Stretch to fill the whole canvas, keeping proportions (for Alerts and Chat Box)"));
 	grid->addWidget(placeCombo_, 1, 0);
 	grid->addWidget(scaleSpin_, 1, 1);
 	grid->addWidget(fitBtn_, 1, 2);
@@ -324,7 +323,8 @@ void GfxDock::setState(State s, const QString &message, bool isError)
 	const QString who = (c.displayName.isEmpty() ? c.username : c.displayName).toHtmlEscaped();
 	switch (s) {
 	case State::Disconnected:
-		statusLbl_->setText(QStringLiteral("<b>Not connected.</b> Connect your GoalForgeX account to add your widgets to OBS."));
+		statusLbl_->setText(QStringLiteral(
+			"<b>Not connected.</b> Connect your GoalForgeX account to add your widgets to OBS."));
 		break;
 	case State::Linking:
 		statusLbl_->setText(QStringLiteral("<b>Connecting…</b>"));
@@ -333,11 +333,13 @@ void GfxDock::setState(State s, const QString &message, bool isError)
 		statusLbl_->setText(QStringLiteral("Connected as <b>%1</b>").arg(who));
 		break;
 	case State::NeedsReconnect:
-		statusLbl_->setText(QStringLiteral("<b>⚠ Disconnected from GoalForgeX.</b> Widgets already in your scenes that this OBS added won't update until you connect again."));
+		statusLbl_->setText(QStringLiteral(
+			"<b>⚠ Disconnected from GoalForgeX.</b> Widgets already in your scenes that this OBS added won't update until you connect again."));
 		break;
 	}
 	connectBtn_->setVisible(s == State::Disconnected || s == State::NeedsReconnect);
-	connectBtn_->setText(s == State::NeedsReconnect ? QStringLiteral("Reconnect") : QStringLiteral("Connect GoalForgeX"));
+	connectBtn_->setText(s == State::NeedsReconnect ? QStringLiteral("Reconnect")
+							: QStringLiteral("Connect GoalForgeX"));
 	disconnectBtn_->setVisible(s == State::Connected || s == State::NeedsReconnect);
 	linkPanel_->setVisible(s == State::Linking);
 	// Existing sources can still be shown/hidden/moved while reconnecting.
@@ -372,35 +374,41 @@ void GfxDock::startConnect()
 	body.insert(QStringLiteral("client_version"), QString::fromUtf8(PLUGIN_VERSION));
 	body.insert(QStringLiteral("obs_version"), QString::fromUtf8(obs_get_version_string()));
 
-	runAsync([body] { return httpPostJson(baseUrl() + QStringLiteral("/api/obs/device"), body); },
-		 [this, gen](const HttpResult &r) {
-			 if (gen != linkGeneration_ || state_ != State::Linking)
-				 return;
-			 if (!r.ok()) {
-				 setState(State::Disconnected, describe(r), true);
-				 return;
-			 }
-			 const QJsonObject o = r.json();
-			 deviceCode_ = o.value(QStringLiteral("device_code")).toString();
-			 userCode_ = o.value(QStringLiteral("user_code")).toString();
-			 verifyUrl_ = o.value(QStringLiteral("verification_uri_complete")).toString();
-			 const QString plainUrl = o.value(QStringLiteral("verification_uri")).toString();
-			 pollIntervalS_ = qMax(1, o.value(QStringLiteral("interval")).toInt(5));
-			 linkExpiresMs_ = QDateTime::currentMSecsSinceEpoch() +
-					  static_cast<qint64>(o.value(QStringLiteral("expires_in")).toInt(600)) * 1000;
-			 if (deviceCode_.isEmpty() || userCode_.isEmpty() || verifyUrl_.isEmpty()) {
-				 setState(State::Disconnected, QStringLiteral("GoalForgeX sent an unexpected response — please try again."), true);
-				 return;
-			 }
-			 codeLbl_->setText(userCode_);
-			 linkHint_->setText(QStringLiteral("If your browser didn't open, go to <a href=\"%1\">%2</a> and enter the code above. It expires in 10 minutes.")
-						    .arg(verifyUrl_.toHtmlEscaped(), plainUrl.toHtmlEscaped()));
-			 if (!QDesktopServices::openUrl(QUrl(verifyUrl_)))
-				 showMessage(QStringLiteral("Couldn't open your browser automatically — use the link above."));
-			 else
-				 showMessage(QStringLiteral("Waiting for you to approve in the browser…"));
-			 schedulePoll();
-		 });
+	runAsync(
+		[body] { return httpPostJson(baseUrl() + QStringLiteral("/api/obs/device"), body); },
+		[this, gen](const HttpResult &r) {
+			if (gen != linkGeneration_ || state_ != State::Linking)
+				return;
+			if (!r.ok()) {
+				setState(State::Disconnected, describe(r), true);
+				return;
+			}
+			const QJsonObject o = r.json();
+			deviceCode_ = o.value(QStringLiteral("device_code")).toString();
+			userCode_ = o.value(QStringLiteral("user_code")).toString();
+			verifyUrl_ = o.value(QStringLiteral("verification_uri_complete")).toString();
+			const QString plainUrl = o.value(QStringLiteral("verification_uri")).toString();
+			pollIntervalS_ = qMax(1, o.value(QStringLiteral("interval")).toInt(5));
+			linkExpiresMs_ = QDateTime::currentMSecsSinceEpoch() +
+					 static_cast<qint64>(o.value(QStringLiteral("expires_in")).toInt(600)) * 1000;
+			if (deviceCode_.isEmpty() || userCode_.isEmpty() || verifyUrl_.isEmpty()) {
+				setState(State::Disconnected,
+					 QStringLiteral("GoalForgeX sent an unexpected response — please try again."),
+					 true);
+				return;
+			}
+			codeLbl_->setText(userCode_);
+			linkHint_->setText(
+				QStringLiteral(
+					"If your browser didn't open, go to <a href=\"%1\">%2</a> and enter the code above. It expires in 10 minutes.")
+					.arg(verifyUrl_.toHtmlEscaped(), plainUrl.toHtmlEscaped()));
+			if (!QDesktopServices::openUrl(QUrl(verifyUrl_)))
+				showMessage(QStringLiteral(
+					"Couldn't open your browser automatically — use the link above."));
+			else
+				showMessage(QStringLiteral("Waiting for you to approve in the browser…"));
+			schedulePoll();
+		});
 }
 
 void GfxDock::schedulePoll()
@@ -413,7 +421,9 @@ void GfxDock::pollOnce()
 	if (state_ != State::Linking || deviceCode_.isEmpty())
 		return;
 	if (QDateTime::currentMSecsSinceEpoch() > linkExpiresMs_) {
-		setState(State::Disconnected, QStringLiteral("The code expired before it was approved. Click Connect to get a new one."), true);
+		setState(State::Disconnected,
+			 QStringLiteral("The code expired before it was approved. Click Connect to get a new one."),
+			 true);
 		return;
 	}
 	const int gen = linkGeneration_;
@@ -421,7 +431,8 @@ void GfxDock::pollOnce()
 	runAsync(
 		[dc] {
 			QJsonObject body;
-			body.insert(QStringLiteral("grant_type"), QStringLiteral("urn:ietf:params:oauth:grant-type:device_code"));
+			body.insert(QStringLiteral("grant_type"),
+				    QStringLiteral("urn:ietf:params:oauth:grant-type:device_code"));
 			body.insert(QStringLiteral("device_code"), dc);
 			return httpPostJson(baseUrl() + QStringLiteral("/api/obs/token"), body);
 		},
@@ -444,14 +455,21 @@ void GfxDock::pollOnce()
 			if (code == QLatin1String("authorization_pending")) {
 				schedulePoll();
 			} else if (code == QLatin1String("slow_down")) {
-				pollIntervalS_ = qMax(pollIntervalS_ + 5, r.json().value(QStringLiteral("interval")).toInt(0));
+				pollIntervalS_ =
+					qMax(pollIntervalS_ + 5, r.json().value(QStringLiteral("interval")).toInt(0));
 				schedulePoll();
 			} else if (code == QLatin1String("access_denied")) {
 				setState(State::Disconnected,
-					 r.serverMessage().isEmpty() ? QStringLiteral("The connection was declined in the browser.") : r.serverMessage(),
+					 r.serverMessage().isEmpty()
+						 ? QStringLiteral("The connection was declined in the browser.")
+						 : r.serverMessage(),
 					 true);
 			} else if (code == QLatin1String("expired_token")) {
-				setState(State::Disconnected, QStringLiteral("The code expired before it was approved. Click Connect to get a new one."), true);
+				setState(
+					State::Disconnected,
+					QStringLiteral(
+						"The code expired before it was approved. Click Connect to get a new one."),
+					true);
 			} else {
 				// Network blip or server hiccup — keep waiting, the code is still good.
 				showMessage(describe(r) + QStringLiteral(" Still waiting for approval…"), true);
@@ -472,8 +490,9 @@ void GfxDock::disconnectAccount()
 {
 	const auto ans = QMessageBox::question(
 		this, QStringLiteral("Disconnect GoalForgeX"),
-		QStringLiteral("Disconnect this OBS from your GoalForgeX account?\n\nWidgets this OBS added stay in your scenes but "
-			       "stop showing until you connect again."));
+		QStringLiteral(
+			"Disconnect this OBS from your GoalForgeX account?\n\nWidgets this OBS added stay in your scenes but "
+			"stop showing until you connect again."));
 	if (ans != QMessageBox::Yes)
 		return;
 	catalogueTimer_.stop();
@@ -483,7 +502,8 @@ void GfxDock::disconnectAccount()
 			if (!wasConnected)
 				return ApiResult();
 			return authedCall([](const QString &tok) {
-				return httpPostJson(baseUrl() + QStringLiteral("/api/obs/disconnect"), QJsonObject(), tok);
+				return httpPostJson(baseUrl() + QStringLiteral("/api/obs/disconnect"), QJsonObject(),
+						    tok);
 			});
 		},
 		[this, wasConnected](const ApiResult &r) {
@@ -493,9 +513,12 @@ void GfxDock::disconnectAccount()
 			// NeedsReconnect means the server had already dropped this link — nothing left to remove.
 			const bool serverOk = !wasConnected || r.token == TokenStatus::NeedsReconnect ||
 					      (r.token == TokenStatus::Ok && r.http.ok());
-			setState(State::Disconnected,
-				 serverOk ? QStringLiteral("Disconnected.")
-					  : QStringLiteral("Disconnected here. GoalForgeX couldn't be reached — to be sure, remove this device at goalforgex.com/obs."));
+			setState(
+				State::Disconnected,
+				serverOk
+					? QStringLiteral("Disconnected.")
+					: QStringLiteral(
+						  "Disconnected here. GoalForgeX couldn't be reached — to be sure, remove this device at goalforgex.com/obs."));
 		});
 }
 
@@ -517,12 +540,22 @@ void GfxDock::loadCatalogue(bool quiet)
 		[this, quiet](const ApiResult &r) {
 			catalogueInFlight_ = false;
 			if (r.token == TokenStatus::NeedsReconnect) {
-				setState(State::NeedsReconnect, r.error.isEmpty() ? QStringLiteral("This OBS was disconnected from GoalForgeX. Click Reconnect.") : r.error, true);
+				setState(
+					State::NeedsReconnect,
+					r.error.isEmpty()
+						? QStringLiteral(
+							  "This OBS was disconnected from GoalForgeX. Click Reconnect.")
+						: r.error,
+					true);
 				return;
 			}
 			if (r.token == TokenStatus::Transient || !r.http.ok()) {
 				const QString why = r.token == TokenStatus::Transient ? r.error : describe(r.http);
-				showMessage(QStringLiteral("%1 Widgets already in your scenes keep working. Retrying in %2s.").arg(why).arg(netBackoffS_), true);
+				showMessage(QStringLiteral(
+						    "%1 Widgets already in your scenes keep working. Retrying in %2s.")
+						    .arg(why)
+						    .arg(netBackoffS_),
+					    true);
 				catalogueTimer_.start(netBackoffS_ * 1000);
 				netBackoffS_ = qMin(netBackoffS_ * 2, 300);
 				if (state_ != State::Connected)
@@ -532,8 +565,10 @@ void GfxDock::loadCatalogue(bool quiet)
 			netBackoffS_ = 5;
 			QList<WidgetInfo> next;
 			const QJsonArray arr = r.http.json().value(QStringLiteral("widgets")).toArray();
-			for (const QJsonValue &v : arr) {
-				const QJsonObject o = v.toObject();
+			// Index loop: iterating a QJsonArray yields temporaries, which clang
+			// rejects binding to a reference (-Wrange-loop-bind-reference).
+			for (qsizetype i = 0; i < arr.size(); ++i) {
+				const QJsonObject o = arr.at(i).toObject();
 				WidgetInfo w;
 				w.id = o.value(QStringLiteral("id")).toString();
 				w.name = o.value(QStringLiteral("name")).toString();
@@ -556,9 +591,11 @@ void GfxDock::loadCatalogue(bool quiet)
 			const int updated = sources::syncUrls(widgets_, c.overlayKey, c.username);
 			setState(State::Connected);
 			if (updated > 0)
-				showMessage(QStringLiteral("Updated %1 GoalForgeX source(s) to use this connection.").arg(updated));
+				showMessage(QStringLiteral("Updated %1 GoalForgeX source(s) to use this connection.")
+						    .arg(updated));
 			else if (!quiet)
-				showMessage(widgets_.isEmpty() ? QStringLiteral("No widgets found on your account.") : QString());
+				showMessage(widgets_.isEmpty() ? QStringLiteral("No widgets found on your account.")
+							       : QString());
 			catalogueTimer_.start(5 * 60 * 1000); // pick up new counters etc.
 		});
 }
@@ -651,18 +688,25 @@ void GfxDock::refreshStatuses()
 		if (src) {
 			obs_sceneitem_t *item = scene ? sources::findItem(scene, src) : nullptr;
 			if (item)
-				status = obs_sceneitem_visible(item) ? QStringLiteral("● in this scene") : QStringLiteral("◌ in this scene (hidden)");
+				status = obs_sceneitem_visible(item) ? QStringLiteral("● in this scene")
+								     : QStringLiteral("◌ in this scene (hidden)");
 			else
 				status = QStringLiteral("in another scene");
 			obs_source_release(src);
 		} else if (w.locked) {
-			status = QStringLiteral("🔒 ") + (w.lockReason.isEmpty() ? QStringLiteral("locked") : w.lockReason);
+			status = QStringLiteral("🔒 ") +
+				 (w.lockReason.isEmpty() ? QStringLiteral("locked") : w.lockReason);
 		}
-		const QString text = w.icon + QLatin1Char(' ') + w.name + (status.isEmpty() ? QString() : QStringLiteral("   ·  ") + status);
+		const QString text = w.icon + QLatin1Char(' ') + w.name +
+				     (status.isEmpty() ? QString() : QStringLiteral("   ·  ") + status);
 		if (it->text() != text)
 			it->setText(text);
-		it->setForeground(w.locked && !hasSource ? palette().color(QPalette::Disabled, QPalette::Text) : palette().color(QPalette::Text));
-		it->setToolTip(w.locked ? QStringLiteral("%1 — upgrade on goalforgex.com to use this widget.").arg(w.lockReason) : w.name);
+		it->setForeground(w.locked && !hasSource ? palette().color(QPalette::Disabled, QPalette::Text)
+							 : palette().color(QPalette::Text));
+		it->setToolTip(
+			w.locked
+				? QStringLiteral("%1 — upgrade on goalforgex.com to use this widget.").arg(w.lockReason)
+				: w.name);
 	}
 	if (scene)
 		obs_source_release(scene);
@@ -727,7 +771,10 @@ void GfxDock::addSelected()
 		showMessage(QStringLiteral("Added %1 to \"%2\".").arg(w->name, sceneName));
 		break;
 	case sources::AddResult::Reused:
-		showMessage(QStringLiteral("Added %1 to \"%2\" — it's the same source as in your other scenes, so changes apply everywhere.").arg(w->name, sceneName));
+		showMessage(
+			QStringLiteral(
+				"Added %1 to \"%2\" — it's the same source as in your other scenes, so changes apply everywhere.")
+				.arg(w->name, sceneName));
 		break;
 	case sources::AddResult::AlreadyInScene:
 		showMessage(QStringLiteral("%1 is already in \"%2\" — selected it for you.").arg(w->name, sceneName));
@@ -757,7 +804,8 @@ static bool withSelectedItem(const WidgetInfo *w, obs_source_t *scene, const std
 void GfxDock::toggleSelected()
 {
 	obs_source_t *scene = selectedScene();
-	withSelectedItem(selectedWidget(), scene, [](obs_sceneitem_t *it) { obs_sceneitem_set_visible(it, !obs_sceneitem_visible(it)); });
+	withSelectedItem(selectedWidget(), scene,
+			 [](obs_sceneitem_t *it) { obs_sceneitem_set_visible(it, !obs_sceneitem_visible(it)); });
 	if (scene)
 		obs_source_release(scene);
 	refreshStatuses();
@@ -768,8 +816,11 @@ void GfxDock::removeSelected()
 	const WidgetInfo *w = selectedWidget();
 	if (!w)
 		return;
-	const auto ans = QMessageBox::question(this, QStringLiteral("Remove from scene"),
-					       QStringLiteral("Remove %1 from this scene?\n\nIt stays in any other scenes it's in, and you can add it back any time.").arg(w->name));
+	const auto ans = QMessageBox::question(
+		this, QStringLiteral("Remove from scene"),
+		QStringLiteral(
+			"Remove %1 from this scene?\n\nIt stays in any other scenes it's in, and you can add it back any time.")
+			.arg(w->name));
 	if (ans != QMessageBox::Yes)
 		return;
 	obs_source_t *scene = selectedScene();
@@ -817,7 +868,8 @@ void GfxDock::reloadSelected()
 	obs_source_t *src = sources::find(Auth::instance().credentials().username, w->id);
 	if (!src)
 		return;
-	showMessage(sources::reload(src) ? QStringLiteral("Reloaded %1.").arg(w->name) : QStringLiteral("Couldn't reload %1.").arg(w->name),
+	showMessage(sources::reload(src) ? QStringLiteral("Reloaded %1.").arg(w->name)
+					 : QStringLiteral("Couldn't reload %1.").arg(w->name),
 		    false);
 	obs_source_release(src);
 }
