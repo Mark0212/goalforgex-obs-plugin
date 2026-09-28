@@ -35,7 +35,6 @@ the Free Software Foundation; either version 2 of the License, or
 namespace gfx {
 
 static const char *kCredFile = "credentials.dat";
-static const char kEntropy[] = "GoalForgeX-OBS-credentials-v1";
 
 static QString credPath()
 {
@@ -46,6 +45,10 @@ static QString credPath()
 }
 
 #ifdef _WIN32
+// DPAPI optional entropy — Windows-only, so declared here (an unused const
+// elsewhere is a -Werror failure on the macOS/Linux builds).
+static const char kEntropy[] = "GoalForgeX-OBS-credentials-v1";
+
 static QByteArray protect(const QByteArray &plain)
 {
 	DATA_BLOB in{static_cast<DWORD>(plain.size()), reinterpret_cast<BYTE *>(const_cast<char *>(plain.constData()))};
