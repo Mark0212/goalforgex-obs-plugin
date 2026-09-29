@@ -14,6 +14,7 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include <curl/curl.h>
 
+#include <QFile>
 #include <QJsonDocument>
 #include <QUrl>
 
@@ -177,6 +178,76 @@ HttpResult httpPostJson(const QString &url, const QJsonObject &body, const QStri
 {
 	const QByteArray data = QJsonDocument(body).toJson(QJsonDocument::Compact);
 	return perform("POST", url, &data, bearer);
+}
+
+static size_t fileWriteCb(char *ptr, size_t size, size_t nmemb, void *userdata)
+{
+	auto *f = static_cast<QFile *>(userdata);
+	const size_t n = size * nmemb;
+	// An installer is a few MB; refuse anything absurd.
+	if (static_cast<size_t>(f->size()) + n > 200u * 1024u * 1024u)
+		return 0;
+	return f->write(ptr, static_cast<qint64>(n)) == static_cast<qint64>(n) ? n : 0;
+}
+
+bool httpDownload(const QString &url, const QString &path, QString *error)
+{
+	if (g_shutdown.load()) {
+		if (error)
+			*error = QStringLiteral("OBS is shutting down");
+		return false;
+	}
+	std::call_once(g_curlInit, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
+	struct InFlight {
+		InFlight() { ++g_inflight; }
+		~InFlight() { --g_inflight; }
+	} guard;
+
+	QFile f(path);
+	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		if (error)
+			*error = QStringLiteral("Couldn't write the update to disk.");
+		return false;
+	}
+	CURL *curl = curl_easy_init();
+	if (!curl) {
+		if (error)
+			*error = QStringLiteral("Could not start a network request");
+		return false;
+	}
+	const std::string urlStr = url.toStdString();
+	const std::string ua =
+		std::string("GoalForgeX-OBS/") + PLUGIN_VERSION + " (OBS " + obs_get_version_string() + ")";
+	char errbuf[CURL_ERROR_SIZE] = {0};
+	curl_easy_setopt(curl, CURLOPT_URL, urlStr.c_str());
+	curl_easy_setopt(curl, CURLOPT_USERAGENT, ua.c_str());
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fileWriteCb);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &f);
+	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
+	curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "https");
+	curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "https");
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+	curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+	curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progressCb);
+	const CURLcode rc = curl_easy_perform(curl);
+	curl_easy_cleanup(curl);
+	f.close();
+	if (rc != CURLE_OK) {
+		QFile::remove(path);
+		if (error)
+			*error = QStringLiteral("Download failed: %1")
+					 .arg(QString::fromUtf8(errbuf[0] ? errbuf : curl_easy_strerror(rc)));
+		obs_log(LOG_WARNING, "Update download failed: %s", errbuf[0] ? errbuf : curl_easy_strerror(rc));
+		return false;
+	}
+	return true;
 }
 
 } // namespace gfx

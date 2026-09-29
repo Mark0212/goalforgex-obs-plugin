@@ -43,8 +43,9 @@ find_package(CURL REQUIRED)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE CURL::libcurl)
 
 if(WIN32)
-  # DPAPI (CryptProtectData) — encrypts the stored refresh token per Windows user.
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE crypt32)
+  # DPAPI (CryptProtectData) — encrypts the stored refresh token per Windows user;
+  # shell32 — ShellExecuteExW("runas") to start a verified update installer.
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE crypt32 shell32)
 endif()
 
 target_sources(
@@ -73,6 +74,8 @@ target_sources(
     src/gfx-sources.hpp
     src/gfx-state.cpp
     src/gfx-state.hpp
+    src/gfx-update.cpp
+    src/gfx-update.hpp
 )
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

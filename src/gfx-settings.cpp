@@ -59,6 +59,7 @@ static const BoolField kBools[] = {
 	{"autoStartTimer", &Settings::autoStartTimer},
 	{"autoPauseTimer", &Settings::autoPauseTimer},
 	{"checkUpdates", &Settings::checkUpdates},
+	{"autoInstallUpdates", &Settings::autoInstallUpdates},
 };
 
 void loadSettings()

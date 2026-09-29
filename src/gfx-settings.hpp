@@ -48,6 +48,8 @@ struct Settings {
 	bool autoPauseTimer = false;
 	// Updates
 	bool checkUpdates = true;
+	// Download updates in the background and install them when OBS closes.
+	bool autoInstallUpdates = true;
 
 	QList<Reaction> reactions;
 };

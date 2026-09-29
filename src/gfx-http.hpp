@@ -34,6 +34,11 @@ struct HttpResult {
 HttpResult httpGet(const QString &url, const QString &bearer = QString());
 HttpResult httpPostJson(const QString &url, const QJsonObject &body, const QString &bearer = QString());
 
+// Downloads a public file (no credentials sent) to `path`, following
+// redirects over HTTPS only (GitHub release assets redirect to their CDN).
+// Returns false and fills `error` on any failure. Worker thread only.
+bool httpDownload(const QString &url, const QString &path, QString *error);
+
 // Aborts in-flight transfers and makes new ones fail fast (OBS is exiting).
 void httpBeginShutdown();
 bool httpShuttingDown();

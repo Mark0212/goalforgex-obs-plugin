@@ -62,6 +62,11 @@ Type: filesandordirs; Name: "{app}\bin"; Check: UseNewLayout
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
 
+[Run]
+; The plugin's "Restart now" update passes /RELAUNCH=1: reopen OBS as the normal
+; (non-admin) user once the new version is in place.
+Filename: "{code:ObsExeForRun}"; WorkingDir: "{code:ObsBinDir}"; Flags: nowait runasoriginaluser skipifdoesntexist; Check: WantRelaunch
+
 [Code]
 var
   ObsFound: Boolean;
@@ -138,9 +143,45 @@ begin
     '', SW_HIDE, ewWaitUntilTerminated, RC) and (RC = 0);
 end;
 
+// Plugin-driven updates run silently with /WAITOBS=1: OBS is already closing,
+// so wait for it quietly (up to 2 minutes) instead of asking.
+function WantWaitForObs(): Boolean;
+begin
+  Result := ExpandConstant('{param:WAITOBS|0}') = '1';
+end;
+
+function WantRelaunch(): Boolean;
+begin
+  Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;
+
+function ObsExeForRun(Param: String): String;
+begin
+  Result := ObsExePath();
+end;
+
+function ObsBinDir(Param: String): String;
+begin
+  Result := ExtractFileDir(ObsExePath());
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Tries: Integer;
 begin
   Result := '';
+  if WantWaitForObs() then
+  begin
+    Tries := 0;
+    while IsObsRunning() and (Tries < 240) do
+    begin
+      Sleep(500);
+      Tries := Tries + 1;
+    end;
+    if IsObsRunning() then
+      Result := 'OBS Studio is still running — close it and run the update again.';
+    Exit;
+  end;
   while IsObsRunning() do
   begin
     if MsgBox('OBS Studio is open. Close OBS completely, then click Retry.', mbError, MB_RETRYCANCEL) = IDCANCEL then

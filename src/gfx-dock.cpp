@@ -65,18 +65,6 @@ bool trustedUrl(const QString &s)
 	       (h == QLatin1String("goalforgex.com") || h.endsWith(QLatin1String(".goalforgex.com")));
 }
 
-// 1.2.3 > 1.2.0 ?
-bool newerVersion(const QString &a, const QString &b)
-{
-	const QStringList x = a.split(QLatin1Char('.')), y = b.split(QLatin1Char('.'));
-	for (int i = 0; i < 3; ++i) {
-		const int xa = i < x.size() ? x[i].toInt() : 0, yb = i < y.size() ? y[i].toInt() : 0;
-		if (xa != yb)
-			return xa > yb;
-	}
-	return false;
-}
-
 QString fmtSecs(int s)
 {
 	s = qAbs(s);
@@ -160,11 +148,50 @@ void GfxDock::buildUi()
 	root->addLayout(head);
 	connect(connectBtn_, &QPushButton::clicked, this, [this] { startConnect(); });
 
-	updateLbl_ = new QLabel(this);
-	updateLbl_->setTextFormat(Qt::RichText);
-	updateLbl_->setOpenExternalLinks(true);
-	updateLbl_->hide();
-	root->addWidget(updateLbl_);
+	// Update line: "⬆ 1.2.0 is out [Update]" → downloading → "ready [Restart now]"
+	updateRow_ = new QWidget(this);
+	auto *ur = new QHBoxLayout(updateRow_);
+	ur->setContentsMargins(0, 0, 0, 0);
+	updateLbl_ = new QLabel(updateRow_);
+	updateLbl_->setWordWrap(true);
+	updateBtn_ = new QPushButton(updateRow_);
+	ur->addWidget(updateLbl_, 1);
+	ur->addWidget(updateBtn_);
+	updateRow_->hide();
+	root->addWidget(updateRow_);
+	connect(updateBtn_, &QPushButton::clicked, this, [this] {
+		if (upd_ == Upd::Ready)
+			restartAndUpdate();
+		else if (upd_ == Upd::Available || upd_ == Upd::Failed)
+			startUpdateDownload();
+	});
+
+	// Shown instead of the tabs when this version is no longer supported.
+	requiredPanel_ = new QWidget(this);
+	auto *rp = new QVBoxLayout(requiredPanel_);
+	rp->setContentsMargins(0, 12, 0, 12);
+	requiredLbl_ = new QLabel(requiredPanel_);
+	requiredLbl_->setWordWrap(true);
+	requiredLbl_->setAlignment(Qt::AlignCenter);
+	requiredBtn_ = new QPushButton(QStringLiteral("Update now"), requiredPanel_);
+	auto *requiredNote = new QLabel(QStringLiteral("Widgets already in your scenes keep working in the meantime."),
+					requiredPanel_);
+	requiredNote->setWordWrap(true);
+	requiredNote->setAlignment(Qt::AlignCenter);
+	rp->addWidget(requiredLbl_);
+	rp->addWidget(requiredBtn_, 0, Qt::AlignHCenter);
+	rp->addWidget(requiredNote);
+	rp->addStretch(1);
+	requiredPanel_->hide();
+	root->addWidget(requiredPanel_, 1);
+	connect(requiredBtn_, &QPushButton::clicked, this, [this] {
+		if (upd_ == Upd::Ready)
+			restartAndUpdate();
+		else if (update_.installable())
+			startUpdateDownload();
+		else
+			QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/obs")));
+	});
 
 	// Linking panel (device code)
 	linkPanel_ = new QWidget(this);
@@ -365,7 +392,9 @@ void GfxDock::openSettings()
 	      {{QStringLiteral("Start / resume the subathon timer when I start streaming"), &s.autoStartTimer},
 	       {QStringLiteral("Pause the subathon timer when I stop streaming"), &s.autoPauseTimer}});
 	group(QStringLiteral("Updates"),
-	      {{QStringLiteral("Tell me when a new version of the plugin is out"), &s.checkUpdates}});
+	      {{QStringLiteral("Tell me when a new version of the plugin is out"), &s.checkUpdates},
+	       {QStringLiteral("Download updates automatically and install them when I close OBS"),
+		&s.autoInstallUpdates}});
 	auto *hint = new QLabel(
 		QStringLiteral(
 			"Hotkeys for timers, goal, wheel, counters and alerts are in OBS → Settings → Hotkeys (search “GoalForgeX”)."),
@@ -382,13 +411,7 @@ void GfxDock::openSettings()
 		*o.value = o.box->isChecked();
 	saveSettings();
 	rebuildTabs();
-	if (!s.checkUpdates) {
-		latestVersion_.clear();
-		updateLbl_->hide();
-		updateHealthContext();
-	} else {
-		checkForUpdate();
-	}
+	checkForUpdate();
 }
 
 // ── State + messages ─────────────────────────────────────────────
@@ -416,7 +439,8 @@ void GfxDock::setState(State s, const QString &message, bool isError)
 	connectBtn_->setText(s == State::NeedsReconnect ? QStringLiteral("Reconnect") : QStringLiteral("Connect"));
 	disconnectAct_->setEnabled(s == State::Connected || s == State::NeedsReconnect);
 	linkPanel_->setVisible(s == State::Linking);
-	tabs_->setVisible(s == State::Connected || s == State::NeedsReconnect);
+	tabs_->setVisible((s == State::Connected || s == State::NeedsReconnect) && !updateRequired_);
+	requiredPanel_->setVisible(updateRequired_ && s != State::Linking);
 	if (s == State::Connected) {
 		statusTimer_.start();
 		stateTimer_.start();
@@ -645,6 +669,8 @@ void GfxDock::pollState()
 					true);
 				return;
 			}
+			if (handleUpdateRequired(r.http.status, r.http.serverMessage()))
+				return;
 			if (!r.ok())
 				return; // transient — the next poll will catch up
 			const LiveState st = LiveState::fromJson(r.http.json());
@@ -794,6 +820,8 @@ void GfxDock::performAction(const QString &id, const QJsonValue &arg)
 	runAsync(
 		this, [path, body] { return apiPost(path, body); },
 		[this, ok](const ApiResult &r) {
+			if (handleUpdateRequired(r.http.status, r.http.serverMessage()))
+				return;
 			if (r.token == TokenStatus::NeedsReconnect)
 				setState(State::NeedsReconnect, describe(r), true);
 			else if (r.ok())
@@ -843,28 +871,158 @@ void GfxDock::streamingChanged(bool started)
 		});
 }
 
+// ── Updates ──────────────────────────────────────────────────────
+// Always asks (a required update must be noticed even with notices off);
+// what's SHOWN follows ⚙ Settings → Updates.
 void GfxDock::checkForUpdate()
 {
-	if (!settings().checkUpdates)
-		return;
 	runAsync(
 		this, [] { return httpGet(baseUrl() + QStringLiteral("/api/obs/latest")); },
 		[this](const HttpResult &r) {
 			if (!r.ok())
 				return;
-			const QString v = r.json().value(QStringLiteral("version")).toString();
-			if (!v.isEmpty() && newerVersion(v, QString::fromUtf8(PLUGIN_VERSION))) {
-				latestVersion_ = v;
-				updateLbl_->setText(QStringLiteral("⬆ Version %1 is out — <a href=\"%2\">download</a>")
-							    .arg(v.toHtmlEscaped(),
-								 (baseUrl() + QStringLiteral("/obs")).toHtmlEscaped()));
-				updateLbl_->show();
-			} else {
-				latestVersion_.clear();
-				updateLbl_->hide();
+			const UpdateInfo info = UpdateInfo::fromJson(r.json());
+			if (info.version != update_.version)
+				upd_ = Upd::None; // a newer release replaced the one we knew about
+			update_ = info;
+			const bool newer = !info.version.isEmpty() &&
+					   versionNewer(info.version, QString::fromUtf8(PLUGIN_VERSION));
+			latestVersion_ = newer ? info.version : QString();
+			if (info.required() && !updateRequired_)
+				enterUpdateRequired(QString());
+			if (newer && upd_ == Upd::None) {
+				upd_ = Upd::Available;
+				updatePath_ = installerPath(info.version);
+				// Background download so it's ready to install on exit.
+				if (info.installable() && (settings().autoInstallUpdates || updateRequired_))
+					startUpdateDownload();
 			}
+			renderUpdate();
 			updateHealthContext();
 		});
+}
+
+void GfxDock::renderUpdate()
+{
+	const bool show = upd_ != Upd::None && (settings().checkUpdates || updateRequired_ || upd_ == Upd::Ready);
+	updateRow_->setVisible(show && !updateRequired_);
+	const QString v = update_.version.toHtmlEscaped();
+	updateBtn_->setEnabled(upd_ != Upd::Downloading);
+	switch (upd_) {
+	case Upd::None:
+		break;
+	case Upd::Available:
+		updateLbl_->setText(QStringLiteral("⬆ Version %1 is out.").arg(v));
+		updateBtn_->setText(update_.installable() ? QStringLiteral("Update") : QStringLiteral("Download"));
+		break;
+	case Upd::Downloading:
+		updateLbl_->setText(QStringLiteral("⬇ Downloading version %1…").arg(v));
+		updateBtn_->setText(QStringLiteral("Downloading…"));
+		break;
+	case Upd::Ready:
+		updateLbl_->setText(
+			settings().autoInstallUpdates
+				? QStringLiteral("✅ Version %1 is ready — it installs when you close OBS.").arg(v)
+				: QStringLiteral("✅ Version %1 is ready to install.").arg(v));
+		updateBtn_->setText(QStringLiteral("Restart now"));
+		break;
+	case Upd::Failed:
+		updateLbl_->setText(QStringLiteral("⚠ Update failed: %1").arg(updateError_.toHtmlEscaped()));
+		updateBtn_->setText(QStringLiteral("Try again"));
+		break;
+	}
+	if (updateRequired_) {
+		requiredBtn_->setEnabled(upd_ != Upd::Downloading);
+		requiredBtn_->setText(upd_ == Upd::Ready         ? QStringLiteral("Restart OBS and update")
+				      : upd_ == Upd::Downloading ? QStringLiteral("Downloading…")
+				      : update_.installable()    ? QStringLiteral("Update now")
+								 : QStringLiteral("Download the update"));
+	}
+}
+
+void GfxDock::startUpdateDownload()
+{
+	if (!update_.installable()) {
+		QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/obs")));
+		return;
+	}
+	if (upd_ == Upd::Downloading || upd_ == Upd::Ready)
+		return;
+	upd_ = Upd::Downloading;
+	renderUpdate();
+	const UpdateInfo info = update_;
+	const QString path = updatePath_;
+	runAsync(
+		this, [info, path] { return downloadAndVerify(info, path); },
+		[this, info](const QString &err) {
+			if (info.version != update_.version)
+				return; // superseded while downloading
+			if (err.isEmpty()) {
+				upd_ = Upd::Ready;
+			} else {
+				upd_ = Upd::Failed;
+				updateError_ = err;
+			}
+			renderUpdate();
+		});
+}
+
+void GfxDock::restartAndUpdate()
+{
+	if (upd_ != Upd::Ready)
+		return;
+	// Never interrupt a live show.
+	if (obs_frontend_streaming_active() || obs_frontend_recording_active()) {
+		showMessage(
+			QStringLiteral(
+				"Stop streaming and recording first — the update will also install automatically when you close OBS."),
+			true);
+		return;
+	}
+	if (QMessageBox::question(
+		    this, QStringLiteral("Update GoalForgeX"),
+		    QStringLiteral(
+			    "OBS will close, update GoalForgeX to version %1 and open again.\n\nWindows will ask to allow the installer — click Yes.")
+			    .arg(update_.version)) != QMessageBox::Yes)
+		return;
+	QString err;
+	if (!launchInstaller(updatePath_, true, &err)) {
+		showMessage(err, true);
+		return;
+	}
+	installerLaunched_ = true;
+	// The installer waits for OBS to exit, installs, then reopens OBS.
+	if (auto *main = static_cast<QWidget *>(obs_frontend_get_main_window()))
+		QMetaObject::invokeMethod(main, "close", Qt::QueuedConnection);
+}
+
+void GfxDock::enterUpdateRequired(const QString &message)
+{
+	updateRequired_ = true;
+	stateTimer_.stop();
+	requiredLbl_->setText(
+		QStringLiteral("<b>Please update GoalForgeX for OBS</b><br>%1")
+			.arg((message.isEmpty() ? QStringLiteral("This version (%1) is no longer supported.")
+							  .arg(QString::fromUtf8(PLUGIN_VERSION))
+						: message)
+				     .toHtmlEscaped()));
+	requiredLbl_->setTextFormat(Qt::RichText);
+	setState(state_);
+	if (update_.installable() && upd_ != Upd::Downloading && upd_ != Upd::Ready)
+		startUpdateDownload();
+	renderUpdate();
+}
+
+// A 426 from any plugin call means this version is below the minimum.
+bool GfxDock::handleUpdateRequired(int httpStatus, const QString &message)
+{
+	if (httpStatus != 426)
+		return false;
+	if (!updateRequired_) {
+		enterUpdateRequired(message);
+		checkForUpdate();
+	}
+	return true;
 }
 
 // ── Widget catalogue ─────────────────────────────────────────────
@@ -880,6 +1038,8 @@ void GfxDock::loadCatalogue(bool quiet)
 		this, [] { return apiGet(QStringLiteral("/api/obs/widgets")); },
 		[this, quiet](const ApiResult &r) {
 			catalogueInFlight_ = false;
+			if (handleUpdateRequired(r.http.status, r.http.serverMessage()))
+				return;
 			if (r.token == TokenStatus::NeedsReconnect) {
 				setState(
 					State::NeedsReconnect,
@@ -1307,9 +1467,10 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		if (Auth::instance().connected()) {
 			loadCatalogue(false);
 			pollState();
-			checkForUpdate();
-			updateTimer_.start();
 		}
+		// Even when not connected — an update may be required to connect at all.
+		checkForUpdate();
+		updateTimer_.start();
 		break;
 	case OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED:
 	case OBS_FRONTEND_EVENT_SCENE_CHANGED:
@@ -1340,6 +1501,13 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		streamingChanged(false);
 		break;
 	case OBS_FRONTEND_EVENT_EXIT:
+		// Downloaded + verified update: install it now that OBS is closing
+		// (the installer waits for OBS to finish exiting first).
+		if (upd_ == Upd::Ready && !installerLaunched_ && (settings().autoInstallUpdates || updateRequired_) &&
+		    fileMatches(updatePath_, update_.sha256)) {
+			QString err;
+			installerLaunched_ = launchInstaller(updatePath_, false, &err);
+		}
 		loaded_ = false;
 		statusTimer_.stop();
 		catalogueTimer_.stop();

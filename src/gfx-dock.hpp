@@ -12,6 +12,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-reactions.hpp"
 #include "gfx-sources.hpp"
 #include "gfx-state.hpp"
+#include "gfx-update.hpp"
 
 #include <obs-frontend-api.h>
 
@@ -64,6 +65,11 @@ private:
 	// Live state + updates
 	void pollState();
 	void checkForUpdate();
+	void renderUpdate();
+	void startUpdateDownload();
+	void restartAndUpdate();
+	void enterUpdateRequired(const QString &message);
+	bool handleUpdateRequired(int httpStatus, const QString &message);
 	void streamingChanged(bool started);
 	void updateHealthContext();
 
@@ -91,7 +97,13 @@ private:
 	QPushButton *connectBtn_ = nullptr;
 	QToolButton *menuBtn_ = nullptr;
 	QAction *disconnectAct_ = nullptr;
+	QWidget *updateRow_ = nullptr;
 	QLabel *updateLbl_ = nullptr;
+	QPushButton *updateBtn_ = nullptr;
+	// Shown instead of the tabs when this version is below the minimum.
+	QWidget *requiredPanel_ = nullptr;
+	QLabel *requiredLbl_ = nullptr;
+	QPushButton *requiredBtn_ = nullptr;
 	// Linking
 	QWidget *linkPanel_ = nullptr;
 	QLabel *codeLbl_ = nullptr;
@@ -131,6 +143,13 @@ private:
 	QString feedId_;
 	qint64 since_ = 0;
 	QString latestVersion_;
+	enum class Upd { None, Available, Downloading, Ready, Failed };
+	Upd upd_ = Upd::None;
+	gfx::UpdateInfo update_;
+	QString updatePath_;
+	QString updateError_;
+	bool updateRequired_ = false;
+	bool installerLaunched_ = false;
 	QString deviceCode_;
 	QString userCode_;
 	QString verifyUrl_;
