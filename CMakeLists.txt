@@ -31,7 +31,10 @@ target_compile_options(
   ${CMAKE_PROJECT_NAME}
   PRIVATE $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-quoted-include-in-framework-header -Wno-comma>
 )
-set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON)
+set_target_properties(
+  ${CMAKE_PROJECT_NAME}
+  PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
+)
 
 # HTTPS client. OBS Studio itself links libcurl (frontend/CMakeLists.txt:
 # find_package(CURL REQUIRED)), so the DLL is already present in every OBS
