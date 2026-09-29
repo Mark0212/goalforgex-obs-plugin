@@ -48,14 +48,28 @@ target_sources(
   ${CMAKE_PROJECT_NAME}
   PRIVATE
     src/plugin-main.cpp
-    src/gfx-http.cpp
-    src/gfx-http.hpp
+    src/gfx-api.cpp
+    src/gfx-api.hpp
     src/gfx-auth.cpp
     src/gfx-auth.hpp
-    src/gfx-sources.cpp
-    src/gfx-sources.hpp
     src/gfx-dock.cpp
     src/gfx-dock.hpp
+    src/gfx-health.cpp
+    src/gfx-health.hpp
+    src/gfx-hotkeys.cpp
+    src/gfx-hotkeys.hpp
+    src/gfx-http.cpp
+    src/gfx-http.hpp
+    src/gfx-live.cpp
+    src/gfx-live.hpp
+    src/gfx-reactions.cpp
+    src/gfx-reactions.hpp
+    src/gfx-settings.cpp
+    src/gfx-settings.hpp
+    src/gfx-sources.cpp
+    src/gfx-sources.hpp
+    src/gfx-state.cpp
+    src/gfx-state.hpp
 )
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

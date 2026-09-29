@@ -17,6 +17,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 */
 
 #include "gfx-dock.hpp"
+#include "gfx-hotkeys.hpp"
 #include "gfx-http.hpp"
 
 #include <obs-module.h>
@@ -57,6 +58,11 @@ bool obs_module_load(void)
 	}
 	g_dock = dock;
 	obs_frontend_add_event_callback(onFrontendEvent, nullptr);
+	// OBS Settings → Hotkeys → "GoalForgeX: …" — same actions as the Live tab.
+	gfx::registerHotkeys([](const QString &id, const QJsonValue &arg) {
+		if (g_dock)
+			g_dock->performAction(id, arg);
+	});
 	obs_log(LOG_INFO, "GoalForgeX loaded (version %s, server %s)", PLUGIN_VERSION,
 		gfx::baseUrl().toUtf8().constData());
 	return true;
@@ -65,6 +71,7 @@ bool obs_module_load(void)
 void obs_module_unload(void)
 {
 	obs_frontend_remove_event_callback(onFrontendEvent, nullptr);
+	gfx::unregisterHotkeys();
 	gfx::httpBeginShutdown();
 	// Worker threads abort their transfers once shutdown is flagged; give any
 	// still in flight a moment to return before this DLL's code goes away.

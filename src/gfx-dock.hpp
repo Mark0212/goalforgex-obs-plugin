@@ -9,36 +9,50 @@ the Free Software Foundation; either version 2 of the License, or
 */
 #pragma once
 
+#include "gfx-reactions.hpp"
 #include "gfx-sources.hpp"
+#include "gfx-state.hpp"
 
 #include <obs-frontend-api.h>
 
+#include <QJsonValue>
 #include <QList>
 #include <QString>
 #include <QTimer>
 #include <QWidget>
 
+class GfxHealthPanel;
+class GfxLivePanel;
+class GfxReactionsPanel;
+class QAction;
 class QComboBox;
 class QLabel;
 class QListWidget;
 class QPushButton;
 class QSpinBox;
+class QTabWidget;
 class QToolButton;
 
-// The "GoalForgeX" dock: account connection + widget list + scene controls.
+// The "GoalForgeX" dock: account connection + Live / Widgets / Reactions /
+// Health tabs. Everything the streamer doesn't want to see can be switched
+// off in ⚙ Settings.
 class GfxDock : public QWidget {
 public:
 	explicit GfxDock(QWidget *parent = nullptr);
-	~GfxDock() override;
 
 	void onFrontendEvent(enum obs_frontend_event event);
+	// Shared by the Live tab buttons, OBS hotkeys and stream automation.
+	void performAction(const QString &id, const QJsonValue &arg);
 
 private:
 	enum class State { Disconnected, Linking, Connected, NeedsReconnect };
 
 	void buildUi();
+	QWidget *buildWidgetsPage();
+	void rebuildTabs();
 	void setState(State s, const QString &message = QString(), bool isError = false);
 	void showMessage(const QString &text, bool isError = false);
+	void openSettings();
 
 	// Account linking (RFC 8628 device flow)
 	void startConnect();
@@ -47,7 +61,13 @@ private:
 	void cancelLink();
 	void disconnectAccount();
 
-	// Widgets
+	// Live state + updates
+	void pollState();
+	void checkForUpdate();
+	void streamingChanged(bool started);
+	void updateHealthContext();
+
+	// Widgets tab
 	void loadCatalogue(bool quiet);
 	void populateList();
 	void refreshScenes();
@@ -55,8 +75,8 @@ private:
 	void updateControls();
 	const gfx::WidgetInfo *selectedWidget() const;
 	obs_source_t *selectedScene() const; // new reference or nullptr
-
 	void addSelected();
+	void addStarterLayout();
 	void toggleSelected();
 	void removeSelected();
 	void placeSelected(int comboIndex);
@@ -66,19 +86,24 @@ private:
 	void propertiesSelected();
 	void configureSelected();
 
-	template<class Work, class Done> void runAsync(Work work, Done done);
-
-	// UI
+	// Header
 	QLabel *statusLbl_ = nullptr;
 	QPushButton *connectBtn_ = nullptr;
-	QPushButton *disconnectBtn_ = nullptr;
-	QPushButton *manageBtn_ = nullptr;
+	QToolButton *menuBtn_ = nullptr;
+	QAction *disconnectAct_ = nullptr;
+	QLabel *updateLbl_ = nullptr;
+	// Linking
 	QWidget *linkPanel_ = nullptr;
 	QLabel *codeLbl_ = nullptr;
 	QLabel *linkHint_ = nullptr;
-	QWidget *mainPanel_ = nullptr;
+	// Tabs
+	QTabWidget *tabs_ = nullptr;
+	GfxLivePanel *livePanel_ = nullptr;
+	QWidget *widgetsPage_ = nullptr;
+	GfxReactionsPanel *reactionsPanel_ = nullptr;
+	GfxHealthPanel *healthPanel_ = nullptr;
+	// Widgets tab
 	QComboBox *sceneCombo_ = nullptr;
-	QToolButton *refreshBtn_ = nullptr;
 	QListWidget *list_ = nullptr;
 	QPushButton *addBtn_ = nullptr;
 	QPushButton *toggleBtn_ = nullptr;
@@ -94,10 +119,18 @@ private:
 	QTimer statusTimer_;
 	QTimer catalogueTimer_;
 	QTimer pollTimer_;
+	QTimer stateTimer_;
+	QTimer updateTimer_;
+	QTimer msgClear_;
 
-	// State
+	gfx::ReactionEngine reactions_;
+
 	State state_ = State::Disconnected;
 	QList<gfx::WidgetInfo> widgets_;
+	gfx::LiveState lastState_;
+	QString feedId_;
+	qint64 since_ = 0;
+	QString latestVersion_;
 	QString deviceCode_;
 	QString userCode_;
 	QString verifyUrl_;
@@ -106,6 +139,6 @@ private:
 	int linkGeneration_ = 0;
 	int netBackoffS_ = 5;
 	bool loaded_ = false;
-	bool shuttingDown_ = false;
 	bool catalogueInFlight_ = false;
+	bool stateInFlight_ = false;
 };

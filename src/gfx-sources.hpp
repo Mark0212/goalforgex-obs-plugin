@@ -59,6 +59,29 @@ AddResult addToScene(obs_source_t *scene, const WidgetInfo &w, const QString &ov
 // Returns how many sources were updated.
 int syncUrls(const QList<WidgetInfo> &widgets, const QString &overlayKey, const QString &account);
 
+// A GoalForgeX source this plugin manages (tagged), by source name.
+struct OwnedSource {
+	QString name;
+	QString widgetId;
+};
+QList<OwnedSource> owned(const QString &account);
+
+// A GoalForgeX Browser Source someone pasted in by hand before the plugin
+// (untagged, URL on goalforgex.com for this account) — can be taken over.
+struct ManualSource {
+	QString name;
+	QString widgetId;
+};
+QList<ManualSource> findManual(const QString &account);
+// Tags the source as ours and points it at this install's overlay key.
+bool adopt(const QString &sourceName, const WidgetInfo &w, const QString &overlayKey, const QString &account);
+
+// Browser Source settings helpers.
+QString sourceUrl(obs_source_t *source);
+void sourceSize(obs_source_t *source, int *w, int *h);
+void setSourceSize(obs_source_t *source, int w, int h);
+QString keyInUrl(const QString &url);
+
 void place(obs_sceneitem_t *item, Place where);
 void setScalePercent(obs_sceneitem_t *item, double percent);
 double scalePercent(obs_sceneitem_t *item);

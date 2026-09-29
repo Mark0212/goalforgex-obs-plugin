@@ -8,99 +8,50 @@ the Free Software Foundation; either version 2 of the License, or
 (at your option) any later version.
 */
 #include "gfx-dock.hpp"
+#include "gfx-api.hpp"
 #include "gfx-auth.hpp"
+#include "gfx-health.hpp"
 #include "gfx-http.hpp"
+#include "gfx-live.hpp"
+#include "gfx-settings.hpp"
 
 #include <obs-module.h>
 #include <plugin-support.h>
 
-#include <QApplication>
+#include <QAction>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDesktopServices>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFont>
-#include <QFrame>
 #include <QGridLayout>
+#include <QGroupBox>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QLabel>
 #include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
-#include <QPointer>
+#include <QPair>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QSysInfo>
+#include <QTabWidget>
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
-
-#include <functional>
-#include <thread>
 
 using namespace gfx;
 
 namespace {
 
-// Result of a call that needs an access token.
-struct ApiResult {
-	TokenStatus token = TokenStatus::Ok;
-	HttpResult http;
-	QString error;
-};
-
-// Runs `call` with a fresh access token; on a 401 it refreshes once and
-// retries, and a revoked link is reported as NeedsReconnect.
-ApiResult authedCall(const std::function<HttpResult(const QString &)> &call)
-{
-	ApiResult r;
-	QString tok, err;
-	r.token = Auth::instance().accessToken(&tok, &err);
-	if (r.token != TokenStatus::Ok) {
-		r.error = err;
-		return r;
-	}
-	r.http = call(tok);
-	if (r.http.status == 401) {
-		if (r.http.errorCode() == QLatin1String("link_revoked") ||
-		    r.http.errorCode() == QLatin1String("account_missing")) {
-			r.token = TokenStatus::NeedsReconnect;
-			r.error = r.http.serverMessage();
-			return r;
-		}
-		Auth::instance().invalidateAccess();
-		r.token = Auth::instance().accessToken(&tok, &err);
-		if (r.token != TokenStatus::Ok) {
-			r.error = err;
-			return r;
-		}
-		r.http = call(tok);
-		if (r.http.status == 401) {
-			r.token = TokenStatus::NeedsReconnect;
-			r.error = r.http.serverMessage();
-		}
-	}
-	return r;
-}
-
-// Plain-English version of a failed call.
-QString describe(const HttpResult &h)
-{
-	if (h.status == 0)
-		return QStringLiteral("Can't reach GoalForgeX — check your internet connection.");
-	if (h.status == 429)
-		return QStringLiteral("Too many requests to GoalForgeX — waiting a moment before trying again.");
-	if (h.status >= 500)
-		return QStringLiteral("GoalForgeX is having a problem right now — retrying shortly.");
-	const QString m = h.serverMessage();
-	return m.isEmpty() ? QStringLiteral("GoalForgeX returned an error (HTTP %1).").arg(h.status) : m;
-}
-
 // Widget URLs must point at GoalForgeX (or the dev server set via
 // GOALFORGEX_BASE_URL) — never load an arbitrary page into a Browser Source.
-// Host-based, so goalforgex.com vs www.goalforgex.com can't silently drop
-// every widget.
 bool trustedUrl(const QString &s)
 {
 	const QUrl u(s);
@@ -114,6 +65,28 @@ bool trustedUrl(const QString &s)
 	       (h == QLatin1String("goalforgex.com") || h.endsWith(QLatin1String(".goalforgex.com")));
 }
 
+// 1.2.3 > 1.2.0 ?
+bool newerVersion(const QString &a, const QString &b)
+{
+	const QStringList x = a.split(QLatin1Char('.')), y = b.split(QLatin1Char('.'));
+	for (int i = 0; i < 3; ++i) {
+		const int xa = i < x.size() ? x[i].toInt() : 0, yb = i < y.size() ? y[i].toInt() : 0;
+		if (xa != yb)
+			return xa > yb;
+	}
+	return false;
+}
+
+QString fmtSecs(int s)
+{
+	s = qAbs(s);
+	return s >= 3600 ? QStringLiteral("%1:%2:%3")
+				   .arg(s / 3600)
+				   .arg((s % 3600) / 60, 2, 10, QLatin1Char('0'))
+				   .arg(s % 60, 2, 10, QLatin1Char('0'))
+			 : QStringLiteral("%1:%2").arg(s / 60).arg(s % 60, 2, 10, QLatin1Char('0'));
+}
+
 enum PlaceIdx { PlaceHeader = 0 };
 const QList<QPair<QString, Place>> kPlaces = {
 	{QStringLiteral("Top left"), Place::TopLeft},         {QStringLiteral("Top center"), Place::TopCenter},
@@ -124,24 +97,10 @@ const QList<QPair<QString, Place>> kPlaces = {
 
 } // namespace
 
-template<class Work, class Done> void GfxDock::runAsync(Work work, Done done)
+GfxDock::GfxDock(QWidget *parent) : QWidget(parent), reactions_(this)
 {
-	QPointer<GfxDock> self(this);
-	std::thread([self, work, done]() mutable {
-		auto result = work();
-		QMetaObject::invokeMethod(
-			qApp,
-			[self, done, result]() mutable {
-				if (self && !self->shuttingDown_)
-					done(result);
-			},
-			Qt::QueuedConnection);
-	}).detach();
-}
-
-GfxDock::GfxDock(QWidget *parent) : QWidget(parent)
-{
-	setMinimumWidth(280);
+	setMinimumWidth(300);
+	loadSettings();
 	buildUi();
 
 	statusTimer_.setInterval(2000);
@@ -153,49 +112,62 @@ GfxDock::GfxDock(QWidget *parent) : QWidget(parent)
 	connect(&catalogueTimer_, &QTimer::timeout, this, [this] { loadCatalogue(true); });
 	pollTimer_.setSingleShot(true);
 	connect(&pollTimer_, &QTimer::timeout, this, [this] { pollOnce(); });
+	stateTimer_.setInterval(2000);
+	connect(&stateTimer_, &QTimer::timeout, this, [this] { pollState(); });
+	updateTimer_.setInterval(6 * 60 * 60 * 1000);
+	connect(&updateTimer_, &QTimer::timeout, this, [this] { checkForUpdate(); });
+	msgClear_.setSingleShot(true);
+	connect(&msgClear_, &QTimer::timeout, this, [this] { msgLbl_->clear(); });
 
 	Auth::instance().load();
-	if (Auth::instance().connected()) {
-		setState(State::Connected, QStringLiteral("Loading your widgets…"));
-	} else {
+	if (Auth::instance().connected())
+		setState(State::Connected, QStringLiteral("Loading…"));
+	else
 		setState(State::Disconnected);
-	}
 }
 
-GfxDock::~GfxDock()
-{
-	shuttingDown_ = true;
-}
+// ── UI ───────────────────────────────────────────────────────────
 
 void GfxDock::buildUi()
 {
 	auto *root = new QVBoxLayout(this);
 	root->setContentsMargins(8, 8, 8, 8);
-	root->setSpacing(8);
+	root->setSpacing(6);
 
-	// ── Account row ───────────────────────────────────────────────
+	// Header: status · Connect · ⚙
+	auto *head = new QHBoxLayout();
 	statusLbl_ = new QLabel(this);
 	statusLbl_->setWordWrap(true);
 	statusLbl_->setTextFormat(Qt::RichText);
-	root->addWidget(statusLbl_);
-
-	auto *acctRow = new QHBoxLayout();
-	connectBtn_ = new QPushButton(QStringLiteral("Connect GoalForgeX"), this);
-	disconnectBtn_ = new QPushButton(QStringLiteral("Disconnect"), this);
-	manageBtn_ = new QPushButton(QStringLiteral("Manage…"), this);
-	manageBtn_->setToolTip(QStringLiteral("Open goalforgex.com/obs — see and remove connected devices"));
-	acctRow->addWidget(connectBtn_);
-	acctRow->addWidget(disconnectBtn_);
-	acctRow->addStretch(1);
-	acctRow->addWidget(manageBtn_);
-	root->addLayout(acctRow);
-	connect(connectBtn_, &QPushButton::clicked, this, [this] { startConnect(); });
-	connect(disconnectBtn_, &QPushButton::clicked, this, [this] { disconnectAccount(); });
-	connect(manageBtn_, &QPushButton::clicked, this,
+	connectBtn_ = new QPushButton(QStringLiteral("Connect"), this);
+	menuBtn_ = new QToolButton(this);
+	menuBtn_->setText(QStringLiteral("⚙"));
+	menuBtn_->setToolTip(QStringLiteral("Settings"));
+	menuBtn_->setPopupMode(QToolButton::InstantPopup);
+	auto *menu = new QMenu(menuBtn_);
+	connect(menu->addAction(QStringLiteral("Settings…")), &QAction::triggered, this, [this] { openSettings(); });
+	connect(menu->addAction(QStringLiteral("Manage connected devices…")), &QAction::triggered, this,
 		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/obs"))); });
+	connect(menu->addAction(QStringLiteral("Open GoalForgeX dashboard")), &QAction::triggered, this,
+		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/dashboard"))); });
+	menu->addSeparator();
+	disconnectAct_ = menu->addAction(QStringLiteral("Disconnect this OBS"));
+	connect(disconnectAct_, &QAction::triggered, this, [this] { disconnectAccount(); });
+	menuBtn_->setMenu(menu);
+	head->addWidget(statusLbl_, 1);
+	head->addWidget(connectBtn_);
+	head->addWidget(menuBtn_);
+	root->addLayout(head);
+	connect(connectBtn_, &QPushButton::clicked, this, [this] { startConnect(); });
 
-	// ── Linking panel (device code) ──────────────────────────────
-	linkPanel_ = new QFrame(this);
+	updateLbl_ = new QLabel(this);
+	updateLbl_->setTextFormat(Qt::RichText);
+	updateLbl_->setOpenExternalLinks(true);
+	updateLbl_->hide();
+	root->addWidget(updateLbl_);
+
+	// Linking panel (device code)
+	linkPanel_ = new QWidget(this);
 	auto *lp = new QVBoxLayout(linkPanel_);
 	lp->setContentsMargins(0, 4, 0, 4);
 	auto *lpTitle =
@@ -226,7 +198,8 @@ void GfxDock::buildUi()
 	lp->addWidget(codeLbl_);
 	lp->addWidget(linkHint_);
 	lp->addLayout(lpRow);
-	root->addWidget(linkPanel_);
+	lp->addStretch(1);
+	root->addWidget(linkPanel_, 1);
 	connect(openBtn, &QPushButton::clicked, this, [this] { QDesktopServices::openUrl(QUrl(verifyUrl_)); });
 	connect(copyBtn, &QPushButton::clicked, this, [this] {
 		QGuiApplication::clipboard()->setText(userCode_);
@@ -234,28 +207,52 @@ void GfxDock::buildUi()
 	});
 	connect(cancelBtn, &QPushButton::clicked, this, [this] { cancelLink(); });
 
-	// ── Widgets panel ─────────────────────────────────────────────
-	mainPanel_ = new QWidget(this);
-	auto *mp = new QVBoxLayout(mainPanel_);
-	mp->setContentsMargins(0, 0, 0, 0);
+	// Tabs
+	tabs_ = new QTabWidget(this);
+	tabs_->setDocumentMode(true);
+	livePanel_ = new GfxLivePanel(tabs_);
+	livePanel_->setActionHandler([this](const QString &id, const QJsonValue &arg) { performAction(id, arg); });
+	widgetsPage_ = buildWidgetsPage();
+	reactionsPanel_ = new GfxReactionsPanel(&reactions_, tabs_);
+	healthPanel_ = new GfxHealthPanel(tabs_);
+	root->addWidget(tabs_, 1);
+	rebuildTabs();
+
+	msgLbl_ = new QLabel(this);
+	msgLbl_->setWordWrap(true);
+	msgLbl_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	root->addWidget(msgLbl_);
+}
+
+QWidget *GfxDock::buildWidgetsPage()
+{
+	auto *page = new QWidget(tabs_);
+	auto *mp = new QVBoxLayout(page);
+	mp->setContentsMargins(0, 4, 0, 4);
 	mp->setSpacing(6);
 
 	auto *sceneRow = new QHBoxLayout();
-	sceneRow->addWidget(new QLabel(QStringLiteral("Scene"), mainPanel_));
-	sceneCombo_ = new QComboBox(mainPanel_);
+	sceneRow->addWidget(new QLabel(QStringLiteral("Scene"), page));
+	sceneCombo_ = new QComboBox(page);
 	sceneCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-	refreshBtn_ = new QToolButton(mainPanel_);
-	refreshBtn_->setText(QStringLiteral("↻"));
-	refreshBtn_->setToolTip(QStringLiteral("Reload your widget list from GoalForgeX"));
+	auto *refreshBtn = new QToolButton(page);
+	refreshBtn->setText(QStringLiteral("↻"));
+	refreshBtn->setToolTip(QStringLiteral("Reload your widget list from GoalForgeX"));
+	auto *starterBtn = new QToolButton(page);
+	starterBtn->setText(QStringLiteral("✨ Starter layout"));
+	starterBtn->setToolTip(
+		QStringLiteral("Add alerts, chat box, goal and timer to this scene, already positioned"));
 	sceneRow->addWidget(sceneCombo_, 1);
-	sceneRow->addWidget(refreshBtn_);
+	sceneRow->addWidget(refreshBtn);
 	mp->addLayout(sceneRow);
+	mp->addWidget(starterBtn);
 	connect(sceneCombo_, &QComboBox::currentIndexChanged, this, [this](int) { refreshStatuses(); });
-	connect(refreshBtn_, &QToolButton::clicked, this, [this] { loadCatalogue(false); });
+	connect(refreshBtn, &QToolButton::clicked, this, [this] { loadCatalogue(false); });
+	connect(starterBtn, &QToolButton::clicked, this, [this] { addStarterLayout(); });
 
-	list_ = new QListWidget(mainPanel_);
+	list_ = new QListWidget(page);
 	list_->setSelectionMode(QAbstractItemView::SingleSelection);
-	list_->setMinimumHeight(160);
+	list_->setMinimumHeight(150);
 	mp->addWidget(list_, 1);
 	connect(list_, &QListWidget::currentRowChanged, this, [this](int) { updateControls(); });
 	connect(list_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) { addSelected(); });
@@ -263,33 +260,33 @@ void GfxDock::buildUi()
 	auto *grid = new QGridLayout();
 	grid->setHorizontalSpacing(6);
 	grid->setVerticalSpacing(6);
-	addBtn_ = new QPushButton(QStringLiteral("Add to scene"), mainPanel_);
-	toggleBtn_ = new QPushButton(QStringLiteral("Hide"), mainPanel_);
-	removeBtn_ = new QPushButton(QStringLiteral("Remove from scene"), mainPanel_);
+	addBtn_ = new QPushButton(QStringLiteral("Add to scene"), page);
+	toggleBtn_ = new QPushButton(QStringLiteral("Hide"), page);
+	removeBtn_ = new QPushButton(QStringLiteral("Remove"), page);
+	removeBtn_->setToolTip(QStringLiteral("Remove from this scene"));
 	grid->addWidget(addBtn_, 0, 0);
 	grid->addWidget(toggleBtn_, 0, 1);
 	grid->addWidget(removeBtn_, 0, 2);
 
-	placeCombo_ = new QComboBox(mainPanel_);
+	placeCombo_ = new QComboBox(page);
 	placeCombo_->addItem(QStringLiteral("Move to…"));
 	for (const auto &p : kPlaces)
 		placeCombo_->addItem(p.first);
-	scaleSpin_ = new QSpinBox(mainPanel_);
+	scaleSpin_ = new QSpinBox(page);
 	scaleSpin_->setRange(10, 400);
 	scaleSpin_->setSuffix(QStringLiteral(" %"));
 	scaleSpin_->setToolTip(QStringLiteral("Size in the scene (100% = the widget's native size)"));
 	scaleSpin_->setKeyboardTracking(false);
-	fitBtn_ = new QPushButton(QStringLiteral("Fit canvas"), mainPanel_);
-	fitBtn_->setToolTip(
-		QStringLiteral("Stretch to fill the whole canvas, keeping proportions (for Alerts and Chat Box)"));
+	fitBtn_ = new QPushButton(QStringLiteral("Fit canvas"), page);
+	fitBtn_->setToolTip(QStringLiteral("Fill the whole canvas, keeping proportions (for Alerts and Chat Box)"));
 	grid->addWidget(placeCombo_, 1, 0);
 	grid->addWidget(scaleSpin_, 1, 1);
 	grid->addWidget(fitBtn_, 1, 2);
 
-	reloadBtn_ = new QPushButton(QStringLiteral("Reload"), mainPanel_);
+	reloadBtn_ = new QPushButton(QStringLiteral("Reload"), page);
 	reloadBtn_->setToolTip(QStringLiteral("Refresh this widget in OBS"));
-	propsBtn_ = new QPushButton(QStringLiteral("Properties"), mainPanel_);
-	configureBtn_ = new QPushButton(QStringLiteral("Customize…"), mainPanel_);
+	propsBtn_ = new QPushButton(QStringLiteral("Properties"), page);
+	configureBtn_ = new QPushButton(QStringLiteral("Customize…"), page);
 	configureBtn_->setToolTip(QStringLiteral("Change this widget's look and settings on goalforgex.com"));
 	grid->addWidget(reloadBtn_, 2, 0);
 	grid->addWidget(propsBtn_, 2, 1);
@@ -305,13 +302,93 @@ void GfxDock::buildUi()
 	connect(reloadBtn_, &QPushButton::clicked, this, [this] { reloadSelected(); });
 	connect(propsBtn_, &QPushButton::clicked, this, [this] { propertiesSelected(); });
 	connect(configureBtn_, &QPushButton::clicked, this, [this] { configureSelected(); });
+	return page;
+}
 
-	root->addWidget(mainPanel_, 1);
+void GfxDock::rebuildTabs()
+{
+	QWidget *current = tabs_->currentWidget();
+	tabs_->clear();
+	const Settings &s = settings();
+	if (s.tabLive)
+		tabs_->addTab(livePanel_, QStringLiteral("Live"));
+	if (s.tabWidgets)
+		tabs_->addTab(widgetsPage_, QStringLiteral("Widgets"));
+	if (s.tabReactions)
+		tabs_->addTab(reactionsPanel_, QStringLiteral("Reactions"));
+	if (s.tabHealth)
+		tabs_->addTab(healthPanel_, QStringLiteral("Health"));
+	if (tabs_->count() == 0)
+		tabs_->addTab(widgetsPage_, QStringLiteral("Widgets")); // never leave the dock empty
+	const int i = tabs_->indexOf(current);
+	if (i >= 0)
+		tabs_->setCurrentIndex(i);
+	livePanel_->applySettings();
+}
 
-	msgLbl_ = new QLabel(this);
-	msgLbl_->setWordWrap(true);
-	msgLbl_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-	root->addWidget(msgLbl_);
+void GfxDock::openSettings()
+{
+	Settings &s = settings();
+	QDialog dlg(this);
+	dlg.setWindowTitle(QStringLiteral("GoalForgeX settings"));
+	auto *root = new QVBoxLayout(&dlg);
+
+	struct Opt {
+		QCheckBox *box;
+		bool *value;
+	};
+	QList<Opt> opts;
+	const auto group = [&dlg, root, &opts](const QString &title, const QList<QPair<QString, bool *>> &items) {
+		auto *g = new QGroupBox(title, &dlg);
+		auto *l = new QVBoxLayout(g);
+		for (const auto &it : items) {
+			auto *c = new QCheckBox(it.first, g);
+			c->setChecked(*it.second);
+			l->addWidget(c);
+			opts.push_back({c, it.second});
+		}
+		root->addWidget(g);
+	};
+	group(QStringLiteral("Tabs"), {{QStringLiteral("Live"), &s.tabLive},
+				       {QStringLiteral("Widgets"), &s.tabWidgets},
+				       {QStringLiteral("Reactions"), &s.tabReactions},
+				       {QStringLiteral("Health"), &s.tabHealth}});
+	group(QStringLiteral("Live tab"), {{QStringLiteral("Stream stats line"), &s.cardStats},
+					   {QStringLiteral("Subathon timer"), &s.cardTimer},
+					   {QStringLiteral("Action timer"), &s.cardActionTimer},
+					   {QStringLiteral("Goal"), &s.cardGoal},
+					   {QStringLiteral("Spin wheel"), &s.cardWheel},
+					   {QStringLiteral("Counters"), &s.cardCounters},
+					   {QStringLiteral("Alerts (test / replay / clear chat)"), &s.cardAlerts},
+					   {QStringLiteral("Activity feed"), &s.cardActivity}});
+	group(QStringLiteral("Automation"),
+	      {{QStringLiteral("Start / resume the subathon timer when I start streaming"), &s.autoStartTimer},
+	       {QStringLiteral("Pause the subathon timer when I stop streaming"), &s.autoPauseTimer}});
+	group(QStringLiteral("Updates"),
+	      {{QStringLiteral("Tell me when a new version of the plugin is out"), &s.checkUpdates}});
+	auto *hint = new QLabel(
+		QStringLiteral(
+			"Hotkeys for timers, goal, wheel, counters and alerts are in OBS → Settings → Hotkeys (search “GoalForgeX”)."),
+		&dlg);
+	hint->setWordWrap(true);
+	root->addWidget(hint);
+	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+	root->addWidget(buttons);
+	connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+	connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+	if (dlg.exec() != QDialog::Accepted)
+		return;
+	for (const Opt &o : opts)
+		*o.value = o.box->isChecked();
+	saveSettings();
+	rebuildTabs();
+	if (!s.checkUpdates) {
+		latestVersion_.clear();
+		updateLbl_->hide();
+		updateHealthContext();
+	} else {
+		checkForUpdate();
+	}
 }
 
 // ── State + messages ─────────────────────────────────────────────
@@ -323,40 +400,66 @@ void GfxDock::setState(State s, const QString &message, bool isError)
 	const QString who = (c.displayName.isEmpty() ? c.username : c.displayName).toHtmlEscaped();
 	switch (s) {
 	case State::Disconnected:
-		statusLbl_->setText(QStringLiteral(
-			"<b>Not connected.</b> Connect your GoalForgeX account to add your widgets to OBS."));
+		statusLbl_->setText(QStringLiteral("<b>GoalForgeX</b> — not connected"));
 		break;
 	case State::Linking:
 		statusLbl_->setText(QStringLiteral("<b>Connecting…</b>"));
 		break;
 	case State::Connected:
-		statusLbl_->setText(QStringLiteral("Connected as <b>%1</b>").arg(who));
+		statusLbl_->setText(QStringLiteral("<b>%1</b>").arg(who));
 		break;
 	case State::NeedsReconnect:
-		statusLbl_->setText(QStringLiteral(
-			"<b>⚠ Disconnected from GoalForgeX.</b> Widgets already in your scenes that this OBS added won't update until you connect again."));
+		statusLbl_->setText(QStringLiteral("<b>⚠ Disconnected</b>"));
 		break;
 	}
 	connectBtn_->setVisible(s == State::Disconnected || s == State::NeedsReconnect);
-	connectBtn_->setText(s == State::NeedsReconnect ? QStringLiteral("Reconnect")
-							: QStringLiteral("Connect GoalForgeX"));
-	disconnectBtn_->setVisible(s == State::Connected || s == State::NeedsReconnect);
+	connectBtn_->setText(s == State::NeedsReconnect ? QStringLiteral("Reconnect") : QStringLiteral("Connect"));
+	disconnectAct_->setEnabled(s == State::Connected || s == State::NeedsReconnect);
 	linkPanel_->setVisible(s == State::Linking);
-	// Existing sources can still be shown/hidden/moved while reconnecting.
-	mainPanel_->setVisible((s == State::Connected || s == State::NeedsReconnect) && !widgets_.isEmpty());
-	if (s == State::Connected || s == State::NeedsReconnect)
+	tabs_->setVisible(s == State::Connected || s == State::NeedsReconnect);
+	if (s == State::Connected) {
 		statusTimer_.start();
-	else
-		statusTimer_.stop();
+		stateTimer_.start();
+	} else {
+		stateTimer_.stop();
+		if (s != State::NeedsReconnect)
+			statusTimer_.stop();
+	}
 	if (!message.isNull())
 		showMessage(message, isError);
+	else if (s == State::Disconnected)
+		showMessage(QStringLiteral(
+			"Connect your GoalForgeX account to control your widgets, timers and alerts from OBS."));
 	updateControls();
+	updateHealthContext();
 }
 
 void GfxDock::showMessage(const QString &text, bool isError)
 {
 	msgLbl_->setStyleSheet(isError ? QStringLiteral("color:#f87171;") : QString());
 	msgLbl_->setText(text);
+	// Confirmations fade on their own; errors stay until something replaces them.
+	if (!isError && !text.isEmpty())
+		msgClear_.start(5000);
+	else
+		msgClear_.stop();
+}
+
+void GfxDock::updateHealthContext()
+{
+	GfxHealthContext ctx;
+	ctx.widgets = &widgets_;
+	ctx.state = &lastState_;
+	ctx.connected = Auth::instance().connected();
+	ctx.needsReconnect = state_ == State::NeedsReconnect;
+	ctx.latestVersion = latestVersion_;
+	ctx.reconnect = [this] {
+		startConnect();
+	};
+	ctx.message = [this](const QString &m) {
+		showMessage(m);
+	};
+	healthPanel_->setContext(ctx);
 }
 
 // ── Linking ──────────────────────────────────────────────────────
@@ -375,7 +478,7 @@ void GfxDock::startConnect()
 	body.insert(QStringLiteral("obs_version"), QString::fromUtf8(obs_get_version_string()));
 
 	runAsync(
-		[body] { return httpPostJson(baseUrl() + QStringLiteral("/api/obs/device"), body); },
+		this, [body] { return httpPostJson(baseUrl() + QStringLiteral("/api/obs/device"), body); },
 		[this, gen](const HttpResult &r) {
 			if (gen != linkGeneration_ || state_ != State::Linking)
 				return;
@@ -429,6 +532,7 @@ void GfxDock::pollOnce()
 	const int gen = linkGeneration_;
 	const QString dc = deviceCode_;
 	runAsync(
+		this,
 		[dc] {
 			QJsonObject body;
 			body.insert(QStringLiteral("grant_type"),
@@ -447,8 +551,12 @@ void GfxDock::pollOnce()
 				}
 				deviceCode_.clear();
 				netBackoffS_ = 5;
+				feedId_.clear();
+				since_ = 0;
 				setState(State::Connected, QStringLiteral("Connected! Loading your widgets…"));
 				loadCatalogue(false);
+				pollState();
+				checkForUpdate();
 				return;
 			}
 			const QString code = r.errorCode();
@@ -471,7 +579,6 @@ void GfxDock::pollOnce()
 						"The code expired before it was approved. Click Connect to get a new one."),
 					true);
 			} else {
-				// Network blip or server hiccup — keep waiting, the code is still good.
 				showMessage(describe(r) + QStringLiteral(" Still waiting for approval…"), true);
 				schedulePoll();
 			}
@@ -498,27 +605,265 @@ void GfxDock::disconnectAccount()
 	catalogueTimer_.stop();
 	const bool wasConnected = state_ == State::Connected;
 	runAsync(
-		[wasConnected] {
-			if (!wasConnected)
-				return ApiResult();
-			return authedCall([](const QString &tok) {
-				return httpPostJson(baseUrl() + QStringLiteral("/api/obs/disconnect"), QJsonObject(),
-						    tok);
-			});
-		},
+		this,
+		[wasConnected] { return wasConnected ? apiPost(QStringLiteral("/api/obs/disconnect")) : ApiResult(); },
 		[this, wasConnected](const ApiResult &r) {
 			Auth::instance().clear();
 			widgets_.clear();
 			list_->clear();
-			// NeedsReconnect means the server had already dropped this link — nothing left to remove.
-			const bool serverOk = !wasConnected || r.token == TokenStatus::NeedsReconnect ||
-					      (r.token == TokenStatus::Ok && r.http.ok());
+			lastState_ = LiveState();
+			livePanel_->clearEvents();
+			const bool serverOk = !wasConnected || r.token == TokenStatus::NeedsReconnect || r.ok();
 			setState(
 				State::Disconnected,
 				serverOk
 					? QStringLiteral("Disconnected.")
 					: QStringLiteral(
 						  "Disconnected here. GoalForgeX couldn't be reached — to be sure, remove this device at goalforgex.com/obs."));
+		});
+}
+
+// ── Live state (every 2s while connected) ────────────────────────
+
+void GfxDock::pollState()
+{
+	if (state_ != State::Connected || stateInFlight_)
+		return;
+	stateInFlight_ = true;
+	const QString path = QStringLiteral("/api/obs/state?since=%1").arg(since_);
+	runAsync(
+		this, [path] { return apiGet(path); },
+		[this](const ApiResult &r) {
+			stateInFlight_ = false;
+			if (r.token == TokenStatus::NeedsReconnect) {
+				setState(
+					State::NeedsReconnect,
+					r.error.isEmpty()
+						? QStringLiteral(
+							  "This OBS was disconnected from GoalForgeX. Click Reconnect.")
+						: r.error,
+					true);
+				return;
+			}
+			if (!r.ok())
+				return; // transient — the next poll will catch up
+			const LiveState st = LiveState::fromJson(r.http.json());
+			const bool firstOrReset = st.feed != feedId_;
+			if (firstOrReset) {
+				feedId_ = st.feed;
+				livePanel_->clearEvents();
+			}
+			QList<FeedEvent> fresh;
+			for (const FeedEvent &e : st.events)
+				if (firstOrReset || e.seq > since_)
+					fresh.push_back(e);
+			since_ = st.seq;
+			const LiveState prev = lastState_;
+			lastState_ = st;
+			livePanel_->setState(st);
+			livePanel_->addEvents(fresh);
+			// History from before OBS connected is shown, never reacted to.
+			if (!firstOrReset)
+				reactions_.onEvents(fresh);
+			reactions_.onStateChange(prev, st);
+			updateHealthContext();
+		});
+}
+
+void GfxDock::performAction(const QString &id, const QJsonValue &arg)
+{
+	if (state_ != State::Connected) {
+		showMessage(QStringLiteral("Connect GoalForgeX first."), true);
+		return;
+	}
+	const LiveState &s = lastState_;
+	QString path, ok;
+	QJsonObject body;
+	const auto timerPath = [](bool action, const QString &verb) {
+		return (action ? QStringLiteral("/api/actiontimer/") : QStringLiteral("/api/subathon/")) + verb;
+	};
+	const bool isAt = id.startsWith(QLatin1String("at."));
+	const QString what = isAt ? QStringLiteral("Action timer") : QStringLiteral("Timer");
+
+	if (id == QLatin1String("timer.toggle") || id == QLatin1String("at.toggle")) {
+		if (!s.valid) {
+			showMessage(QStringLiteral("Still loading — try again in a second."), true);
+			return;
+		}
+		const TimerState &t = isAt ? s.actionTimer : s.timer;
+		if (t.locked) {
+			showMessage(QStringLiteral("%1 needs GoalForgeX Pro.").arg(what), true);
+			return;
+		}
+		const QString verb = !t.active ? QStringLiteral("start")
+					       : (t.paused ? QStringLiteral("resume") : QStringLiteral("pause"));
+		path = timerPath(isAt, verb);
+		ok = QStringLiteral("%1 %2.").arg(what, !t.active ? QStringLiteral("started")
+								  : (t.paused ? QStringLiteral("resumed")
+									      : QStringLiteral("paused")));
+	} else if (id == QLatin1String("timer.add") || id == QLatin1String("at.add")) {
+		const int secs = arg.toInt();
+		path = timerPath(isAt, QStringLiteral("add-time"));
+		body.insert(QStringLiteral("seconds"), secs);
+		ok = QStringLiteral("%1 %2%3.")
+			     .arg(what, secs >= 0 ? QStringLiteral("+") : QStringLiteral("−"), fmtSecs(secs));
+	} else if (id == QLatin1String("timer.set")) {
+		const int secs = qMax(0, arg.toInt());
+		path = QStringLiteral("/api/subathon/set-time");
+		body.insert(QStringLiteral("seconds"), secs);
+		ok = QStringLiteral("Timer set to %1.").arg(fmtSecs(secs));
+	} else if (id == QLatin1String("timer.reset") || id == QLatin1String("at.reset")) {
+		path = timerPath(isAt, QStringLiteral("reset"));
+		ok = QStringLiteral("%1 reset.").arg(what);
+	} else if (id == QLatin1String("goal.adjust")) {
+		path = QStringLiteral("/api/goal/adjust");
+		body.insert(QStringLiteral("delta"), arg.toInt());
+		ok = arg.toInt() >= 0 ? QStringLiteral("Goal +1.") : QStringLiteral("Goal −1.");
+	} else if (id == QLatin1String("counter.adjust") || id == QLatin1String("counter.nth")) {
+		const QJsonObject a = arg.toObject();
+		QString cid = a.value(QStringLiteral("id")).toString();
+		QString cname;
+		if (id == QLatin1String("counter.nth")) {
+			const int idx = a.value(QStringLiteral("index")).toInt();
+			if (idx < 0 || idx >= s.counters.size()) {
+				showMessage(QStringLiteral("There's no counter #%1 on your account.").arg(idx + 1),
+					    true);
+				return;
+			}
+			cid = s.counters[idx].id;
+		}
+		for (const CounterState &c : s.counters)
+			if (c.id == cid)
+				cname = c.name;
+		const int delta = a.value(QStringLiteral("delta")).toInt();
+		path = QStringLiteral("/api/counters/%1/adjust").arg(QString::fromUtf8(QUrl::toPercentEncoding(cid)));
+		body.insert(QStringLiteral("delta"), delta);
+		ok = QStringLiteral("%1 %2.").arg(cname.isEmpty() ? QStringLiteral("Counter") : cname,
+						  delta >= 0 ? QStringLiteral("+1") : QStringLiteral("−1"));
+	} else if (id == QLatin1String("alert.test")) {
+		path = QStringLiteral("/api/obs/alerts/test");
+		body.insert(QStringLiteral("type"), arg.toString());
+		ok = QStringLiteral("Test alert sent.");
+	} else if (id == QLatin1String("alert.replay")) {
+		path = QStringLiteral("/api/obs/alerts/replay");
+		ok = QStringLiteral("Replaying the last alert.");
+	} else if (id == QLatin1String("chat.clear")) {
+		path = QStringLiteral("/api/chatbox/clear");
+		ok = QStringLiteral("Chat box cleared.");
+	} else if (id == QLatin1String("wheel.spin")) {
+		runAsync(
+			this,
+			[] {
+				// Spin with the wheel exactly as saved on goalforgex.com.
+				ApiResult w = apiGet(QStringLiteral("/api/spinwheel"));
+				if (!w.ok())
+					return w;
+				const QJsonObject wheel = w.http.json().value(QStringLiteral("wheel")).toObject();
+				const QJsonArray segs = wheel.value(QStringLiteral("segments")).toArray();
+				if (segs.isEmpty()) {
+					ApiResult e;
+					e.http.status = 400;
+					e.http.body = QByteArrayLiteral(
+						"{\"message\":\"Your wheel has no slices yet — add some on goalforgex.com.\"}");
+					return e;
+				}
+				QJsonObject b;
+				b.insert(QStringLiteral("segments"), segs);
+				b.insert(QStringLiteral("equalWeight"),
+					 wheel.value(QStringLiteral("equalWeight")).toBool());
+				b.insert(QStringLiteral("removeOnWin"),
+					 wheel.value(QStringLiteral("removeOnWin")).toBool());
+				return apiPost(QStringLiteral("/api/spinwheel/spin"), b);
+			},
+			[this](const ApiResult &r) {
+				if (r.token == TokenStatus::NeedsReconnect)
+					setState(State::NeedsReconnect, describe(r), true);
+				else if (r.ok())
+					showMessage(
+						QStringLiteral("🎡 Spinning… landed on %1.")
+							.arg(r.http.json().value(QStringLiteral("winner")).toString()));
+				else
+					showMessage(describe(r), true);
+				pollState();
+			});
+		return;
+	} else {
+		return;
+	}
+
+	runAsync(
+		this, [path, body] { return apiPost(path, body); },
+		[this, ok](const ApiResult &r) {
+			if (r.token == TokenStatus::NeedsReconnect)
+				setState(State::NeedsReconnect, describe(r), true);
+			else if (r.ok())
+				showMessage(ok);
+			else
+				showMessage(describe(r), true);
+			pollState();
+		});
+}
+
+// Start/pause the subathon timer with the stream (⚙ Settings → Automation).
+void GfxDock::streamingChanged(bool started)
+{
+	const Settings &s = settings();
+	if (state_ != State::Connected || (started ? !s.autoStartTimer : !s.autoPauseTimer))
+		return;
+	runAsync(
+		this,
+		[started] {
+			ApiResult st = apiGet(QStringLiteral("/api/obs/state"));
+			if (!st.ok())
+				return st;
+			const LiveState ls = LiveState::fromJson(st.http.json());
+			if (ls.timer.locked)
+				return ApiResult();
+			if (started) {
+				if (!ls.timer.active)
+					return apiPost(QStringLiteral("/api/subathon/start"));
+				if (ls.timer.paused)
+					return apiPost(QStringLiteral("/api/subathon/resume"));
+			} else if (ls.timer.active && !ls.timer.paused) {
+				return apiPost(QStringLiteral("/api/subathon/pause"));
+			}
+			return ApiResult();
+		},
+		[this, started](const ApiResult &r) {
+			if (r.http.status == 0 && r.token == TokenStatus::Ok)
+				return; // nothing needed doing
+			if (r.ok())
+				showMessage(started ? QStringLiteral("Subathon timer started with your stream.")
+						    : QStringLiteral("Subathon timer paused — stream ended."));
+			else
+				showMessage(
+					QStringLiteral("Couldn't update the timer automatically: %1").arg(describe(r)),
+					true);
+			pollState();
+		});
+}
+
+void GfxDock::checkForUpdate()
+{
+	if (!settings().checkUpdates)
+		return;
+	runAsync(
+		this, [] { return httpGet(baseUrl() + QStringLiteral("/api/obs/latest")); },
+		[this](const HttpResult &r) {
+			if (!r.ok())
+				return;
+			const QString v = r.json().value(QStringLiteral("version")).toString();
+			if (!v.isEmpty() && newerVersion(v, QString::fromUtf8(PLUGIN_VERSION))) {
+				latestVersion_ = v;
+				updateLbl_->setText(QStringLiteral("⬆ Version %1 is out — <a href=\"%2\">download</a>")
+							    .arg(v.toHtmlEscaped(),
+								 (baseUrl() + QStringLiteral("/obs")).toHtmlEscaped()));
+				updateLbl_->show();
+			} else {
+				latestVersion_.clear();
+				updateLbl_->hide();
+			}
+			updateHealthContext();
 		});
 }
 
@@ -532,11 +877,7 @@ void GfxDock::loadCatalogue(bool quiet)
 	if (!quiet)
 		showMessage(QStringLiteral("Loading your widgets…"));
 	runAsync(
-		[] {
-			return authedCall([](const QString &tok) {
-				return httpGet(baseUrl() + QStringLiteral("/api/obs/widgets"), tok);
-			});
-		},
+		this, [] { return apiGet(QStringLiteral("/api/obs/widgets")); },
 		[this, quiet](const ApiResult &r) {
 			catalogueInFlight_ = false;
 			if (r.token == TokenStatus::NeedsReconnect) {
@@ -549,17 +890,14 @@ void GfxDock::loadCatalogue(bool quiet)
 					true);
 				return;
 			}
-			if (r.token == TokenStatus::Transient || !r.http.ok()) {
-				const QString why = r.token == TokenStatus::Transient ? r.error : describe(r.http);
+			if (!r.ok()) {
 				showMessage(QStringLiteral(
 						    "%1 Widgets already in your scenes keep working. Retrying in %2s.")
-						    .arg(why)
+						    .arg(describe(r))
 						    .arg(netBackoffS_),
 					    true);
 				catalogueTimer_.start(netBackoffS_ * 1000);
 				netBackoffS_ = qMin(netBackoffS_ * 2, 300);
-				if (state_ != State::Connected)
-					setState(State::Connected);
 				return;
 			}
 			netBackoffS_ = 5;
@@ -581,7 +919,6 @@ void GfxDock::loadCatalogue(bool quiet)
 				w.fullCanvas = o.value(QStringLiteral("fullCanvas")).toBool();
 				w.audio = o.value(QStringLiteral("audio")).toBool();
 				w.locked = o.value(QStringLiteral("locked")).toBool();
-				// Only ever load widgets from the GoalForgeX site itself.
 				if (!w.id.isEmpty() && trustedUrl(w.url))
 					next.push_back(w);
 			}
@@ -589,13 +926,15 @@ void GfxDock::loadCatalogue(bool quiet)
 			populateList();
 			const Credentials c = Auth::instance().credentials();
 			const int updated = sources::syncUrls(widgets_, c.overlayKey, c.username);
-			setState(State::Connected);
+			if (state_ != State::Connected)
+				setState(State::Connected);
+			updateHealthContext();
 			if (updated > 0)
 				showMessage(QStringLiteral("Updated %1 GoalForgeX source(s) to use this connection.")
 						    .arg(updated));
 			else if (!quiet)
 				showMessage(widgets_.isEmpty() ? QStringLiteral("No widgets found on your account.")
-							       : QString());
+							       : QStringLiteral("Ready."));
 			catalogueTimer_.start(5 * 60 * 1000); // pick up new counters etc.
 		});
 }
@@ -688,14 +1027,13 @@ void GfxDock::refreshStatuses()
 		if (src) {
 			obs_sceneitem_t *item = scene ? sources::findItem(scene, src) : nullptr;
 			if (item)
-				status = obs_sceneitem_visible(item) ? QStringLiteral("● in this scene")
-								     : QStringLiteral("◌ in this scene (hidden)");
+				status = obs_sceneitem_visible(item) ? QStringLiteral("● in scene")
+								     : QStringLiteral("◌ hidden");
 			else
 				status = QStringLiteral("in another scene");
 			obs_source_release(src);
 		} else if (w.locked) {
-			status = QStringLiteral("🔒 ") +
-				 (w.lockReason.isEmpty() ? QStringLiteral("locked") : w.lockReason);
+			status = QStringLiteral("🔒 Pro");
 		}
 		const QString text = w.icon + QLatin1Char(' ') + w.name +
 				     (status.isEmpty() ? QString() : QStringLiteral("   ·  ") + status);
@@ -723,8 +1061,9 @@ void GfxDock::updateControls()
 	obs_source_t *src = (w && loaded_) ? sources::find(account, w->id) : nullptr;
 	obs_sceneitem_t *item = (scene && src) ? sources::findItem(scene, src) : nullptr;
 
-	addBtn_->setEnabled(w && !w->locked && scene && !item && state_ == State::Connected);
-	addBtn_->setToolTip(w && w->locked ? w->lockReason : QString());
+	const bool locked = w && w->locked;
+	addBtn_->setText(locked ? QStringLiteral("Unlock with Pro") : QStringLiteral("Add to scene"));
+	addBtn_->setEnabled(w && (locked || (scene && !item && state_ == State::Connected)));
 	toggleBtn_->setEnabled(item != nullptr);
 	toggleBtn_->setText(item && !obs_sceneitem_visible(item) ? QStringLiteral("Show") : QStringLiteral("Hide"));
 	removeBtn_->setEnabled(item != nullptr);
@@ -745,17 +1084,19 @@ void GfxDock::updateControls()
 		obs_source_release(scene);
 }
 
-// ── Actions ──────────────────────────────────────────────────────
+// ── Widget actions ───────────────────────────────────────────────
 
 void GfxDock::addSelected()
 {
 	const WidgetInfo *w = selectedWidget();
-	if (!w || state_ != State::Connected)
+	if (!w)
 		return;
 	if (w->locked) {
-		showMessage(w->lockReason + QStringLiteral(" — upgrade on goalforgex.com to use this widget."), true);
+		QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/subscribe")));
 		return;
 	}
+	if (state_ != State::Connected)
+		return;
 	obs_source_t *scene = selectedScene();
 	if (!scene) {
 		showMessage(QStringLiteral("Pick a scene first."), true);
@@ -768,21 +1109,83 @@ void GfxDock::addSelected()
 	obs_source_release(scene);
 	switch (res) {
 	case sources::AddResult::Added:
-		showMessage(QStringLiteral("Added %1 to \"%2\".").arg(w->name, sceneName));
+		showMessage(QStringLiteral("Added %1 to “%2”.").arg(w->name, sceneName));
 		break;
 	case sources::AddResult::Reused:
-		showMessage(
-			QStringLiteral(
-				"Added %1 to \"%2\" — it's the same source as in your other scenes, so changes apply everywhere.")
-				.arg(w->name, sceneName));
+		showMessage(QStringLiteral("Added %1 to “%2” — it's the same source as in your other scenes.")
+				    .arg(w->name, sceneName));
 		break;
 	case sources::AddResult::AlreadyInScene:
-		showMessage(QStringLiteral("%1 is already in \"%2\" — selected it for you.").arg(w->name, sceneName));
+		showMessage(QStringLiteral("%1 is already in “%2” — selected it for you.").arg(w->name, sceneName));
 		break;
 	case sources::AddResult::Failed:
 		showMessage(err, true);
 		break;
 	}
+	refreshStatuses();
+}
+
+// One click: alerts + chat box (full canvas), goal top-left, timer top-right.
+void GfxDock::addStarterLayout()
+{
+	obs_source_t *scene = selectedScene();
+	if (!scene || state_ != State::Connected) {
+		if (scene)
+			obs_source_release(scene);
+		showMessage(QStringLiteral("Pick a scene first."), true);
+		return;
+	}
+	const QString sceneName = QString::fromUtf8(obs_source_get_name(scene));
+	if (QMessageBox::question(
+		    this, QStringLiteral("Starter layout"),
+		    QStringLiteral(
+			    "Add your alerts, chat box, goal and subathon timer to “%1”, already positioned?\n\nAnything already in the scene is left where it is.")
+			    .arg(sceneName)) != QMessageBox::Yes) {
+		obs_source_release(scene);
+		return;
+	}
+	const Credentials c = Auth::instance().credentials();
+	const QList<QPair<QString, int>> plan = {
+		{QStringLiteral("alerts"), -1},
+		{QStringLiteral("chatbox"), -1},
+		{QStringLiteral("goal"), static_cast<int>(Place::TopLeft)},
+		{QStringLiteral("timer"), static_cast<int>(Place::TopRight)},
+	};
+	int added = 0;
+	QStringList skipped;
+	for (const auto &p : plan) {
+		const WidgetInfo *w = nullptr;
+		for (const WidgetInfo &x : widgets_)
+			if (x.id == p.first)
+				w = &x;
+		if (!w)
+			continue;
+		if (w->locked) {
+			skipped << w->name + QStringLiteral(" (Pro)");
+			continue;
+		}
+		QString err;
+		const auto res = sources::addToScene(scene, *w, c.overlayKey, c.username, &err);
+		if (res == sources::AddResult::Added || res == sources::AddResult::Reused) {
+			++added;
+			if (p.second >= 0) {
+				obs_source_t *src = sources::find(c.username, w->id);
+				if (src) {
+					sources::place(sources::findItem(scene, src), static_cast<Place>(p.second));
+					obs_source_release(src);
+				}
+			}
+		}
+	}
+	obs_source_release(scene);
+	QString msg = added ? QStringLiteral("Added %1 widget%2 to “%3”.")
+				      .arg(added)
+				      .arg(added == 1 ? QString() : QStringLiteral("s"))
+				      .arg(sceneName)
+			    : QStringLiteral("Everything was already in “%1”.").arg(sceneName);
+	if (!skipped.isEmpty())
+		msg += QStringLiteral(" Skipped: %1.").arg(skipped.join(QStringLiteral(", ")));
+	showMessage(msg);
 	refreshStatuses();
 }
 
@@ -901,8 +1304,12 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 	case OBS_FRONTEND_EVENT_FINISHED_LOADING:
 		loaded_ = true;
 		refreshScenes();
-		if (Auth::instance().connected())
+		if (Auth::instance().connected()) {
 			loadCatalogue(false);
+			pollState();
+			checkForUpdate();
+			updateTimer_.start();
+		}
 		break;
 	case OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED:
 	case OBS_FRONTEND_EVENT_SCENE_CHANGED:
@@ -926,12 +1333,19 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		sceneCombo_->clear();
 		sceneCombo_->blockSignals(false);
 		break;
+	case OBS_FRONTEND_EVENT_STREAMING_STARTED:
+		streamingChanged(true);
+		break;
+	case OBS_FRONTEND_EVENT_STREAMING_STOPPED:
+		streamingChanged(false);
+		break;
 	case OBS_FRONTEND_EVENT_EXIT:
-		shuttingDown_ = true;
 		loaded_ = false;
 		statusTimer_.stop();
 		catalogueTimer_.stop();
 		pollTimer_.stop();
+		stateTimer_.stop();
+		updateTimer_.stop();
 		httpBeginShutdown();
 		break;
 	default:

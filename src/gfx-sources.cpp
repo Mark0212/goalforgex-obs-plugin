@@ -8,6 +8,7 @@ the Free Software Foundation; either version 2 of the License, or
 (at your option) any later version.
 */
 #include "gfx-sources.hpp"
+#include "gfx-http.hpp"
 
 #include <obs-module.h>
 #include <plugin-support.h>
@@ -327,6 +328,160 @@ int syncUrls(const QList<WidgetInfo> &widgets, const QString &overlayKey, const 
 		},
 		&ctx);
 	return ctx.updated;
+}
+
+struct OwnedCtx {
+	std::string account;
+	QList<OwnedSource> out;
+};
+
+QList<OwnedSource> owned(const QString &account)
+{
+	OwnedCtx ctx;
+	ctx.account = account.toStdString();
+	obs_enum_sources(
+		[](void *param, obs_source_t *src) {
+			auto *c = static_cast<OwnedCtx *>(param);
+			if (isOurs(src, c->account.c_str(), nullptr)) {
+				obs_data_t *priv = obs_source_get_private_settings(src);
+				OwnedSource o;
+				o.name = QString::fromUtf8(obs_source_get_name(src));
+				o.widgetId = QString::fromUtf8(obs_data_get_string(priv, kWidgetKey));
+				obs_data_release(priv);
+				c->out.push_back(o);
+			}
+			return true;
+		},
+		&ctx);
+	return ctx.out;
+}
+
+// Which catalogue widget a GoalForgeX overlay URL points at ("" = not one).
+static QString widgetIdForUrl(const QUrl &u)
+{
+	const QUrlQuery q(u);
+	if (q.queryItemValue(QStringLiteral("src")) == QLatin1String("xive"))
+		return QString(); // Xive overlays aren't in the plugin's catalogue
+	QString f = u.path().section(QLatin1Char('/'), -1).toLower();
+	if (f.endsWith(QLatin1String(".html")))
+		f.chop(5);
+	if (f == QLatin1String("widget")) {
+		const QString t = q.queryItemValue(QStringLiteral("type"));
+		if (t == QLatin1String("follower") || t == QLatin1String("timer") || t == QLatin1String("actiontimer"))
+			return t;
+		return QStringLiteral("goal");
+	}
+	if (f == QLatin1String("spinwheel") || f == QLatin1String("bitscup"))
+		return f;
+	if (f == QLatin1String("chat-overlay"))
+		return QStringLiteral("chatbox");
+	if (f == QLatin1String("alert-overlay"))
+		return QStringLiteral("alerts");
+	if (f == QLatin1String("counter")) {
+		const QString c = q.queryItemValue(QStringLiteral("c"));
+		return c.isEmpty() ? QString() : QStringLiteral("counter:") + c;
+	}
+	return QString();
+}
+
+static bool goalforgexHost(const QString &host)
+{
+	const QString h = host.toLower();
+	return h == QUrl(baseUrl()).host().toLower() || h == QLatin1String("goalforgex.com") ||
+	       h.endsWith(QLatin1String(".goalforgex.com"));
+}
+
+struct ManualCtx {
+	QString account;
+	QList<ManualSource> out;
+};
+
+QList<ManualSource> findManual(const QString &account)
+{
+	ManualCtx ctx;
+	ctx.account = account.toLower();
+	obs_enum_sources(
+		[](void *param, obs_source_t *src) {
+			auto *c = static_cast<ManualCtx *>(param);
+			const char *id = obs_source_get_unversioned_id(src);
+			if (!id || strcmp(id, kBrowserId) != 0)
+				return true;
+			obs_data_t *priv = obs_source_get_private_settings(src);
+			const bool tagged = priv && obs_data_get_string(priv, kWidgetKey)[0] != '\0';
+			obs_data_release(priv);
+			if (tagged)
+				return true;
+			const QUrl u(sourceUrl(src));
+			if (!u.isValid() || !goalforgexHost(u.host()))
+				return true;
+			if (QUrlQuery(u).queryItemValue(QStringLiteral("id")).toLower() != c->account)
+				return true;
+			const QString wid = widgetIdForUrl(u);
+			if (wid.isEmpty())
+				return true;
+			ManualSource m;
+			m.name = QString::fromUtf8(obs_source_get_name(src));
+			m.widgetId = wid;
+			c->out.push_back(m);
+			return true;
+		},
+		&ctx);
+	return ctx.out;
+}
+
+bool adopt(const QString &sourceName, const WidgetInfo &w, const QString &overlayKey, const QString &account)
+{
+	obs_source_t *src = obs_get_source_by_name(sourceName.toUtf8().constData());
+	if (!src)
+		return false;
+	obs_data_t *priv = obs_source_get_private_settings(src);
+	obs_data_set_string(priv, kWidgetKey, w.id.toUtf8().constData());
+	obs_data_set_string(priv, kAccountKey, account.toUtf8().constData());
+	obs_data_release(priv);
+	obs_data_t *upd = obs_data_create();
+	obs_data_set_string(upd, "url", fullUrl(w, overlayKey).toUtf8().constData());
+	obs_source_update(src, upd);
+	obs_data_release(upd);
+	obs_source_release(src);
+	return true;
+}
+
+QString sourceUrl(obs_source_t *source)
+{
+	if (!source)
+		return QString();
+	obs_data_t *s = obs_source_get_settings(source);
+	const QString url = QString::fromUtf8(obs_data_get_string(s, "url"));
+	obs_data_release(s);
+	return url;
+}
+
+void sourceSize(obs_source_t *source, int *w, int *h)
+{
+	*w = 0;
+	*h = 0;
+	if (!source)
+		return;
+	obs_data_t *s = obs_source_get_settings(source);
+	*w = static_cast<int>(obs_data_get_int(s, "width"));
+	*h = static_cast<int>(obs_data_get_int(s, "height"));
+	obs_data_release(s);
+}
+
+void setSourceSize(obs_source_t *source, int w, int h)
+{
+	if (!source)
+		return;
+	obs_data_t *upd = obs_data_create();
+	obs_data_set_int(upd, "width", w);
+	obs_data_set_int(upd, "height", h);
+	obs_source_update(source, upd);
+	obs_data_release(upd);
+}
+
+QString keyInUrl(const QString &url)
+{
+	return QUrlQuery(QUrl(url)).queryItemValue(QStringLiteral("key"));
 }
 
 bool reload(obs_source_t *source)
