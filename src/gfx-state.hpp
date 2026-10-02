@@ -65,6 +65,9 @@ struct LiveState {
 	bool hasLastAlert = false;
 
 	QString feed;
+	// Fingerprint of the widget catalogue (ids + sizes). Changes when the
+	// streamer resizes a widget in the dashboard, adds a counter, etc.
+	QString catalogueRev;
 	qint64 seq = 0;
 	QList<FeedEvent> events;
 

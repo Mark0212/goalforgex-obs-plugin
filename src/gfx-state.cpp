@@ -73,6 +73,7 @@ LiveState LiveState::fromJson(const QJsonObject &o)
 	s.hasLastAlert = o.value(QStringLiteral("hasLastAlert")).toBool();
 
 	s.feed = o.value(QStringLiteral("feed")).toString();
+	s.catalogueRev = o.value(QStringLiteral("catalogueRev")).toString();
 	s.seq = i64(o.value(QStringLiteral("seq")));
 	const QJsonArray evs = o.value(QStringLiteral("events")).toArray();
 	for (qsizetype i = 0; i < evs.size(); ++i) {

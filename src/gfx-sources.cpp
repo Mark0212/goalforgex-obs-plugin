@@ -28,6 +28,22 @@ namespace sources {
 static const char *kWidgetKey = "gfx_widget";
 static const char *kAccountKey = "gfx_account";
 static const char *kBrowserId = "browser_source";
+// The Browser Source width/height this plugin last applied. A source whose
+// current size no longer matches was resized by hand, so syncSizes() leaves
+// it alone. -1 = never auto-size (adopted hand-made sources). Missing (0) =
+// created by plugin ≤1.2, which always used the catalogue size → managed.
+static const char *kSizeWKey = "gfx_w";
+static const char *kSizeHKey = "gfx_h";
+
+static void rememberSize(obs_source_t *src, int w, int h)
+{
+	obs_data_t *priv = obs_source_get_private_settings(src);
+	if (!priv)
+		return;
+	obs_data_set_int(priv, kSizeWKey, w);
+	obs_data_set_int(priv, kSizeHKey, h);
+	obs_data_release(priv);
+}
 
 QString fullUrl(const WidgetInfo &w, const QString &overlayKey)
 {
@@ -272,6 +288,7 @@ AddResult addToScene(obs_source_t *sceneSource, const WidgetInfo &w, const QStri
 	obs_data_set_string(priv, kWidgetKey, w.id.toUtf8().constData());
 	obs_data_set_string(priv, kAccountKey, account.toUtf8().constData());
 	obs_data_release(priv);
+	rememberSize(src, w.width, w.height);
 
 	obs_sceneitem_t *item = obs_scene_add(scene, src);
 	obs_source_release(src); // the scene item holds its own reference
@@ -328,6 +345,106 @@ int syncUrls(const QList<WidgetInfo> &widgets, const QString &overlayKey, const 
 		},
 		&ctx);
 	return ctx.updated;
+}
+
+struct SizeTodo {
+	obs_source_t *src; // own reference
+	const WidgetInfo *w;
+};
+
+struct SizeCtx {
+	std::string account;
+	const QList<WidgetInfo> *widgets;
+	QList<SizeTodo> todo;
+};
+
+static bool nearly(float a, float b)
+{
+	return a > b - 2.0f && a < b + 2.0f;
+}
+
+// A source switching between full-canvas and native size (e.g. Chat Box was
+// full-canvas before) needs its scene items re-laid out too, or the old
+// fit-to-canvas bounds would just stretch the new size back over the canvas.
+static void relayoutItems(obs_source_t *src, const WidgetInfo &w)
+{
+	QList<obs_source_t *> scenes;
+	obs_enum_scenes(
+		[](void *param, obs_source_t *scene) {
+			static_cast<QList<obs_source_t *> *>(param)->push_back(obs_source_get_ref(scene));
+			return true;
+		},
+		&scenes);
+	float cw, ch;
+	canvasSize(&cw, &ch);
+	const char *name = obs_source_get_name(src);
+	for (obs_source_t *sceneSrc : scenes) {
+		if (!sceneSrc)
+			continue;
+		obs_scene_t *scene = obs_scene_from_source(sceneSrc);
+		if (!scene)
+			scene = obs_group_from_source(sceneSrc);
+		obs_sceneitem_t *item = scene ? obs_scene_find_source(scene, name) : nullptr;
+		if (item) {
+			const bool bounded = obs_sceneitem_get_bounds_type(item) != OBS_BOUNDS_NONE;
+			vec2 b = {};
+			if (bounded)
+				obs_sceneitem_get_bounds(item, &b);
+			const bool canvasFit = bounded && nearly(b.x, cw) && nearly(b.y, ch);
+			if (w.fullCanvas && !bounded) {
+				fitToCanvas(item);
+			} else if (!w.fullCanvas && canvasFit) {
+				vec2 one;
+				vec2_set(&one, 1.0f, 1.0f);
+				obs_sceneitem_set_bounds_type(item, OBS_BOUNDS_NONE);
+				obs_sceneitem_set_scale(item, &one);
+				place(item, Place::Center);
+			}
+		}
+		obs_source_release(sceneSrc);
+	}
+}
+
+int syncSizes(const QList<WidgetInfo> &widgets, const QString &account)
+{
+	SizeCtx ctx;
+	ctx.account = account.toStdString();
+	ctx.widgets = &widgets;
+	// Collect first, change after: resizing / touching scene items while
+	// obs_enum_sources holds its lock isn't something to rely on.
+	obs_enum_sources(
+		[](void *param, obs_source_t *src) {
+			auto *c = static_cast<SizeCtx *>(param);
+			if (!isOurs(src, c->account.c_str(), nullptr))
+				return true;
+			obs_data_t *priv = obs_source_get_private_settings(src);
+			const QString wid = QString::fromUtf8(obs_data_get_string(priv, kWidgetKey));
+			const int rw = static_cast<int>(obs_data_get_int(priv, kSizeWKey));
+			const int rh = static_cast<int>(obs_data_get_int(priv, kSizeHKey));
+			obs_data_release(priv);
+			for (const WidgetInfo &w : *c->widgets) {
+				if (w.id != wid)
+					continue;
+				int cw = 0, ch = 0;
+				sourceSize(src, &cw, &ch);
+				const bool managed = (rw == 0 && rh == 0) || (rw == cw && rh == ch);
+				if (managed && (cw != w.width || ch != w.height))
+					c->todo.push_back({obs_source_get_ref(src), &w});
+				break;
+			}
+			return true;
+		},
+		&ctx);
+	int resized = 0;
+	for (const SizeTodo &t : ctx.todo) {
+		if (!t.src)
+			continue;
+		setSourceSize(t.src, t.w->width, t.w->height);
+		relayoutItems(t.src, *t.w);
+		obs_source_release(t.src);
+		resized++;
+	}
+	return resized;
 }
 
 struct OwnedCtx {
@@ -438,6 +555,7 @@ bool adopt(const QString &sourceName, const WidgetInfo &w, const QString &overla
 	obs_data_set_string(priv, kWidgetKey, w.id.toUtf8().constData());
 	obs_data_set_string(priv, kAccountKey, account.toUtf8().constData());
 	obs_data_release(priv);
+	rememberSize(src, -1, -1); // sized by hand before the plugin — keep it
 	obs_data_t *upd = obs_data_create();
 	obs_data_set_string(upd, "url", fullUrl(w, overlayKey).toUtf8().constData());
 	obs_source_update(src, upd);
@@ -477,6 +595,8 @@ void setSourceSize(obs_source_t *source, int w, int h)
 	obs_data_set_int(upd, "height", h);
 	obs_source_update(source, upd);
 	obs_data_release(upd);
+	// Set to the catalogue size by the plugin → follow dashboard sizing again.
+	rememberSize(source, w, h);
 }
 
 QString keyInUrl(const QString &url)

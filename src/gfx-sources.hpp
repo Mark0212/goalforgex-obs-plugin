@@ -59,6 +59,13 @@ AddResult addToScene(obs_source_t *scene, const WidgetInfo &w, const QString &ov
 // Returns how many sources were updated.
 int syncUrls(const QList<WidgetInfo> &widgets, const QString &overlayKey, const QString &account);
 
+// Resize every GoalForgeX source for `account` to its catalogue size (which
+// follows the widget's sizing in the dashboard). Only sources still at the
+// size this plugin last gave them are touched — one resized by hand in OBS
+// (or adopted from a hand-made Browser Source) keeps its size. Returns how
+// many sources were resized.
+int syncSizes(const QList<WidgetInfo> &widgets, const QString &account);
+
 // A GoalForgeX source this plugin manages (tagged), by source name.
 struct OwnedSource {
 	QString name;

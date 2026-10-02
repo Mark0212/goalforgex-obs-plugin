@@ -634,6 +634,7 @@ void GfxDock::disconnectAccount()
 		[this, wasConnected](const ApiResult &r) {
 			Auth::instance().clear();
 			widgets_.clear();
+			catalogueRev_.clear();
 			list_->clear();
 			lastState_ = LiveState();
 			livePanel_->clearEvents();
@@ -693,6 +694,10 @@ void GfxDock::pollState()
 				reactions_.onEvents(fresh);
 			reactions_.onStateChange(prev, st);
 			updateHealthContext();
+			// Widget sizes/list changed on the site (e.g. Chat Box width in the
+			// dashboard) → re-fetch now instead of waiting for the 5-min refresh.
+			if (!st.catalogueRev.isEmpty() && !catalogueRev_.isEmpty() && st.catalogueRev != catalogueRev_)
+				loadCatalogue(true);
 		});
 }
 
@@ -1083,15 +1088,22 @@ void GfxDock::loadCatalogue(bool quiet)
 					next.push_back(w);
 			}
 			widgets_ = next;
+			catalogueRev_ = r.http.json().value(QStringLiteral("catalogueRev")).toString();
 			populateList();
 			const Credentials c = Auth::instance().credentials();
 			const int updated = sources::syncUrls(widgets_, c.overlayKey, c.username);
+			// Follow size changes made in the dashboard (sources resized by
+			// hand in OBS are left alone — see sources::syncSizes).
+			const int resized = sources::syncSizes(widgets_, c.username);
 			if (state_ != State::Connected)
 				setState(State::Connected);
 			updateHealthContext();
 			if (updated > 0)
 				showMessage(QStringLiteral("Updated %1 GoalForgeX source(s) to use this connection.")
 						    .arg(updated));
+			else if (resized > 0)
+				showMessage(QStringLiteral("Resized %1 GoalForgeX source(s) to match your dashboard.")
+						    .arg(resized));
 			else if (!quiet)
 				showMessage(widgets_.isEmpty() ? QStringLiteral("No widgets found on your account.")
 							       : QStringLiteral("Ready."));

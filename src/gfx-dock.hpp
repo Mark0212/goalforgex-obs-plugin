@@ -141,6 +141,7 @@ private:
 	QList<gfx::WidgetInfo> widgets_;
 	gfx::LiveState lastState_;
 	QString feedId_;
+	QString catalogueRev_; // catalogueRev of the widget list last loaded
 	qint64 since_ = 0;
 	QString latestVersion_;
 	enum class Upd { None, Available, Downloading, Ready, Failed };
