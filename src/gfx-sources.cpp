@@ -45,6 +45,33 @@ static void rememberSize(obs_source_t *src, int w, int h)
 	obs_data_release(priv);
 }
 
+// Sources with "Control audio via OBS" on send their sound to the mixer, and
+// OBS defaults a new source to "Monitor Off" — so alerts reached the stream
+// but the streamer never heard them. Turn on "Monitor and Output" once per
+// source; the flag means a streamer who later switches it back off keeps
+// their choice. Also covers sources created by plugin ≤1.3.0 (no flag yet).
+static const char *kMonitorKey = "gfx_monitor_set";
+
+static void ensureMonitoring(obs_source_t *src, const WidgetInfo &w)
+{
+	if (!src || !w.audio)
+		return;
+	obs_data_t *s = obs_source_get_settings(src);
+	const bool rerouted = s && obs_data_get_bool(s, "reroute_audio");
+	obs_data_release(s);
+	if (!rerouted) // audio already plays straight to the desktop
+		return;
+	obs_data_t *priv = obs_source_get_private_settings(src);
+	if (!priv)
+		return;
+	if (!obs_data_get_bool(priv, kMonitorKey)) {
+		if (obs_source_get_monitoring_type(src) == OBS_MONITORING_TYPE_NONE)
+			obs_source_set_monitoring_type(src, OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT);
+		obs_data_set_bool(priv, kMonitorKey, true);
+	}
+	obs_data_release(priv);
+}
+
 QString fullUrl(const WidgetInfo &w, const QString &overlayKey)
 {
 	QUrl u(w.url);
@@ -289,6 +316,7 @@ AddResult addToScene(obs_source_t *sceneSource, const WidgetInfo &w, const QStri
 	obs_data_set_string(priv, kAccountKey, account.toUtf8().constData());
 	obs_data_release(priv);
 	rememberSize(src, w.width, w.height);
+	ensureMonitoring(src, w);
 
 	obs_sceneitem_t *item = obs_scene_add(scene, src);
 	obs_source_release(src); // the scene item holds its own reference
@@ -339,6 +367,9 @@ int syncUrls(const QList<WidgetInfo> &widgets, const QString &overlayKey, const 
 					c->updated++;
 				}
 				obs_data_release(s);
+				// Runs on every catalogue fetch, so sources made by older
+				// plugin versions get monitoring turned on too.
+				ensureMonitoring(src, w);
 				break;
 			}
 			return true;
@@ -560,6 +591,7 @@ bool adopt(const QString &sourceName, const WidgetInfo &w, const QString &overla
 	obs_data_set_string(upd, "url", fullUrl(w, overlayKey).toUtf8().constData());
 	obs_source_update(src, upd);
 	obs_data_release(upd);
+	ensureMonitoring(src, w);
 	obs_source_release(src);
 	return true;
 }
