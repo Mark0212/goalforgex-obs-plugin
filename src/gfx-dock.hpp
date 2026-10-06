@@ -66,6 +66,7 @@ private:
 	void pollState();
 	void checkForUpdate();
 	void renderUpdate();
+	void renderVersion();
 	void startUpdateDownload();
 	void restartAndUpdate();
 	void enterUpdateRequired(const QString &message);
@@ -127,6 +128,8 @@ private:
 	QPushButton *propsBtn_ = nullptr;
 	QPushButton *configureBtn_ = nullptr;
 	QLabel *msgLbl_ = nullptr;
+	// Footer: "v1.3.0 · Up to date"
+	QLabel *versionLbl_ = nullptr;
 
 	QTimer statusTimer_;
 	QTimer catalogueTimer_;
@@ -144,6 +147,8 @@ private:
 	QString catalogueRev_; // catalogueRev of the widget list last loaded
 	qint64 since_ = 0;
 	QString latestVersion_;
+	enum class VerCheck { Checking, Done, Failed };
+	VerCheck verCheck_ = VerCheck::Checking;
 	enum class Upd { None, Available, Downloading, Ready, Failed };
 	Upd upd_ = Upd::None;
 	gfx::UpdateInfo update_;

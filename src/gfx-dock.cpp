@@ -138,6 +138,11 @@ void GfxDock::buildUi()
 		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/obs"))); });
 	connect(menu->addAction(QStringLiteral("Open GoalForgeX dashboard")), &QAction::triggered, this,
 		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/dashboard"))); });
+	connect(menu->addAction(QStringLiteral("Check for updates")), &QAction::triggered, this, [this] {
+		verCheck_ = VerCheck::Checking;
+		renderVersion();
+		checkForUpdate();
+	});
 	menu->addSeparator();
 	disconnectAct_ = menu->addAction(QStringLiteral("Disconnect this OBS"));
 	connect(disconnectAct_, &QAction::triggered, this, [this] { disconnectAccount(); });
@@ -249,6 +254,18 @@ void GfxDock::buildUi()
 	msgLbl_->setWordWrap(true);
 	msgLbl_->setTextInteractionFlags(Qt::TextSelectableByMouse);
 	root->addWidget(msgLbl_);
+
+	versionLbl_ = new QLabel(this);
+	versionLbl_->setAlignment(Qt::AlignRight);
+	versionLbl_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	const QString obsVersion = QString::fromUtf8(obs_get_version_string());
+	versionLbl_->setToolTip(
+		QStringLiteral("GoalForgeX for OBS %1 · OBS %2").arg(QString::fromUtf8(PLUGIN_VERSION), obsVersion));
+	QFont vf = versionLbl_->font();
+	vf.setPointSizeF(vf.pointSizeF() * 0.85);
+	versionLbl_->setFont(vf);
+	root->addWidget(versionLbl_);
+	renderVersion();
 }
 
 QWidget *GfxDock::buildWidgetsPage()
@@ -884,8 +901,12 @@ void GfxDock::checkForUpdate()
 	runAsync(
 		this, [] { return httpGet(baseUrl() + QStringLiteral("/api/obs/latest")); },
 		[this](const HttpResult &r) {
-			if (!r.ok())
+			if (!r.ok()) {
+				verCheck_ = VerCheck::Failed;
+				renderVersion();
 				return;
+			}
+			verCheck_ = VerCheck::Done;
 			const UpdateInfo info = UpdateInfo::fromJson(r.json());
 			if (info.version != update_.version)
 				upd_ = Upd::None; // a newer release replaced the one we knew about
@@ -903,8 +924,35 @@ void GfxDock::checkForUpdate()
 					startUpdateDownload();
 			}
 			renderUpdate();
+			renderVersion();
 			updateHealthContext();
 		});
+}
+
+void GfxDock::renderVersion()
+{
+	const QString current = QStringLiteral("v%1").arg(QString::fromUtf8(PLUGIN_VERSION));
+	QString status;
+	QString color = QStringLiteral("#9ca3af");
+	switch (verCheck_) {
+	case VerCheck::Checking:
+		status = QStringLiteral("checking for updates…");
+		break;
+	case VerCheck::Failed:
+		status = QStringLiteral("couldn't check for updates");
+		break;
+	case VerCheck::Done:
+		if (latestVersion_.isEmpty()) {
+			status = QStringLiteral("✓ up to date");
+			color = QStringLiteral("#4ade80");
+		} else {
+			status = QStringLiteral("⬆ v%1 available").arg(latestVersion_);
+			color = QStringLiteral("#fbbf24");
+		}
+		break;
+	}
+	versionLbl_->setStyleSheet(QStringLiteral("color:%1;").arg(color));
+	versionLbl_->setText(QStringLiteral("%1 · %2").arg(current, status));
 }
 
 void GfxDock::renderUpdate()
