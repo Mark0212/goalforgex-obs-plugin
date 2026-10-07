@@ -554,7 +554,8 @@ void GfxDock::openSettings()
 				       {QStringLiteral("Reactions"), &s.tabReactions},
 				       {QStringLiteral("Health"), &s.tabHealth}});
 	group(QStringLiteral("MultiChat tab"),
-	      {{QStringLiteral("Show the time next to each message"), &s.chatTimestamps}});
+	      {{QStringLiteral("Show the time next to each message"), &s.chatTimestamps},
+	       {QStringLiteral("Viewers, uptime and stream info for Twitch and Kick"), &s.chatStats}});
 	group(QStringLiteral("Live tab"), {{QStringLiteral("Stream stats line"), &s.cardStats},
 					   {QStringLiteral("Subathon timer"), &s.cardTimer},
 					   {QStringLiteral("Action timer"), &s.cardActionTimer},

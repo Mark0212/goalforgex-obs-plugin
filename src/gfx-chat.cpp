@@ -18,6 +18,9 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QCursor>
 #include <QDateTime>
 #include <QDesktopServices>
+#include <QEvent>
+#include <QFontMetrics>
+#include <QFrame>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHash>
@@ -28,14 +31,18 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QLabel>
 #include <QLineEdit>
 #include <QList>
+#include <QLocale>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QPair>
 #include <QPixmap>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollBar>
+#include <QSet>
 #include <QSize>
+#include <QSizePolicy>
 #include <QTextBrowser>
 #include <QTextDocument>
 #include <QTimer>
@@ -124,6 +131,20 @@ QString readableColor(const QString &hex)
 	return c.name();
 }
 
+QString fmtCount(qint64 n)
+{
+	return QLocale(QLocale::English).toString(n);
+}
+
+QString fmtUptime(qint64 ms)
+{
+	const qint64 s = qMax<qint64>(0, ms / 1000);
+	return QStringLiteral("%1:%2:%3")
+		.arg(s / 3600)
+		.arg((s / 60) % 60, 2, 10, QLatin1Char('0'))
+		.arg(s % 60, 2, 10, QLatin1Char('0'));
+}
+
 QString tag(const char *text, const char *color)
 {
 	return QStringLiteral("<span style='color:%1;font-size:7pt;font-weight:800;'>%2</span>&nbsp;")
@@ -137,6 +158,13 @@ GfxChatPanel::GfxChatPanel(QWidget *parent) : QWidget(parent)
 	buildUi();
 	updateTargets();
 	render();
+	tick_ = new QTimer(this);
+	tick_->setInterval(1000);
+	connect(tick_, &QTimer::timeout, this, [this] {
+		if (isVisible())
+			renderStats();
+	});
+	tick_->start();
 }
 
 void GfxChatPanel::buildUi()
@@ -195,6 +223,27 @@ void GfxChatPanel::buildUi()
 	top->addStretch(1);
 	top->addWidget(statusLbl_);
 	root->addLayout(top);
+
+	// Stats: [Twitch card] [Kick card] + chatters / pace line
+	stats_ = new QWidget(main_);
+	auto *sl = new QVBoxLayout(stats_);
+	sl->setContentsMargins(0, 0, 0, 0);
+	sl->setSpacing(3);
+	auto *cards = new QHBoxLayout();
+	cards->setSpacing(6);
+	buildStatCard(twCard_, QStringLiteral("twitch"));
+	buildStatCard(kkCard_, QStringLiteral("kick"));
+	cards->addWidget(twCard_.box, 1);
+	cards->addWidget(kkCard_.box, 1);
+	sl->addLayout(cards);
+	summary_ = new QLabel(stats_);
+	summary_->setObjectName(QStringLiteral("gfxStatSummary"));
+	summary_->setTextFormat(Qt::RichText);
+	summary_->setToolTip(QStringLiteral("Chatters: different people who chatted in the last 10 minutes.\n"
+					    "Messages a minute: average over the last 5 minutes."));
+	sl->addWidget(summary_);
+	stats_->hide();
+	root->addWidget(stats_);
 
 	// Feed
 	view_ = new ChatView(main_);
@@ -293,6 +342,199 @@ void GfxChatPanel::buildUi()
 	connect(sendBtn_, &QPushButton::clicked, this, [this] { doSend(); });
 }
 
+void GfxChatPanel::buildStatCard(StatCard &c, const QString &platform)
+{
+	c.platform = platform;
+	c.box = new QFrame(stats_);
+	c.box->setObjectName(QStringLiteral("gfxStatCard"));
+	c.box->installEventFilter(this);
+	auto *l = new QHBoxLayout(c.box);
+	l->setContentsMargins(8, 5, 8, 5);
+	l->setSpacing(7);
+	auto *icon = new QLabel(c.box);
+	icon->setPixmap(QPixmap::fromImage(platformIcon(platform, 18, devicePixelRatioF())));
+	icon->setFixedSize(18, 18);
+	auto *text = new QVBoxLayout();
+	text->setContentsMargins(0, 0, 0, 0);
+	text->setSpacing(0);
+	c.head = new QLabel(c.box);
+	c.head->setTextFormat(Qt::RichText);
+	c.sub = new QLabel(c.box);
+	c.sub->setObjectName(QStringLiteral("gfxStatSub"));
+	c.sub->setTextFormat(Qt::PlainText);
+	// Ignored width: long titles / categories clip instead of widening the dock.
+	for (QLabel *lbl : {c.head, c.sub})
+		lbl->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+	// Clicks and tooltips belong to the card.
+	for (QLabel *lbl : {icon, c.head, c.sub})
+		lbl->setAttribute(Qt::WA_TransparentForMouseEvents);
+	text->addWidget(c.head);
+	text->addWidget(c.sub);
+	l->addWidget(icon, 0, Qt::AlignVCenter);
+	l->addLayout(text, 1);
+}
+
+bool GfxChatPanel::eventFilter(QObject *watched, QEvent *event)
+{
+	if (event->type() == QEvent::MouseButtonRelease &&
+	    static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) {
+		for (const StatCard *c : {&twCard_, &kkCard_}) {
+			if (watched != c->box)
+				continue;
+			// Only ever the streamer's own channel page.
+			const QString url =
+				streams_.value(c->platform).toObject().value(QStringLiteral("url")).toString();
+			if (url.startsWith(QLatin1String("https://www.twitch.tv/")) ||
+			    url.startsWith(QLatin1String("https://kick.com/")))
+				QDesktopServices::openUrl(QUrl(url));
+			return true;
+		}
+	}
+	return QWidget::eventFilter(watched, event);
+}
+
+qint64 GfxChatPanel::serverNow() const
+{
+	return QDateTime::currentMSecsSinceEpoch() + clockSkew_;
+}
+
+void GfxChatPanel::renderStatCard(StatCard &c)
+{
+	const QJsonObject s = streams_.value(c.platform).toObject();
+	const bool kick = c.platform == QLatin1String("kick");
+	const QString name = kick ? QStringLiteral("Kick") : QStringLiteral("Twitch");
+	const bool connected = s.value(QStringLiteral("connected")).toBool();
+	const bool live = connected && s.value(QStringLiteral("live")).toBool();
+	const QJsonValue viewers = s.value(QStringLiteral("viewers"));
+	const qint64 since = static_cast<qint64>(s.value(QStringLiteral("since")).toDouble());
+	const QString title = s.value(QStringLiteral("title")).toString();
+	const QString category = s.value(QStringLiteral("category")).toString();
+	const QJsonValue followers = s.value(QStringLiteral("followers"));
+	const QJsonValue subs = s.value(QStringLiteral("subscribers"));
+
+	QString head, sub;
+	QStringList tip;
+	if (!connected) {
+		head = QStringLiteral("<span style='color:#5b6270'>Not connected</span>");
+		sub = QStringLiteral("Connect on goalforgex.com");
+		tip << QStringLiteral(
+			       "%1 isn't connected — connect it on goalforgex.com to see its chat and stats here.")
+				.arg(name);
+	} else if (s.value(QStringLiteral("pending")).toBool()) {
+		head = QStringLiteral("<span style='color:#6b7280'>Checking…</span>");
+		tip << name;
+	} else if (live) {
+		const bool hasViewers = viewers.isDouble();
+		const qint64 v = static_cast<qint64>(viewers.toDouble());
+		head = QStringLiteral(
+			       "<span style='color:#ff3b4f'>●</span>&nbsp;<b style='color:#ffffff;font-size:11pt'>%1</b>"
+			       "&nbsp;<span style='color:#9aa1b0;font-size:8pt'>%2</span>")
+			       .arg(hasViewers ? fmtCount(v) : QStringLiteral("LIVE"),
+				    hasViewers ? (v == 1 ? QStringLiteral("viewer") : QStringLiteral("viewers"))
+					       : QString());
+		QStringList bits;
+		if (since > 0)
+			bits << QStringLiteral("⏱ ") + fmtUptime(serverNow() - since);
+		if (!category.isEmpty())
+			bits << category;
+		sub = bits.join(QStringLiteral(" · "));
+		tip << QStringLiteral("%1 — LIVE").arg(name);
+		if (hasViewers)
+			tip << QStringLiteral("Viewers: ") + fmtCount(v);
+		if (since > 0)
+			tip << QStringLiteral("Uptime: ") + fmtUptime(serverNow() - since);
+		if (!title.isEmpty())
+			tip << QStringLiteral("Title: ") + title;
+		if (!category.isEmpty())
+			tip << QStringLiteral("Category: ") + category;
+	} else {
+		head = QStringLiteral("<span style='color:#9aa1b0;font-weight:600'>Offline</span>");
+		tip << QStringLiteral("%1 — offline").arg(name);
+	}
+	// Channel totals: in the sub line while offline, always in the tooltip.
+	QStringList totals;
+	if (connected && followers.isDouble()) {
+		totals << fmtCount(static_cast<qint64>(followers.toDouble())) + QStringLiteral(" followers");
+		tip << QStringLiteral("Followers: ") + fmtCount(static_cast<qint64>(followers.toDouble()));
+	}
+	if (connected && subs.isDouble()) {
+		totals << fmtCount(static_cast<qint64>(subs.toDouble())) + QStringLiteral(" subs");
+		tip << QStringLiteral("Active subscribers: ") + fmtCount(static_cast<qint64>(subs.toDouble()));
+	}
+	if (connected && !live)
+		sub = totals.join(QStringLiteral(" · "));
+	if (connected)
+		tip << QStringLiteral("\nClick to open your %1 channel").arg(name);
+
+	c.head->setText(head);
+	c.sub->setText(c.sub->fontMetrics().elidedText(sub.isEmpty() ? QStringLiteral(" ") : sub, Qt::ElideRight,
+						       qMax(40, c.sub->width())));
+	c.box->setToolTip(tip.join(QLatin1Char('\n')));
+	c.box->setCursor(connected ? Qt::PointingHandCursor : Qt::ArrowCursor);
+	theme::setState(c.box, live ? (kick ? "kick" : "twitch") : "");
+}
+
+void GfxChatPanel::renderStats()
+{
+	// Only connected platforms get a card — no "not connected" clutter.
+	const bool tw = streams_.value(QStringLiteral("twitch")).toObject().value(QStringLiteral("connected")).toBool();
+	const bool kk = streams_.value(QStringLiteral("kick")).toObject().value(QStringLiteral("connected")).toBool();
+	const bool show = settings().chatStats && (tw || kk);
+	stats_->setVisible(show);
+	if (!show)
+		return;
+	twCard_.box->setVisible(tw);
+	kkCard_.box->setVisible(kk);
+	if (tw)
+		renderStatCard(twCard_);
+	if (kk)
+		renderStatCard(kkCard_);
+
+	QStringList parts;
+	qint64 total = 0;
+	int liveWithViewers = 0;
+	for (const QString &p : {QStringLiteral("twitch"), QStringLiteral("kick")}) {
+		const QJsonObject s = streams_.value(p).toObject();
+		if (s.value(QStringLiteral("live")).toBool() && s.value(QStringLiteral("viewers")).isDouble()) {
+			total += static_cast<qint64>(s.value(QStringLiteral("viewers")).toDouble());
+			++liveWithViewers;
+		}
+	}
+	if (liveWithViewers == 2)
+		parts << QStringLiteral("<b style='color:#e8eaf0'>%1</b> watching in total").arg(fmtCount(total));
+
+	// Chat pace from the messages the panel already has (host's own lines excluded).
+	const qint64 now = serverNow();
+	constexpr qint64 kChattersWindow = 10 * 60 * 1000, kPaceWindow = 5 * 60 * 1000;
+	// A full buffer may not reach back 5 minutes — measure over what it holds.
+	qint64 paceStart = now - kPaceWindow;
+	if (msgs_.size() >= kKeep && msgs_.first().ts > paceStart)
+		paceStart = msgs_.first().ts;
+	QSet<QString> chatters;
+	int paced = 0;
+	for (const ChatMessage &m : msgs_) {
+		if (m.host || m.ts <= 0)
+			continue;
+		if (now - m.ts <= kChattersWindow)
+			chatters.insert(m.platform + QLatin1Char(':') + m.login.toLower());
+		if (m.ts >= paceStart)
+			++paced;
+	}
+	// Nothing live and nobody chatting → just the cards.
+	const bool anyLive =
+		streams_.value(QStringLiteral("twitch")).toObject().value(QStringLiteral("live")).toBool() ||
+		streams_.value(QStringLiteral("kick")).toObject().value(QStringLiteral("live")).toBool();
+	summary_->setVisible(anyLive || !chatters.isEmpty());
+	const double minutes = qMax(1.0, (now - paceStart) / 60000.0);
+	const double pace = paced / minutes;
+	parts << QStringLiteral("<b style='color:#e8eaf0'>%1</b> chatter%2")
+			 .arg(chatters.size())
+			 .arg(chatters.size() == 1 ? QString() : QStringLiteral("s"));
+	parts << QStringLiteral("<b style='color:#e8eaf0'>%1</b> msgs/min")
+			 .arg(pace < 10 ? QString::number(pace, 'f', 1) : QString::number(qRound(pace)));
+	summary_->setText(parts.join(QStringLiteral("&nbsp;&nbsp;·&nbsp;&nbsp;")));
+}
+
 void GfxChatPanel::setSendHandler(SendFn fn)
 {
 	send_ = std::move(fn);
@@ -385,6 +627,10 @@ bool GfxChatPanel::platformConnected(const QString &p) const
 int GfxChatPanel::applyPoll(const QJsonObject &o)
 {
 	status_ = o.value(QStringLiteral("status")).toObject();
+	streams_ = o.value(QStringLiteral("streams")).toObject();
+	const double serverTime = o.value(QStringLiteral("serverTime")).toDouble();
+	if (serverTime > 0)
+		clockSkew_ = static_cast<qint64>(serverTime) - QDateTime::currentMSecsSinceEpoch();
 	renderStatus();
 	updateTargets();
 
@@ -438,6 +684,7 @@ int GfxChatPanel::applyPoll(const QJsonObject &o)
 	}
 	while (msgs_.size() > kKeep)
 		msgs_.removeFirst();
+	renderStats();
 	if (changed)
 		render(o.value(QStringLiteral("reset")).toBool() ? 0 : added,
 		       o.value(QStringLiteral("reset")).toBool());
@@ -645,7 +892,9 @@ void GfxChatPanel::clearChat()
 {
 	msgs_.clear();
 	status_ = QJsonObject();
+	streams_ = QJsonObject();
 	pendingNew_ = 0;
+	renderStats();
 	renderStatus();
 	updateTargets();
 	render(0, true);

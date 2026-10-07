@@ -52,6 +52,7 @@ static const BoolField kBools[] = {
 	{"chatToTwitch", &Settings::chatToTwitch},
 	{"chatToKick", &Settings::chatToKick},
 	{"chatTimestamps", &Settings::chatTimestamps},
+	{"chatStats", &Settings::chatStats},
 	{"cardStats", &Settings::cardStats},
 	{"cardTimer", &Settings::cardTimer},
 	{"cardActionTimer", &Settings::cardActionTimer},

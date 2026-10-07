@@ -17,10 +17,13 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include <functional>
 
+class QEvent;
+class QFrame;
 class QLabel;
 class QLineEdit;
 class QPushButton;
 class QTextBrowser;
+class QTimer;
 
 namespace gfx {
 
@@ -68,7 +71,23 @@ public:
 	void sendFinished(bool anyDelivered);
 	void clearChat();
 
+protected:
+	// Click on a platform's stats card → opens that channel.
+	bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
+	// One platform's card in the stats strip.
+	struct StatCard {
+		QString platform;
+		QFrame *box = nullptr;
+		QLabel *head = nullptr; // ● 1,234 viewers / Offline / Not connected
+		QLabel *sub = nullptr;  // uptime · category (elided)
+	};
+	void buildStatCard(StatCard &c, const QString &platform);
+	// Viewers / uptime / title per platform + chatters and messages per minute.
+	void renderStats();
+	void renderStatCard(StatCard &c);
+	qint64 serverNow() const;
 	void buildUi();
 	void render(int newlyAdded = 0, bool forceBottom = false);
 	void scrollToBottom();
@@ -85,6 +104,8 @@ private:
 
 	QList<gfx::ChatMessage> msgs_;
 	QJsonObject status_;
+	QJsonObject streams_;  // "streams" from the poll; empty = older server, strip hidden
+	qint64 clockSkew_ = 0; // server clock − ours, so uptime matches the server's start times
 	QString filter_ = QStringLiteral("all");
 	SendFn send_;
 	ModFn mod_;
@@ -95,6 +116,11 @@ private:
 	QWidget *lockPanel_ = nullptr;
 	QLabel *lockLbl_ = nullptr;
 	QLabel *statusLbl_ = nullptr;
+	QWidget *stats_ = nullptr;
+	StatCard twCard_;
+	StatCard kkCard_;
+	QLabel *summary_ = nullptr;
+	QTimer *tick_ = nullptr; // 1 s: uptime + chat pace
 	QPushButton *fAll_ = nullptr;
 	QPushButton *fTwitch_ = nullptr;
 	QPushButton *fKick_ = nullptr;

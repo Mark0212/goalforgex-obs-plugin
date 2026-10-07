@@ -254,6 +254,12 @@ QPushButton#gfxSeg:hover { color: #e8eaf0; background: #1d2129; }
 QPushButton#gfxSeg:checked { color: #ffffff; background: #262b36; border-color: #3a4150; }
 QLabel#gfxChatStatus { font-size: 8pt; }
 
+QFrame#gfxStatCard { background: #15181e; border: 1px solid #262a33; border-radius: 8px; }
+QFrame#gfxStatCard:hover { border-color: #3a4150; }
+QFrame#gfxStatCard[gfxState="twitch"] { background: #1a1528; border-color: #4b2f8f; }
+QFrame#gfxStatCard[gfxState="kick"] { background: #12200c; border-color: #2c6b12; }
+QLabel#gfxStatSub, QLabel#gfxStatSummary { color: #8b93a3; font-size: 8pt; }
+
 QTextBrowser#gfxChatView {
 	background: #0f1115; color: #e8eaf0; border: 1px solid #262a33; border-radius: 10px;
 	selection-background-color: #6b4d14;

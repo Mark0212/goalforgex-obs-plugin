@@ -48,6 +48,8 @@ struct Settings {
 	bool chatToTwitch = true;
 	bool chatToKick = true;
 	bool chatTimestamps = true;
+	// Viewers / uptime / title per platform above the chat
+	bool chatStats = true;
 	// Automation
 	bool autoStartTimer = false;
 	bool autoPauseTimer = false;
