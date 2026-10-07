@@ -34,6 +34,7 @@ struct Settings {
 	bool tabWidgets = true;
 	bool tabReactions = true;
 	bool tabHealth = true;
+	bool tabChat = true;
 	// Live tab cards
 	bool cardStats = true;
 	bool cardTimer = true;
@@ -43,6 +44,10 @@ struct Settings {
 	bool cardCounters = true;
 	bool cardAlerts = true;
 	bool cardActivity = true;
+	// Chat tab: where messages go (remembered between sessions) + show times
+	bool chatToTwitch = true;
+	bool chatToKick = true;
+	bool chatTimestamps = true;
 	// Automation
 	bool autoStartTimer = false;
 	bool autoPauseTimer = false;

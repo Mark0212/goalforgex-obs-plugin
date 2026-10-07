@@ -229,6 +229,34 @@ QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 QDialogButtonBox QPushButton { min-width: 72px; }
 )QSS");
 
+	// ── Chat tab ─────────────────────────────────────────────────────
+	qss += QString::fromUtf8(R"QSS(
+QPushButton#gfxSeg {
+	background: transparent; color: #8b93a3; border: 1px solid transparent; border-radius: 6px;
+	padding: 3px 10px; font-weight: 600;
+}
+QPushButton#gfxSeg:hover { color: #e8eaf0; background: #1d2129; }
+QPushButton#gfxSeg:checked { color: #ffffff; background: #262b36; border-color: #3a4150; }
+QLabel#gfxChatStatus { font-size: 8pt; }
+
+QTextBrowser#gfxChatView {
+	background: #0f1115; color: #e8eaf0; border: 1px solid #262a33; border-radius: 10px;
+	selection-background-color: #6b4d14;
+}
+
+QPushButton#gfxTarget {
+	background: #1a1d24; color: #6b7280; border: 1px solid #2f3541; border-radius: 6px;
+	padding: 5px 9px; font-weight: 700; font-size: 8pt;
+}
+QPushButton#gfxTarget:hover { color: #c9ced8; border-color: #3d4452; }
+QPushButton#gfxTarget[gfxState="twitch"]:checked { color: #ffffff; background: #2a1f4d; border-color: #9146ff; }
+QPushButton#gfxTarget[gfxState="kick"]:checked { color: #d9ffc7; background: #16300a; border-color: #53fc18; }
+QPushButton#gfxTarget:disabled { color: #3f4552; background: #15171c; border-color: #22262d; }
+
+QLineEdit#gfxChatInput { padding: 6px 10px; border-radius: 8px; background: #0f1115; }
+QLineEdit#gfxChatInput:disabled { color: #6b7280; }
+)QSS");
+
 	return qss;
 }
 

@@ -10,6 +10,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-dock.hpp"
 #include "gfx-api.hpp"
 #include "gfx-auth.hpp"
+#include "gfx-chat.hpp"
 #include "gfx-health.hpp"
 #include "gfx-http.hpp"
 #include "gfx-live.hpp"
@@ -122,6 +123,8 @@ GfxDock::GfxDock(QWidget *parent) : QWidget(parent), reactions_(this)
 			renderAirChip();
 	});
 	clockTimer_.start();
+	chatTimer_.setSingleShot(true);
+	connect(&chatTimer_, &QTimer::timeout, this, [this] { pollChat(); });
 
 	Auth::instance().load();
 	if (Auth::instance().connected())
@@ -371,6 +374,16 @@ void GfxDock::buildUi()
 	widgetsPage_ = buildWidgetsPage();
 	reactionsPanel_ = new GfxReactionsPanel(&reactions_, tabs_);
 	healthPanel_ = new GfxHealthPanel(tabs_);
+	chatPanel_ = new GfxChatPanel(tabs_);
+	chatPanel_->setSendHandler(
+		[this](const QStringList &platforms, const QString &text) { sendChat(platforms, text); });
+	connect(tabs_, &QTabWidget::currentChanged, this, [this](int) {
+		if (chatPanel_ && tabs_->currentWidget() == chatPanel_) {
+			chatUnread_ = 0;
+			updateChatTabTitle();
+			scheduleChat(0); // switch to the fast cadence right away
+		}
+	});
 	body->addWidget(tabs_, 1);
 	rebuildTabs();
 
@@ -488,6 +501,8 @@ void GfxDock::rebuildTabs()
 	const Settings &s = settings();
 	if (s.tabLive)
 		tabs_->addTab(livePanel_, QStringLiteral("Live"));
+	if (s.tabChat)
+		tabs_->addTab(chatPanel_, QStringLiteral("Chat"));
 	if (s.tabWidgets)
 		tabs_->addTab(widgetsPage_, QStringLiteral("Widgets"));
 	if (s.tabReactions)
@@ -500,6 +515,7 @@ void GfxDock::rebuildTabs()
 	if (i >= 0)
 		tabs_->setCurrentIndex(i);
 	livePanel_->applySettings();
+	updateChatTabTitle();
 }
 
 void GfxDock::openSettings()
@@ -530,8 +546,10 @@ void GfxDock::openSettings()
 	};
 	group(QStringLiteral("Tabs"), {{QStringLiteral("Live"), &s.tabLive},
 				       {QStringLiteral("Widgets"), &s.tabWidgets},
+				       {QStringLiteral("Chat (Twitch + Kick)"), &s.tabChat},
 				       {QStringLiteral("Reactions"), &s.tabReactions},
 				       {QStringLiteral("Health"), &s.tabHealth}});
+	group(QStringLiteral("Chat tab"), {{QStringLiteral("Show the time next to each message"), &s.chatTimestamps}});
 	group(QStringLiteral("Live tab"), {{QStringLiteral("Stream stats line"), &s.cardStats},
 					   {QStringLiteral("Subathon timer"), &s.cardTimer},
 					   {QStringLiteral("Action timer"), &s.cardActionTimer},
@@ -566,6 +584,7 @@ void GfxDock::openSettings()
 		*o.value = o.box->isChecked();
 	saveSettings();
 	rebuildTabs();
+	scheduleChat(0);
 	checkForUpdate();
 }
 
@@ -603,8 +622,10 @@ void GfxDock::setState(State s, const QString &message, bool isError)
 	if (s == State::Connected) {
 		statusTimer_.start();
 		stateTimer_.start();
+		scheduleChat(300);
 	} else {
 		stateTimer_.stop();
+		chatTimer_.stop();
 		if (s != State::NeedsReconnect)
 			statusTimer_.stop();
 	}
@@ -798,6 +819,11 @@ void GfxDock::disconnectAccount()
 			list_->clear();
 			lastState_ = LiveState();
 			livePanel_->clearEvents();
+			chatPanel_->clearChat();
+			chatFeed_.clear();
+			chatSeq_ = 0;
+			chatUnread_ = 0;
+			updateChatTabTitle();
 			const bool serverOk = !wasConnected || r.token == TokenStatus::NeedsReconnect || r.ok();
 			setState(
 				State::Disconnected,
@@ -1128,6 +1154,105 @@ void GfxDock::renderAirChip()
 		airChip_->setText(QStringLiteral("OFF AIR"));
 		airChip_->setToolTip(QStringLiteral("Not streaming or recording"));
 	}
+}
+
+// ── Chat tab ─────────────────────────────────────────────────────
+
+void GfxDock::scheduleChat(int ms)
+{
+	if (state_ != State::Connected || !settings().tabChat || updateRequired_) {
+		chatTimer_.stop();
+		return;
+	}
+	chatTimer_.start(ms);
+}
+
+// Polls fast (1.5 s) while the Chat tab is on screen, slower otherwise so the
+// unread count on the tab stays current. Each poll also keeps the server's
+// Twitch/Kick chat connection up for this account.
+void GfxDock::pollChat()
+{
+	if (state_ != State::Connected || !settings().tabChat || chatInFlight_)
+		return;
+	chatInFlight_ = true;
+	const QString path = QStringLiteral("/api/obs/chat?feed=%1&since=%2")
+				     .arg(chatFeed_.isEmpty() ? QStringLiteral("none") : chatFeed_)
+				     .arg(chatSeq_);
+	runAsync(
+		this, [path] { return apiGet(path); },
+		[this](const ApiResult &r) {
+			chatInFlight_ = false;
+			const bool onTab = isVisible() && tabs_->currentWidget() == chatPanel_;
+			if (r.token == TokenStatus::NeedsReconnect)
+				return; // the state poll shows Reconnect
+			if (handleUpdateRequired(r.http.status, r.http.serverMessage()))
+				return;
+			if (r.http.status == 403 && r.http.errorCode() == QLatin1String("pro_required")) {
+				chatPanel_->setLocked(r.http.serverMessage());
+				scheduleChat(120000);
+				return;
+			}
+			if (!r.ok()) {
+				scheduleChat(onTab ? 4000 : 10000); // transient — try again shortly
+				return;
+			}
+			chatPanel_->setLocked(QString());
+			const QJsonObject o = r.http.json();
+			chatFeed_ = o.value(QStringLiteral("feed")).toString();
+			chatSeq_ = static_cast<qint64>(o.value(QStringLiteral("seq")).toDouble());
+			const int added = chatPanel_->applyPoll(o);
+			if (!onTab && added > 0) {
+				chatUnread_ += added;
+				updateChatTabTitle();
+			}
+			scheduleChat(onTab ? 1500 : 4000);
+		});
+}
+
+void GfxDock::sendChat(const QStringList &platforms, const QString &text)
+{
+	QJsonObject body;
+	body.insert(QStringLiteral("text"), text);
+	body.insert(QStringLiteral("platforms"), QJsonArray::fromStringList(platforms));
+	runAsync(
+		this, [body] { return apiPost(QStringLiteral("/api/obs/chat/send"), body); },
+		[this](const ApiResult &r) {
+			if (!r.ok()) {
+				chatPanel_->sendFinished(false);
+				showMessage(QStringLiteral("Message not sent: %1").arg(describe(r)), true);
+				return;
+			}
+			const QJsonObject results = r.http.json().value(QStringLiteral("results")).toObject();
+			bool any = false;
+			QStringList failed;
+			for (auto it = results.begin(); it != results.end(); ++it) {
+				const QJsonObject one = it.value().toObject();
+				if (one.value(QStringLiteral("ok")).toBool())
+					any = true;
+				else
+					failed << QStringLiteral("%1: %2").arg(
+						it.key() == QLatin1String("kick") ? QStringLiteral("Kick")
+										  : QStringLiteral("Twitch"),
+						one.value(QStringLiteral("error")).toString());
+			}
+			chatPanel_->sendFinished(any);
+			if (!failed.isEmpty())
+				showMessage(
+					QStringLiteral("Not delivered — %1").arg(failed.join(QStringLiteral(" · "))),
+					true);
+			scheduleChat(200); // show the echo right away
+		});
+}
+
+void GfxDock::updateChatTabTitle()
+{
+	const int i = chatPanel_ ? tabs_->indexOf(chatPanel_) : -1;
+	if (i < 0)
+		return;
+	tabs_->setTabText(i, chatUnread_ > 0 ? QStringLiteral("Chat · %1")
+						       .arg(chatUnread_ > 99 ? QStringLiteral("99+")
+									     : QString::number(chatUnread_))
+					     : QStringLiteral("Chat"));
 }
 
 void GfxDock::renderUpdate()
@@ -1768,6 +1893,7 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		stateTimer_.stop();
 		updateTimer_.stop();
 		clockTimer_.stop();
+		chatTimer_.stop();
 		httpBeginShutdown();
 		break;
 	default:

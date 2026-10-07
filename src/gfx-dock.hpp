@@ -19,9 +19,11 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QJsonValue>
 #include <QList>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 #include <QWidget>
 
+class GfxChatPanel;
 class GfxHealthPanel;
 class GfxLivePanel;
 class GfxReactionsPanel;
@@ -56,6 +58,12 @@ private:
 	void openSettings();
 	// Header ON AIR / REC chip (OBS's own output state + viewers from GoalForgeX)
 	void renderAirChip();
+
+	// Chat tab (Twitch + Kick): adaptive poll of /api/obs/chat, send as the streamer
+	void scheduleChat(int ms);
+	void pollChat();
+	void sendChat(const QStringList &platforms, const QString &text);
+	void updateChatTabTitle();
 
 	// Account linking (RFC 8628 device flow)
 	void startConnect();
@@ -121,6 +129,7 @@ private:
 	QWidget *widgetsPage_ = nullptr;
 	GfxReactionsPanel *reactionsPanel_ = nullptr;
 	GfxHealthPanel *healthPanel_ = nullptr;
+	GfxChatPanel *chatPanel_ = nullptr;
 	// Widgets tab
 	QComboBox *sceneCombo_ = nullptr;
 	QListWidget *list_ = nullptr;
@@ -146,6 +155,11 @@ private:
 	QTimer clockTimer_; // 1 s — the header's ON AIR clock
 	qint64 streamStartMs_ = 0;
 	qint64 recordStartMs_ = 0;
+	QTimer chatTimer_; // single-shot; re-armed after every poll
+	QString chatFeed_;
+	qint64 chatSeq_ = 0;
+	bool chatInFlight_ = false;
+	int chatUnread_ = 0;
 
 	gfx::ReactionEngine reactions_;
 
