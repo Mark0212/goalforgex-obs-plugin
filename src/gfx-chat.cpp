@@ -12,9 +12,13 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-settings.hpp"
 #include "gfx-theme.hpp"
 
+#include <QAction>
+#include <QClipboard>
 #include <QColor>
+#include <QCursor>
 #include <QDateTime>
 #include <QDesktopServices>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHash>
 #include <QIcon>
@@ -23,6 +27,10 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QJsonValue>
 #include <QLabel>
 #include <QLineEdit>
+#include <QList>
+#include <QMenu>
+#include <QMessageBox>
+#include <QPair>
 #include <QPixmap>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -72,6 +80,22 @@ const QRegularExpression &loginRe()
 {
 	static const QRegularExpression re(QStringLiteral("^[A-Za-z0-9_][A-Za-z0-9_-]{0,39}$"));
 	return re;
+}
+
+const QRegularExpression &msgIdRe()
+{
+	static const QRegularExpression re(QStringLiteral("^[A-Za-z0-9-]{1,80}$"));
+	return re;
+}
+
+void openProfile(const QString &platform, const QString &login)
+{
+	const QString l = login.toLower();
+	if (!loginRe().match(l).hasMatch())
+		return;
+	QDesktopServices::openUrl(QUrl((platform == QLatin1String("kick") ? QStringLiteral("https://kick.com/")
+									  : QStringLiteral("https://www.twitch.tv/")) +
+				       l));
 }
 
 // The feed: serves the platform icons to the HTML as gfx:twitch / gfx:kick.
@@ -176,21 +200,18 @@ void GfxChatPanel::buildUi()
 	view_ = new ChatView(main_);
 	view_->setObjectName(QStringLiteral("gfxChatView"));
 	view_->setOpenLinks(false);
-	// Names link to profile:<platform>:<login> → open that chatter's channel page.
-	connect(view_, &QTextBrowser::anchorClicked, this, [](const QUrl &u) {
-		if (u.scheme() != QLatin1String("profile"))
+	// Names link to user:<platform>:<login>:<messageId> → the chatter menu.
+	connect(view_, &QTextBrowser::anchorClicked, this, [this](const QUrl &u) {
+		if (u.scheme() != QLatin1String("user"))
 			return;
-		const QString path = u.path();
-		const qsizetype colon = path.indexOf(QLatin1Char(':'));
-		if (colon <= 0)
+		const QStringList parts = u.path().split(QLatin1Char(':'));
+		if (parts.size() < 2)
 			return;
-		const QString platform = path.left(colon), login = path.mid(colon + 1).toLower();
-		if (!loginRe().match(login).hasMatch())
+		const QString platform = parts.at(0), login = parts.at(1);
+		if ((platform != QLatin1String("twitch") && platform != QLatin1String("kick")) ||
+		    !loginRe().match(login).hasMatch())
 			return;
-		if (platform == QLatin1String("twitch"))
-			QDesktopServices::openUrl(QUrl(QStringLiteral("https://www.twitch.tv/") + login));
-		else if (platform == QLatin1String("kick"))
-			QDesktopServices::openUrl(QUrl(QStringLiteral("https://kick.com/") + login));
+		showUserMenu(platform, login, parts.size() > 2 ? parts.at(2) : QString());
 	});
 	view_->setOpenExternalLinks(false);
 	view_->setFrameShape(QFrame::NoFrame);
@@ -275,6 +296,73 @@ void GfxChatPanel::buildUi()
 void GfxChatPanel::setSendHandler(SendFn fn)
 {
 	send_ = std::move(fn);
+}
+
+void GfxChatPanel::setModHandler(ModFn fn)
+{
+	mod_ = std::move(fn);
+}
+
+void GfxChatPanel::showUserMenu(const QString &platform, const QString &login, const QString &messageId)
+{
+	const ChatMessage *msg = nullptr;
+	if (!messageId.isEmpty())
+		for (const ChatMessage &m : msgs_)
+			if (m.id == messageId && m.platform == platform)
+				msg = &m;
+	const bool kick = platform == QLatin1String("kick");
+	const QString shown = msg ? msg->user : login;
+	const bool isHost = msg && msg->host;
+
+	QMenu menu(this);
+	QAction *head = menu.addAction(
+		QIcon(QPixmap::fromImage(platformIcon(platform, 16, devicePixelRatioF()))),
+		QStringLiteral("%1  ·  %2").arg(shown, kick ? QStringLiteral("Kick") : QStringLiteral("Twitch")));
+	head->setEnabled(false);
+	menu.addSeparator();
+	connect(menu.addAction(QStringLiteral("👤   Open %1 profile")
+				       .arg(kick ? QStringLiteral("Kick") : QStringLiteral("Twitch"))),
+		&QAction::triggered, this, [platform, login] { openProfile(platform, login); });
+	connect(menu.addAction(QStringLiteral("📋   Copy username")), &QAction::triggered, this,
+		[login] { QGuiApplication::clipboard()->setText(login); });
+
+	// The broadcaster can't be moderated — profile + copy only.
+	if (!isHost && mod_) {
+		menu.addSeparator();
+		if (msg && !msg->deleted && msgIdRe().match(messageId).hasMatch())
+			connect(menu.addAction(QStringLiteral("🗑   Delete this message")), &QAction::triggered, this,
+				[this, platform, login, messageId, shown] {
+					mod_(platform, QStringLiteral("delete"), login, 0, messageId, shown);
+				});
+		QMenu *timeout = menu.addMenu(QStringLiteral("⏱   Timeout"));
+		const QList<QPair<QString, int>> lengths = {
+			{QStringLiteral("1 minute"), 60},   {QStringLiteral("10 minutes"), 600},
+			{QStringLiteral("1 hour"), 3600},   {QStringLiteral("1 day"), 86400},
+			{QStringLiteral("1 week"), 604800},
+		};
+		for (const QPair<QString, int> &len : lengths) {
+			const int secs = len.second;
+			connect(timeout->addAction(len.first), &QAction::triggered, this,
+				[this, platform, login, messageId, shown, secs] {
+					mod_(platform, QStringLiteral("timeout"), login, secs, messageId, shown);
+				});
+		}
+		connect(menu.addAction(QStringLiteral("🚫   Ban")), &QAction::triggered, this,
+			[this, platform, login, messageId, shown, kick] {
+				if (QMessageBox::question(
+					    this, QStringLiteral("Ban %1?").arg(shown),
+					    QStringLiteral(
+						    "Permanently ban %1 from your %2 chat? You can unban them later.")
+						    .arg(shown, kick ? QStringLiteral("Kick")
+								     : QStringLiteral("Twitch"))) == QMessageBox::Yes)
+					mod_(platform, QStringLiteral("ban"), login, 0, messageId, shown);
+			});
+		connect(menu.addAction(QStringLiteral("↩   Unban")), &QAction::triggered, this,
+			[this, platform, login, messageId, shown] {
+				mod_(platform, QStringLiteral("unban"), login, 0, messageId, shown);
+			});
+	}
+	menu.exec(QCursor::pos());
 }
 
 void GfxChatPanel::setLocked(const QString &message)
@@ -383,10 +471,10 @@ QString GfxChatPanel::lineHtml(const ChatMessage &m) const
 		h += tag("SUB", "#ffb020");
 	const QString nameColor = m.color.isEmpty() ? QStringLiteral("#c9ced8") : readableColor(m.color);
 	if (loginRe().match(m.login).hasMatch())
-		h += QStringLiteral("<a href='profile:%1:%2' title='Open %3 on %4' "
-				    "style='color:%5;text-decoration:none;font-weight:bold;'>%3</a>")
-			     .arg(m.platform, m.login, m.user.toHtmlEscaped(),
-				  kick ? QStringLiteral("Kick") : QStringLiteral("Twitch"), nameColor);
+		h += QStringLiteral("<a href='user:%1:%2:%3' title='Click for options — profile, timeout, ban' "
+				    "style='color:%4;text-decoration:none;font-weight:bold;'>%5</a>")
+			     .arg(m.platform, m.login, msgIdRe().match(m.id).hasMatch() ? m.id : QString(), nameColor,
+				  m.user.toHtmlEscaped());
 	else
 		h += QStringLiteral("<b style='color:%1'>%2</b>").arg(nameColor, m.user.toHtmlEscaped());
 	h += QStringLiteral("<span style='color:#5b6270'>:</span> ");

@@ -63,6 +63,8 @@ private:
 	void scheduleChat(int ms);
 	void pollChat();
 	void sendChat(const QStringList &platforms, const QString &text);
+	void chatMod(const QString &platform, const QString &action, const QString &login, int seconds,
+		     const QString &messageId, const QString &displayName);
 	void updateChatTabTitle();
 
 	// Account linking (RFC 8628 device flow)

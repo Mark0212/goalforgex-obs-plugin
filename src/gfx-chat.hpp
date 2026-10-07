@@ -51,10 +51,14 @@ struct ChatMessage {
 class GfxChatPanel : public QWidget {
 public:
 	using SendFn = std::function<void(const QStringList &platforms, const QString &text)>;
+	// action: timeout | ban | unban | delete. displayName is for the confirmation line.
+	using ModFn = std::function<void(const QString &platform, const QString &action, const QString &login,
+					 int seconds, const QString &messageId, const QString &displayName)>;
 
 	explicit GfxChatPanel(QWidget *parent = nullptr);
 
 	void setSendHandler(SendFn fn);
+	void setModHandler(ModFn fn);
 	// Applies one poll response. Returns how many new messages arrived that the
 	// current filter shows (for the unread badge on the tab).
 	int applyPoll(const QJsonObject &response);
@@ -76,11 +80,14 @@ private:
 	void setFilter(const QString &f);
 	void doSend();
 	bool platformConnected(const QString &p) const;
+	// Click on a chatter's name: profile / copy / delete / timeout / ban / unban.
+	void showUserMenu(const QString &platform, const QString &login, const QString &messageId);
 
 	QList<gfx::ChatMessage> msgs_;
 	QJsonObject status_;
 	QString filter_ = QStringLiteral("all");
 	SendFn send_;
+	ModFn mod_;
 	bool sending_ = false;
 	int pendingNew_ = 0;
 

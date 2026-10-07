@@ -377,6 +377,10 @@ void GfxDock::buildUi()
 	chatPanel_ = new GfxChatPanel(tabs_);
 	chatPanel_->setSendHandler(
 		[this](const QStringList &platforms, const QString &text) { sendChat(platforms, text); });
+	chatPanel_->setModHandler([this](const QString &platform, const QString &action, const QString &login,
+					 int seconds, const QString &messageId, const QString &displayName) {
+		chatMod(platform, action, login, seconds, messageId, displayName);
+	});
 	connect(tabs_, &QTabWidget::currentChanged, this, [this](int) {
 		if (chatPanel_ && tabs_->currentWidget() == chatPanel_) {
 			chatUnread_ = 0;
@@ -1241,6 +1245,51 @@ void GfxDock::sendChat(const QStringList &platforms, const QString &text)
 					QStringLiteral("Not delivered — %1").arg(failed.join(QStringLiteral(" · "))),
 					true);
 			scheduleChat(200); // show the echo right away
+		});
+}
+
+// Moderation from a chat line. The platform's own removal event (Twitch
+// CLEARMSG / CLEARCHAT, Kick ban) then clears the messages from the feed.
+void GfxDock::chatMod(const QString &platform, const QString &action, const QString &login, int seconds,
+		      const QString &messageId, const QString &displayName)
+{
+	QJsonObject body;
+	body.insert(QStringLiteral("platform"), platform);
+	body.insert(QStringLiteral("action"), action);
+	body.insert(QStringLiteral("target"), login);
+	body.insert(QStringLiteral("seconds"), seconds);
+	body.insert(QStringLiteral("messageId"), messageId);
+	const QString who = displayName.isEmpty() ? login : displayName;
+	const auto duration = [](int s) {
+		if (s % 604800 == 0)
+			return s == 604800 ? QStringLiteral("1 week") : QStringLiteral("%1 weeks").arg(s / 604800);
+		if (s % 86400 == 0)
+			return s == 86400 ? QStringLiteral("1 day") : QStringLiteral("%1 days").arg(s / 86400);
+		if (s % 3600 == 0)
+			return s == 3600 ? QStringLiteral("1 hour") : QStringLiteral("%1 hours").arg(s / 3600);
+		return s == 60 ? QStringLiteral("1 minute") : QStringLiteral("%1 minutes").arg(qMax(1, s / 60));
+	};
+	runAsync(
+		this, [body] { return apiPost(QStringLiteral("/api/obs/chat/mod"), body); },
+		[this, action, who, seconds, duration](const ApiResult &r) {
+			if (!r.ok()) {
+				const QString verb =
+					action == QLatin1String("delete")    ? QStringLiteral("delete that message")
+					: action == QLatin1String("timeout") ? QStringLiteral("time out %1").arg(who)
+					: action == QLatin1String("ban")     ? QStringLiteral("ban %1").arg(who)
+									     : QStringLiteral("unban %1").arg(who);
+				showMessage(QStringLiteral("Couldn't %1: %2").arg(verb, describe(r)), true);
+				return;
+			}
+			if (action == QLatin1String("delete"))
+				showMessage(QStringLiteral("🗑 Message deleted."));
+			else if (action == QLatin1String("timeout"))
+				showMessage(QStringLiteral("⏱ %1 timed out for %2.").arg(who, duration(seconds)));
+			else if (action == QLatin1String("ban"))
+				showMessage(QStringLiteral("🚫 %1 banned.").arg(who));
+			else
+				showMessage(QStringLiteral("↩ %1 unbanned.").arg(who));
+			scheduleChat(300);
 		});
 }
 
