@@ -8,6 +8,7 @@ the Free Software Foundation; either version 2 of the License, or
 (at your option) any later version.
 */
 #include "gfx-health.hpp"
+#include "gfx-theme.hpp"
 #include "gfx-auth.hpp"
 #include "gfx-http.hpp"
 
@@ -15,6 +16,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <obs-module.h>
 
 #include <QDesktopServices>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
@@ -29,10 +31,13 @@ GfxHealthPanel::GfxHealthPanel(QWidget *parent) : QWidget(parent)
 {
 	auto *outer = new QVBoxLayout(this);
 	outer->setContentsMargins(0, 4, 0, 4);
+	outer->setSpacing(8);
 	auto *top = new QHBoxLayout();
 	auto *title = new QLabel(QStringLiteral("Checks your setup and fixes common problems in one click."), this);
 	title->setWordWrap(true);
-	auto *recheck = new QPushButton(QStringLiteral("Re-check"), this);
+	title->setObjectName(QStringLiteral("gfxMuted"));
+	auto *recheck = new QPushButton(QStringLiteral("↻ Re-check"), this);
+	theme::setRole(recheck, "ghost");
 	top->addWidget(title, 1);
 	top->addWidget(recheck);
 	outer->addLayout(top);
@@ -63,14 +68,17 @@ void GfxHealthPanel::showEvent(QShowEvent *e)
 
 void GfxHealthPanel::addRow(bool ok, const QString &text, const QString &fixLabel, std::function<void()> fix)
 {
-	auto *row = new QWidget(this);
+	auto *row = new QFrame(this);
+	row->setObjectName(QStringLiteral("gfxHealthRow"));
+	theme::setState(row, ok ? "ok" : "warn");
 	auto *h = new QHBoxLayout(row);
-	h->setContentsMargins(0, 0, 0, 0);
+	h->setContentsMargins(10, 7, 8, 7);
 	auto *lbl = new QLabel((ok ? QStringLiteral("✅  ") : QStringLiteral("⚠️  ")) + text, row);
 	lbl->setWordWrap(true);
 	h->addWidget(lbl, 1);
 	if (fix) {
 		auto *b = new QPushButton(fixLabel.isEmpty() ? QStringLiteral("Fix") : fixLabel, row);
+		theme::setRole(b, "primary");
 		h->addWidget(b);
 		connect(b, &QPushButton::clicked, this, [this, fix] {
 			fix();

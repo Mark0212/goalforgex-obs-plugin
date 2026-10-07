@@ -8,6 +8,7 @@ the Free Software Foundation; either version 2 of the License, or
 (at your option) any later version.
 */
 #include "gfx-live.hpp"
+#include "gfx-theme.hpp"
 #include "gfx-http.hpp"
 #include "gfx-settings.hpp"
 
@@ -72,7 +73,7 @@ QPushButton *GfxLivePanel::lockLine(QWidget *parent, const QString &text)
 	auto *b = new QPushButton(QStringLiteral("🔒 %1 — Unlock with Pro").arg(text), parent);
 	b->setFlat(true);
 	b->setCursor(Qt::PointingHandCursor);
-	b->setStyleSheet(QStringLiteral("text-align:left; padding:2px 0;"));
+	gfx::theme::setRole(b, "link");
 	connect(b, &QPushButton::clicked, this,
 		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/subscribe"))); });
 	b->hide();
@@ -94,12 +95,14 @@ void GfxLivePanel::buildUi()
 	root->setSpacing(8);
 
 	stats_ = new QLabel(content);
+	stats_->setObjectName(QStringLiteral("gfxStats"));
 	stats_->setTextFormat(Qt::RichText);
 	root->addWidget(stats_);
 
 	empty_ = new QLabel(
 		QStringLiteral("Everything on this tab is switched off — turn cards back on in ⚙ Settings."), content);
 	empty_->setWordWrap(true);
+	empty_->setObjectName(QStringLiteral("gfxMuted"));
 	empty_->hide();
 	root->addWidget(empty_);
 
@@ -115,7 +118,9 @@ void GfxLivePanel::buildUi()
 	auto *tRow = new QHBoxLayout();
 	timerTime_ = new QLabel(QStringLiteral("0:00:00"), timerCard_);
 	timerTime_->setFont(big);
+	timerTime_->setObjectName(QStringLiteral("gfxBigTime"));
 	timerStatus_ = new QLabel(timerCard_);
+	timerStatus_->setObjectName(QStringLiteral("gfxStatusChip"));
 	tRow->addWidget(timerTime_);
 	tRow->addStretch(1);
 	tRow->addWidget(timerStatus_);
@@ -125,6 +130,7 @@ void GfxLivePanel::buildUi()
 	tc->setContentsMargins(0, 0, 0, 0);
 	tc->setSpacing(4);
 	timerToggle_ = smallBtn(timerCtl_, QStringLiteral("▶ Start"));
+	gfx::theme::setRole(timerToggle_, "primary");
 	auto *tPlus1 = smallBtn(timerCtl_, QStringLiteral("+1m"), QStringLiteral("Add 1 minute"));
 	auto *tPlus5 = smallBtn(timerCtl_, QStringLiteral("+5m"), QStringLiteral("Add 5 minutes"));
 	auto *tMinus1 = smallBtn(timerCtl_, QStringLiteral("−1m"), QStringLiteral("Remove 1 minute"));
@@ -182,7 +188,9 @@ void GfxLivePanel::buildUi()
 	mid.setPointSize(big.pointSize() - 4);
 	atTime_ = new QLabel(QStringLiteral("0:00:00"), atCard_);
 	atTime_->setFont(mid);
+	atTime_->setObjectName(QStringLiteral("gfxMidTime"));
 	atStatus_ = new QLabel(atCard_);
+	atStatus_->setObjectName(QStringLiteral("gfxStatusChip"));
 	aRow->addWidget(atTime_);
 	aRow->addStretch(1);
 	aRow->addWidget(atStatus_);
@@ -192,6 +200,7 @@ void GfxLivePanel::buildUi()
 	ac->setContentsMargins(0, 0, 0, 0);
 	ac->setSpacing(4);
 	atToggle_ = smallBtn(atCtl_, QStringLiteral("▶ Start"));
+	gfx::theme::setRole(atToggle_, "primary");
 	auto *aPlus1 = smallBtn(atCtl_, QStringLiteral("+1m"));
 	auto *aPlus5 = smallBtn(atCtl_, QStringLiteral("+5m"));
 	auto *aReset = smallBtn(atCtl_, QStringLiteral("Reset"));
@@ -225,9 +234,10 @@ void GfxLivePanel::buildUi()
 	gb->addLayout(gRow);
 	goalBar_ = new QProgressBar(goalCard_);
 	goalBar_->setTextVisible(false);
-	goalBar_->setMaximumHeight(6);
+	goalBar_->setFixedHeight(6);
 	gb->addWidget(goalBar_);
 	followerLbl_ = new QLabel(goalCard_);
+	followerLbl_->setObjectName(QStringLiteral("gfxMuted"));
 	gb->addWidget(followerLbl_);
 	connect(gMinus, &QPushButton::clicked, this, [this] { act(QStringLiteral("goal.adjust"), -1); });
 	connect(gPlus, &QPushButton::clicked, this, [this] { act(QStringLiteral("goal.adjust"), 1); });
@@ -237,8 +247,10 @@ void GfxLivePanel::buildUi()
 	QVBoxLayout *wb = nullptr;
 	wheelCard_ = makeCard(QStringLiteral("🎡 Spin wheel"), &wb);
 	auto *wRow = new QHBoxLayout();
-	wheelBtn_ = smallBtn(wheelCard_, QStringLiteral("Spin"));
+	wheelBtn_ = smallBtn(wheelCard_, QStringLiteral("🎡 Spin"));
+	gfx::theme::setRole(wheelBtn_, "primary");
 	wheelLast_ = new QLabel(wheelCard_);
+	wheelLast_->setObjectName(QStringLiteral("gfxMuted"));
 	wRow->addWidget(wheelBtn_);
 	wRow->addWidget(wheelLast_, 1);
 	wb->addLayout(wRow);
@@ -295,6 +307,7 @@ void GfxLivePanel::buildUi()
 	QVBoxLayout *acb = nullptr;
 	activityCard_ = makeCard(QStringLiteral("📋 Activity"), &acb);
 	activity_ = new QListWidget(activityCard_);
+	activity_->setObjectName(QStringLiteral("gfxActivity"));
 	activity_->setMinimumHeight(90);
 	activity_->setMaximumHeight(170);
 	activity_->setSelectionMode(QAbstractItemView::NoSelection);
@@ -347,8 +360,9 @@ void GfxLivePanel::setState(const LiveState &s)
 				      ? QStringLiteral("▶ Start")
 				      : (s.timer.paused ? QStringLiteral("▶ Resume") : QStringLiteral("⏸ Pause")));
 	timerStatus_->setText(!s.timer.active
-				      ? QStringLiteral("Stopped")
-				      : (s.timer.paused ? QStringLiteral("Paused") : QStringLiteral("Running")));
+				      ? QStringLiteral("STOPPED")
+				      : (s.timer.paused ? QStringLiteral("PAUSED") : QStringLiteral("RUNNING")));
+	gfx::theme::setState(timerStatus_, !s.timer.active ? "stopped" : (s.timer.paused ? "paused" : "running"));
 
 	atCtl_->setVisible(!s.actionTimer.locked);
 	atLock_->setVisible(s.actionTimer.locked);
@@ -358,11 +372,16 @@ void GfxLivePanel::setState(const LiveState &s)
 				   ? QStringLiteral("▶ Start")
 				   : (s.actionTimer.paused ? QStringLiteral("▶ Resume") : QStringLiteral("⏸ Pause")));
 	atStatus_->setText(!s.actionTimer.active
-				   ? QStringLiteral("Stopped")
-				   : (s.actionTimer.paused ? QStringLiteral("Paused") : QStringLiteral("Running")));
+				   ? QStringLiteral("STOPPED")
+				   : (s.actionTimer.paused ? QStringLiteral("PAUSED") : QStringLiteral("RUNNING")));
+	gfx::theme::setState(atStatus_,
+			     !s.actionTimer.active ? "stopped" : (s.actionTimer.paused ? "paused" : "running"));
 
 	// Goal
-	goalLbl_->setText(QStringLiteral("Subs  <b>%1</b> / %2").arg(s.goalCurrent).arg(s.goalTarget));
+	goalLbl_->setText(QStringLiteral("Subs  <b style='color:%1'>%2</b> / %3")
+				  .arg(QLatin1String(gfx::theme::kAmber))
+				  .arg(s.goalCurrent)
+				  .arg(s.goalTarget));
 	goalBar_->setRange(0, qMax(1, s.goalTarget));
 	goalBar_->setValue(qMin(s.goalCurrent, qMax(1, s.goalTarget)));
 	followerLbl_->setText(QStringLiteral("Followers  %1 / %2").arg(s.followerCurrent).arg(s.followerTarget));
@@ -468,7 +487,7 @@ void GfxLivePanel::tick()
 		stats_->setText(
 			QStringLiteral("<span style='opacity:.7'>Twitch isn't connected on goalforgex.com</span>"));
 	} else if (state_.isLive) {
-		QString t = QStringLiteral("<b style='color:#ef4444'>● LIVE</b>");
+		QString t = QStringLiteral("<b style='color:%1'>● LIVE</b>").arg(QLatin1String(gfx::theme::kRed));
 		if (state_.liveSince > 0)
 			t += QStringLiteral(" · ") + fmtClock((now - state_.liveSince) / 1000);
 		if (state_.viewers >= 0)

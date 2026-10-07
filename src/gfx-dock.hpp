@@ -54,6 +54,8 @@ private:
 	void setState(State s, const QString &message = QString(), bool isError = false);
 	void showMessage(const QString &text, bool isError = false);
 	void openSettings();
+	// Header ON AIR / REC chip (OBS's own output state + viewers from GoalForgeX)
+	void renderAirChip();
 
 	// Account linking (RFC 8628 device flow)
 	void startConnect();
@@ -94,6 +96,8 @@ private:
 	void configureSelected();
 
 	// Header
+	QLabel *brandLbl_ = nullptr;
+	QLabel *airChip_ = nullptr;
 	QLabel *statusLbl_ = nullptr;
 	QPushButton *connectBtn_ = nullptr;
 	QToolButton *menuBtn_ = nullptr;
@@ -105,6 +109,8 @@ private:
 	QWidget *requiredPanel_ = nullptr;
 	QLabel *requiredLbl_ = nullptr;
 	QPushButton *requiredBtn_ = nullptr;
+	// Shown while disconnected: what the plugin does + one big Connect button.
+	QWidget *welcomePanel_ = nullptr;
 	// Linking
 	QWidget *linkPanel_ = nullptr;
 	QLabel *codeLbl_ = nullptr;
@@ -137,6 +143,9 @@ private:
 	QTimer stateTimer_;
 	QTimer updateTimer_;
 	QTimer msgClear_;
+	QTimer clockTimer_; // 1 s — the header's ON AIR clock
+	qint64 streamStartMs_ = 0;
+	qint64 recordStartMs_ = 0;
 
 	gfx::ReactionEngine reactions_;
 

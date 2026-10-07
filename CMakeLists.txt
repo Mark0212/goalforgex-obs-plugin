@@ -74,6 +74,8 @@ target_sources(
     src/gfx-sources.hpp
     src/gfx-state.cpp
     src/gfx-state.hpp
+    src/gfx-theme.cpp
+    src/gfx-theme.hpp
     src/gfx-update.cpp
     src/gfx-update.hpp
 )

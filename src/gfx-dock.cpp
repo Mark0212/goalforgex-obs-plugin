@@ -14,6 +14,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-http.hpp"
 #include "gfx-live.hpp"
 #include "gfx-settings.hpp"
+#include "gfx-theme.hpp"
 
 #include <obs-module.h>
 #include <plugin-support.h>
@@ -27,6 +28,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFont>
+#include <QFrame>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QGuiApplication>
@@ -88,6 +90,11 @@ const QList<QPair<QString, Place>> kPlaces = {
 GfxDock::GfxDock(QWidget *parent) : QWidget(parent), reactions_(this)
 {
 	setMinimumWidth(300);
+	// The whole look lives in one style sheet on this widget — it cascades to
+	// the dock's children (and the dialogs/menus it opens) and nothing else.
+	setObjectName(QStringLiteral("GfxDock"));
+	setAttribute(Qt::WA_StyledBackground, true);
+	setStyleSheet(theme::dockStyleSheet());
 	loadSettings();
 	buildUi();
 
@@ -105,7 +112,16 @@ GfxDock::GfxDock(QWidget *parent) : QWidget(parent), reactions_(this)
 	updateTimer_.setInterval(6 * 60 * 60 * 1000);
 	connect(&updateTimer_, &QTimer::timeout, this, [this] { checkForUpdate(); });
 	msgClear_.setSingleShot(true);
-	connect(&msgClear_, &QTimer::timeout, this, [this] { msgLbl_->clear(); });
+	connect(&msgClear_, &QTimer::timeout, this, [this] {
+		msgLbl_->clear();
+		msgLbl_->hide();
+	});
+	clockTimer_.setInterval(1000);
+	connect(&clockTimer_, &QTimer::timeout, this, [this] {
+		if (isVisible())
+			renderAirChip();
+	});
+	clockTimer_.start();
 
 	Auth::instance().load();
 	if (Auth::instance().connected())
@@ -119,19 +135,39 @@ GfxDock::GfxDock(QWidget *parent) : QWidget(parent), reactions_(this)
 void GfxDock::buildUi()
 {
 	auto *root = new QVBoxLayout(this);
-	root->setContentsMargins(8, 8, 8, 8);
-	root->setSpacing(6);
+	root->setContentsMargins(0, 0, 0, 0);
+	root->setSpacing(0);
 
-	// Header: status · Connect · ⚙
-	auto *head = new QHBoxLayout();
-	statusLbl_ = new QLabel(this);
-	statusLbl_->setWordWrap(true);
+	// ── Header: mark · GoalForgeX / account · ON AIR chip · Reconnect · ⚙ ──
+	auto *header = new QFrame(this);
+	header->setObjectName(QStringLiteral("gfxHeader"));
+	auto *head = new QHBoxLayout(header);
+	head->setContentsMargins(10, 8, 6, 8);
+	head->setSpacing(8);
+	brandLbl_ = new QLabel(header);
+	brandLbl_->setObjectName(QStringLiteral("gfxBrandMark"));
+	brandLbl_->setPixmap(theme::brandMark(28, devicePixelRatioF()));
+	brandLbl_->setFixedSize(28, 28);
+	auto *titles = new QVBoxLayout();
+	titles->setContentsMargins(0, 0, 0, 0);
+	titles->setSpacing(0);
+	auto *brandName = new QLabel(QStringLiteral("GoalForgeX"), header);
+	brandName->setObjectName(QStringLiteral("gfxBrandName"));
+	statusLbl_ = new QLabel(header);
+	statusLbl_->setObjectName(QStringLiteral("gfxBrandSub"));
 	statusLbl_->setTextFormat(Qt::RichText);
-	connectBtn_ = new QPushButton(QStringLiteral("Connect"), this);
-	menuBtn_ = new QToolButton(this);
+	titles->addWidget(brandName);
+	titles->addWidget(statusLbl_);
+	airChip_ = new QLabel(header);
+	airChip_->setObjectName(QStringLiteral("gfxAirChip"));
+	airChip_->setAlignment(Qt::AlignCenter);
+	connectBtn_ = new QPushButton(QStringLiteral("Connect"), header);
+	theme::setRole(connectBtn_, "primary");
+	menuBtn_ = new QToolButton(header);
 	menuBtn_->setText(QStringLiteral("⚙"));
 	menuBtn_->setToolTip(QStringLiteral("Settings"));
 	menuBtn_->setPopupMode(QToolButton::InstantPopup);
+	theme::setRole(menuBtn_, "ghost");
 	auto *menu = new QMenu(menuBtn_);
 	connect(menu->addAction(QStringLiteral("Settings…")), &QAction::triggered, this, [this] { openSettings(); });
 	connect(menu->addAction(QStringLiteral("Manage connected devices…")), &QAction::triggered, this,
@@ -147,23 +183,34 @@ void GfxDock::buildUi()
 	disconnectAct_ = menu->addAction(QStringLiteral("Disconnect this OBS"));
 	connect(disconnectAct_, &QAction::triggered, this, [this] { disconnectAccount(); });
 	menuBtn_->setMenu(menu);
-	head->addWidget(statusLbl_, 1);
+	head->addWidget(brandLbl_);
+	head->addLayout(titles, 1);
+	head->addWidget(airChip_);
 	head->addWidget(connectBtn_);
 	head->addWidget(menuBtn_);
-	root->addLayout(head);
+	root->addWidget(header);
 	connect(connectBtn_, &QPushButton::clicked, this, [this] { startConnect(); });
 
-	// Update line: "⬆ 1.2.0 is out [Update]" → downloading → "ready [Restart now]"
-	updateRow_ = new QWidget(this);
+	// Everything below the header gets the page margins.
+	auto *body = new QVBoxLayout();
+	body->setContentsMargins(10, 8, 10, 8);
+	body->setSpacing(8);
+	root->addLayout(body, 1);
+
+	// Update bar: "⬆ 1.2.0 is out [Update]" → downloading → "ready [Restart now]"
+	auto *updateBar = new QFrame(this);
+	updateBar->setObjectName(QStringLiteral("gfxUpdateBar"));
+	updateRow_ = updateBar;
 	auto *ur = new QHBoxLayout(updateRow_);
-	ur->setContentsMargins(0, 0, 0, 0);
+	ur->setContentsMargins(10, 6, 6, 6);
 	updateLbl_ = new QLabel(updateRow_);
 	updateLbl_->setWordWrap(true);
 	updateBtn_ = new QPushButton(updateRow_);
+	theme::setRole(updateBtn_, "primary");
 	ur->addWidget(updateLbl_, 1);
 	ur->addWidget(updateBtn_);
 	updateRow_->hide();
-	root->addWidget(updateRow_);
+	body->addWidget(updateRow_);
 	connect(updateBtn_, &QPushButton::clicked, this, [this] {
 		if (upd_ == Upd::Ready)
 			restartAndUpdate();
@@ -172,15 +219,21 @@ void GfxDock::buildUi()
 	});
 
 	// Shown instead of the tabs when this version is no longer supported.
-	requiredPanel_ = new QWidget(this);
+	auto *required = new QFrame(this);
+	required->setObjectName(QStringLiteral("gfxRequired"));
+	requiredPanel_ = required;
 	auto *rp = new QVBoxLayout(requiredPanel_);
-	rp->setContentsMargins(0, 12, 0, 12);
+	rp->setContentsMargins(16, 18, 16, 16);
+	rp->setSpacing(10);
 	requiredLbl_ = new QLabel(requiredPanel_);
 	requiredLbl_->setWordWrap(true);
 	requiredLbl_->setAlignment(Qt::AlignCenter);
 	requiredBtn_ = new QPushButton(QStringLiteral("Update now"), requiredPanel_);
+	requiredBtn_->setObjectName(QStringLiteral("gfxBigBtn"));
+	theme::setRole(requiredBtn_, "primary");
 	auto *requiredNote = new QLabel(QStringLiteral("Widgets already in your scenes keep working in the meantime."),
 					requiredPanel_);
+	requiredNote->setObjectName(QStringLiteral("gfxMuted"));
 	requiredNote->setWordWrap(true);
 	requiredNote->setAlignment(Qt::AlignCenter);
 	rp->addWidget(requiredLbl_);
@@ -188,7 +241,7 @@ void GfxDock::buildUi()
 	rp->addWidget(requiredNote);
 	rp->addStretch(1);
 	requiredPanel_->hide();
-	root->addWidget(requiredPanel_, 1);
+	body->addWidget(requiredPanel_, 1);
 	connect(requiredBtn_, &QPushButton::clicked, this, [this] {
 		if (upd_ == Upd::Ready)
 			restartAndUpdate();
@@ -198,40 +251,111 @@ void GfxDock::buildUi()
 			QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/obs")));
 	});
 
+	// Welcome (disconnected): what this does + one big Connect button.
+	auto *welcome = new QFrame(this);
+	welcome->setObjectName(QStringLiteral("gfxWelcome"));
+	welcomePanel_ = welcome;
+	auto *wl = new QVBoxLayout(welcomePanel_);
+	wl->setContentsMargins(18, 20, 18, 18);
+	wl->setSpacing(10);
+	auto *heroMark = new QLabel(welcomePanel_);
+	heroMark->setPixmap(theme::brandMark(56, devicePixelRatioF()));
+	heroMark->setAlignment(Qt::AlignHCenter);
+	auto *hero = new QLabel(QStringLiteral("Run your stream from OBS"), welcomePanel_);
+	hero->setObjectName(QStringLiteral("gfxHero"));
+	hero->setAlignment(Qt::AlignHCenter);
+	hero->setWordWrap(true);
+	auto *heroSub = new QLabel(
+		QStringLiteral(
+			"Connect your GoalForgeX account to add widgets in one click and run timers, goals, the wheel and alerts without leaving OBS."),
+		welcomePanel_);
+	heroSub->setObjectName(QStringLiteral("gfxMuted"));
+	heroSub->setAlignment(Qt::AlignHCenter);
+	heroSub->setWordWrap(true);
+	auto *features = new QLabel(welcomePanel_);
+	features->setObjectName(QStringLiteral("gfxFeatures"));
+	features->setTextFormat(Qt::RichText);
+	features->setWordWrap(true);
+	features->setText(
+		QStringLiteral(
+			"<table cellspacing='0' cellpadding='3'>"
+			"<tr><td style='color:%1'>▸</td><td>Widgets added to your scenes, already sized and placed</td></tr>"
+			"<tr><td style='color:%1'>▸</td><td>Live controls and OBS hotkeys for timers, goals and alerts</td></tr>"
+			"<tr><td style='color:%1'>▸</td><td>Reactions that switch scenes when alerts fire</td></tr>"
+			"<tr><td style='color:%1'>▸</td><td>A health check that fixes setup problems in one click</td></tr>"
+			"</table>")
+			.arg(QLatin1String(theme::kAmber)));
+	auto *welcomeBtn = new QPushButton(QStringLiteral("Connect GoalForgeX"), welcomePanel_);
+	welcomeBtn->setObjectName(QStringLiteral("gfxBigBtn"));
+	welcomeBtn->setCursor(Qt::PointingHandCursor);
+	theme::setRole(welcomeBtn, "primary");
+	auto *welcomeNote = new QLabel(
+		QStringLiteral("Opens your browser to approve this OBS. No password is stored here."), welcomePanel_);
+	welcomeNote->setObjectName(QStringLiteral("gfxMuted"));
+	welcomeNote->setAlignment(Qt::AlignHCenter);
+	welcomeNote->setWordWrap(true);
+	wl->addStretch(1);
+	wl->addWidget(heroMark);
+	wl->addWidget(hero);
+	wl->addWidget(heroSub);
+	wl->addSpacing(4);
+	wl->addWidget(features);
+	wl->addSpacing(4);
+	wl->addWidget(welcomeBtn);
+	wl->addWidget(welcomeNote);
+	wl->addStretch(1);
+	welcomePanel_->hide();
+	body->addWidget(welcomePanel_, 1);
+	connect(welcomeBtn, &QPushButton::clicked, this, [this] { startConnect(); });
+
 	// Linking panel (device code)
-	linkPanel_ = new QWidget(this);
+	auto *link = new QFrame(this);
+	link->setObjectName(QStringLiteral("gfxLinkPanel"));
+	linkPanel_ = link;
 	auto *lp = new QVBoxLayout(linkPanel_);
-	lp->setContentsMargins(0, 4, 0, 4);
-	auto *lpTitle =
-		new QLabel(QStringLiteral("Approve this OBS in your browser. Check the code matches:"), linkPanel_);
-	lpTitle->setWordWrap(true);
+	lp->setContentsMargins(16, 16, 16, 14);
+	lp->setSpacing(10);
+	auto *lpTitle = new QLabel(QStringLiteral("Approve this OBS"), linkPanel_);
+	lpTitle->setObjectName(QStringLiteral("gfxSectionTitle"));
+	auto *lpSub = new QLabel(
+		QStringLiteral("Your browser opened GoalForgeX. Check the code there matches this one:"), linkPanel_);
+	lpSub->setObjectName(QStringLiteral("gfxMuted"));
+	lpSub->setWordWrap(true);
 	codeLbl_ = new QLabel(linkPanel_);
+	codeLbl_->setObjectName(QStringLiteral("gfxCode"));
 	QFont f = codeLbl_->font();
-	f.setPointSize(f.pointSize() + 8);
+	f.setPointSize(f.pointSize() + 10);
 	f.setBold(true);
 	f.setFamily(QStringLiteral("Consolas"));
 	f.setStyleHint(QFont::Monospace);
+	f.setLetterSpacing(QFont::AbsoluteSpacing, 3);
 	codeLbl_->setFont(f);
 	codeLbl_->setAlignment(Qt::AlignCenter);
 	codeLbl_->setTextInteractionFlags(Qt::TextSelectableByMouse);
 	linkHint_ = new QLabel(linkPanel_);
+	linkHint_->setObjectName(QStringLiteral("gfxMuted"));
 	linkHint_->setWordWrap(true);
 	linkHint_->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::LinksAccessibleByMouse);
 	linkHint_->setOpenExternalLinks(true);
 	auto *lpRow = new QHBoxLayout();
+	lpRow->setSpacing(6);
 	auto *openBtn = new QPushButton(QStringLiteral("Open browser again"), linkPanel_);
+	theme::setRole(openBtn, "primary");
 	auto *copyBtn = new QPushButton(QStringLiteral("Copy code"), linkPanel_);
 	auto *cancelBtn = new QPushButton(QStringLiteral("Cancel"), linkPanel_);
+	theme::setRole(cancelBtn, "ghost");
 	lpRow->addWidget(openBtn);
 	lpRow->addWidget(copyBtn);
 	lpRow->addStretch(1);
 	lpRow->addWidget(cancelBtn);
 	lp->addWidget(lpTitle);
+	lp->addWidget(lpSub);
 	lp->addWidget(codeLbl_);
 	lp->addWidget(linkHint_);
 	lp->addLayout(lpRow);
 	lp->addStretch(1);
-	root->addWidget(linkPanel_, 1);
+	linkPanel_->hide();
+	body->addWidget(linkPanel_, 1);
 	connect(openBtn, &QPushButton::clicked, this, [this] { QDesktopServices::openUrl(QUrl(verifyUrl_)); });
 	connect(copyBtn, &QPushButton::clicked, this, [this] {
 		QGuiApplication::clipboard()->setText(userCode_);
@@ -247,25 +371,26 @@ void GfxDock::buildUi()
 	widgetsPage_ = buildWidgetsPage();
 	reactionsPanel_ = new GfxReactionsPanel(&reactions_, tabs_);
 	healthPanel_ = new GfxHealthPanel(tabs_);
-	root->addWidget(tabs_, 1);
+	body->addWidget(tabs_, 1);
 	rebuildTabs();
 
 	msgLbl_ = new QLabel(this);
+	msgLbl_->setObjectName(QStringLiteral("gfxMsg"));
 	msgLbl_->setWordWrap(true);
 	msgLbl_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-	root->addWidget(msgLbl_);
+	msgLbl_->hide();
+	body->addWidget(msgLbl_);
 
 	versionLbl_ = new QLabel(this);
+	versionLbl_->setObjectName(QStringLiteral("gfxFooter"));
 	versionLbl_->setAlignment(Qt::AlignRight);
 	versionLbl_->setTextInteractionFlags(Qt::TextSelectableByMouse);
 	const QString obsVersion = QString::fromUtf8(obs_get_version_string());
 	versionLbl_->setToolTip(
 		QStringLiteral("GoalForgeX for OBS %1 · OBS %2").arg(QString::fromUtf8(PLUGIN_VERSION), obsVersion));
-	QFont vf = versionLbl_->font();
-	vf.setPointSizeF(vf.pointSizeF() * 0.85);
-	versionLbl_->setFont(vf);
-	root->addWidget(versionLbl_);
+	body->addWidget(versionLbl_);
 	renderVersion();
+	renderAirChip();
 }
 
 QWidget *GfxDock::buildWidgetsPage()
@@ -276,16 +401,21 @@ QWidget *GfxDock::buildWidgetsPage()
 	mp->setSpacing(6);
 
 	auto *sceneRow = new QHBoxLayout();
-	sceneRow->addWidget(new QLabel(QStringLiteral("Scene"), page));
+	auto *sceneLbl = new QLabel(QStringLiteral("Scene"), page);
+	sceneLbl->setObjectName(QStringLiteral("gfxFieldLabel"));
+	sceneRow->addWidget(sceneLbl);
 	sceneCombo_ = new QComboBox(page);
 	sceneCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 	auto *refreshBtn = new QToolButton(page);
 	refreshBtn->setText(QStringLiteral("↻"));
 	refreshBtn->setToolTip(QStringLiteral("Reload your widget list from GoalForgeX"));
+	theme::setRole(refreshBtn, "ghost");
 	auto *starterBtn = new QToolButton(page);
 	starterBtn->setText(QStringLiteral("✨ Starter layout"));
 	starterBtn->setToolTip(
 		QStringLiteral("Add alerts, chat box, goal and timer to this scene, already positioned"));
+	starterBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+	theme::setRole(starterBtn, "soft");
 	sceneRow->addWidget(sceneCombo_, 1);
 	sceneRow->addWidget(refreshBtn);
 	mp->addLayout(sceneRow);
@@ -308,6 +438,8 @@ QWidget *GfxDock::buildWidgetsPage()
 	toggleBtn_ = new QPushButton(QStringLiteral("Hide"), page);
 	removeBtn_ = new QPushButton(QStringLiteral("Remove"), page);
 	removeBtn_->setToolTip(QStringLiteral("Remove from this scene"));
+	theme::setRole(addBtn_, "primary");
+	theme::setRole(removeBtn_, "danger");
 	grid->addWidget(addBtn_, 0, 0);
 	grid->addWidget(toggleBtn_, 0, 1);
 	grid->addWidget(removeBtn_, 0, 2);
@@ -375,7 +507,10 @@ void GfxDock::openSettings()
 	Settings &s = settings();
 	QDialog dlg(this);
 	dlg.setWindowTitle(QStringLiteral("GoalForgeX settings"));
+	dlg.setMinimumWidth(440);
 	auto *root = new QVBoxLayout(&dlg);
+	root->setContentsMargins(14, 12, 14, 12);
+	root->setSpacing(6);
 
 	struct Opt {
 		QCheckBox *box;
@@ -417,8 +552,11 @@ void GfxDock::openSettings()
 			"Hotkeys for timers, goal, wheel, counters and alerts are in OBS → Settings → Hotkeys (search “GoalForgeX”)."),
 		&dlg);
 	hint->setWordWrap(true);
+	hint->setObjectName(QStringLiteral("gfxMuted"));
 	root->addWidget(hint);
 	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+	if (QPushButton *okBtn = buttons->button(QDialogButtonBox::Ok))
+		theme::setRole(okBtn, "primary");
 	root->addWidget(buttons);
 	connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
 	connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
@@ -440,21 +578,25 @@ void GfxDock::setState(State s, const QString &message, bool isError)
 	const QString who = (c.displayName.isEmpty() ? c.username : c.displayName).toHtmlEscaped();
 	switch (s) {
 	case State::Disconnected:
-		statusLbl_->setText(QStringLiteral("<b>GoalForgeX</b> — not connected"));
+		statusLbl_->setText(QStringLiteral("Not connected"));
 		break;
 	case State::Linking:
-		statusLbl_->setText(QStringLiteral("<b>Connecting…</b>"));
+		statusLbl_->setText(QStringLiteral("Connecting…"));
 		break;
 	case State::Connected:
-		statusLbl_->setText(QStringLiteral("<b>%1</b>").arg(who));
+		statusLbl_->setText(
+			QStringLiteral("<span style='color:%1'>●</span> %2").arg(QLatin1String(theme::kGreen), who));
 		break;
 	case State::NeedsReconnect:
-		statusLbl_->setText(QStringLiteral("<b>⚠ Disconnected</b>"));
+		statusLbl_->setText(QStringLiteral("<span style='color:%1'>⚠ Needs reconnecting</span>")
+					    .arg(QLatin1String(theme::kAmber)));
 		break;
 	}
-	connectBtn_->setVisible(s == State::Disconnected || s == State::NeedsReconnect);
-	connectBtn_->setText(s == State::NeedsReconnect ? QStringLiteral("Reconnect") : QStringLiteral("Connect"));
+	// Disconnected has the big Connect button on the welcome card instead.
+	connectBtn_->setVisible(s == State::NeedsReconnect);
+	connectBtn_->setText(QStringLiteral("Reconnect"));
 	disconnectAct_->setEnabled(s == State::Connected || s == State::NeedsReconnect);
+	welcomePanel_->setVisible(s == State::Disconnected && !updateRequired_);
 	linkPanel_->setVisible(s == State::Linking);
 	tabs_->setVisible((s == State::Connected || s == State::NeedsReconnect) && !updateRequired_);
 	requiredPanel_->setVisible(updateRequired_ && s != State::Linking);
@@ -469,16 +611,17 @@ void GfxDock::setState(State s, const QString &message, bool isError)
 	if (!message.isNull())
 		showMessage(message, isError);
 	else if (s == State::Disconnected)
-		showMessage(QStringLiteral(
-			"Connect your GoalForgeX account to control your widgets, timers and alerts from OBS."));
+		showMessage(QString()); // the welcome card explains what Connect does
 	updateControls();
+	renderAirChip();
 	updateHealthContext();
 }
 
 void GfxDock::showMessage(const QString &text, bool isError)
 {
-	msgLbl_->setStyleSheet(isError ? QStringLiteral("color:#f87171;") : QString());
+	theme::setState(msgLbl_, isError ? "error" : "info");
 	msgLbl_->setText(text);
+	msgLbl_->setVisible(!text.isEmpty());
 	// Confirmations fade on their own; errors stay until something replaces them.
 	if (!isError && !text.isEmpty())
 		msgClear_.start(5000);
@@ -706,6 +849,7 @@ void GfxDock::pollState()
 			lastState_ = st;
 			livePanel_->setState(st);
 			livePanel_->addEvents(fresh);
+			renderAirChip();
 			// History from before OBS connected is shown, never reacted to.
 			if (!firstOrReset)
 				reactions_.onEvents(fresh);
@@ -933,7 +1077,7 @@ void GfxDock::renderVersion()
 {
 	const QString current = QStringLiteral("v%1").arg(QString::fromUtf8(PLUGIN_VERSION));
 	QString status;
-	QString color = QStringLiteral("#9ca3af");
+	const char *tone = "muted";
 	switch (verCheck_) {
 	case VerCheck::Checking:
 		status = QStringLiteral("checking for updates…");
@@ -944,15 +1088,46 @@ void GfxDock::renderVersion()
 	case VerCheck::Done:
 		if (latestVersion_.isEmpty()) {
 			status = QStringLiteral("✓ up to date");
-			color = QStringLiteral("#4ade80");
+			tone = "ok";
 		} else {
 			status = QStringLiteral("⬆ v%1 available").arg(latestVersion_);
-			color = QStringLiteral("#fbbf24");
+			tone = "warn";
 		}
 		break;
 	}
-	versionLbl_->setStyleSheet(QStringLiteral("color:%1;").arg(color));
-	versionLbl_->setText(QStringLiteral("%1 · %2").arg(current, status));
+	theme::setState(versionLbl_, tone);
+	versionLbl_->setText(QStringLiteral("GoalForgeX for OBS %1 · %2").arg(current, status));
+}
+
+// ON AIR (red, stream clock) / REC (amber, recording clock) / OFF AIR, from
+// OBS's own outputs — plus the Twitch viewer count GoalForgeX reports.
+void GfxDock::renderAirChip()
+{
+	if (!airChip_)
+		return;
+	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+	const auto clock = [now](qint64 since) {
+		return since > 0 ? QStringLiteral(" ") + fmtSecs(static_cast<int>((now - since) / 1000)) : QString();
+	};
+	const bool streaming = obs_frontend_streaming_active();
+	const bool recording = obs_frontend_recording_active();
+	if (streaming) {
+		QString t = QStringLiteral("● ON AIR") + clock(streamStartMs_);
+		if (lastState_.valid && lastState_.isLive && lastState_.viewers >= 0)
+			t += QStringLiteral(" · 👁 %1").arg(lastState_.viewers);
+		theme::setState(airChip_, "onair");
+		airChip_->setText(t);
+		airChip_->setToolTip(recording ? QStringLiteral("Streaming and recording")
+					       : QStringLiteral("Streaming"));
+	} else if (recording) {
+		theme::setState(airChip_, "rec");
+		airChip_->setText(QStringLiteral("● REC") + clock(recordStartMs_));
+		airChip_->setToolTip(QStringLiteral("Recording"));
+	} else {
+		theme::setState(airChip_, "off");
+		airChip_->setText(QStringLiteral("OFF AIR"));
+		airChip_->setToolTip(QStringLiteral("Not streaming or recording"));
+	}
 }
 
 void GfxDock::renderUpdate()
@@ -1531,6 +1706,12 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		// Even when not connected — an update may be required to connect at all.
 		checkForUpdate();
 		updateTimer_.start();
+		// Already live when OBS finished loading (rare) — start the clocks now.
+		if (obs_frontend_streaming_active() && !streamStartMs_)
+			streamStartMs_ = QDateTime::currentMSecsSinceEpoch();
+		if (obs_frontend_recording_active() && !recordStartMs_)
+			recordStartMs_ = QDateTime::currentMSecsSinceEpoch();
+		renderAirChip();
 		break;
 	case OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED:
 	case OBS_FRONTEND_EVENT_SCENE_CHANGED:
@@ -1555,10 +1736,22 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		sceneCombo_->blockSignals(false);
 		break;
 	case OBS_FRONTEND_EVENT_STREAMING_STARTED:
+		streamStartMs_ = QDateTime::currentMSecsSinceEpoch();
+		renderAirChip();
 		streamingChanged(true);
 		break;
 	case OBS_FRONTEND_EVENT_STREAMING_STOPPED:
+		streamStartMs_ = 0;
+		renderAirChip();
 		streamingChanged(false);
+		break;
+	case OBS_FRONTEND_EVENT_RECORDING_STARTED:
+		recordStartMs_ = QDateTime::currentMSecsSinceEpoch();
+		renderAirChip();
+		break;
+	case OBS_FRONTEND_EVENT_RECORDING_STOPPED:
+		recordStartMs_ = 0;
+		renderAirChip();
 		break;
 	case OBS_FRONTEND_EVENT_EXIT:
 		// Downloaded + verified update: install it now that OBS is closing
@@ -1574,6 +1767,7 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		pollTimer_.stop();
 		stateTimer_.stop();
 		updateTimer_.stop();
+		clockTimer_.stop();
 		httpBeginShutdown();
 		break;
 	default:

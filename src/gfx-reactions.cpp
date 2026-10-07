@@ -8,6 +8,7 @@ the Free Software Foundation; either version 2 of the License, or
 (at your option) any later version.
 */
 #include "gfx-reactions.hpp"
+#include "gfx-theme.hpp"
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
@@ -172,6 +173,7 @@ GfxReactionsPanel::GfxReactionsPanel(ReactionEngine *engine, QWidget *parent) : 
 			"Make OBS react to your stream — e.g. switch to a celebration scene when your sub goal is hit, or show a “welcome raiders” source on a raid."),
 		this);
 	intro->setWordWrap(true);
+	intro->setObjectName(QStringLiteral("gfxMuted"));
 	root->addWidget(intro);
 
 	list_ = new QListWidget(this);
@@ -183,6 +185,9 @@ GfxReactionsPanel::GfxReactionsPanel(ReactionEngine *engine, QWidget *parent) : 
 	remove_ = new QPushButton(QStringLiteral("Remove"), this);
 	test_ = new QPushButton(QStringLiteral("▶ Test"), this);
 	test_->setToolTip(QStringLiteral("Run the selected reaction now"));
+	theme::setRole(add, "primary");
+	theme::setRole(remove_, "danger");
+	theme::setRole(test_, "soft");
 	row->addWidget(add);
 	row->addWidget(edit_);
 	row->addWidget(remove_);
