@@ -40,11 +40,23 @@ OutputBaseFilename=goalforgex-{#AppVersion}-windows-x64-installer
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; Broadcast Pro branding (installer/assets — see assets/README.md). Several sizes
+; each: Windows picks the one that matches the display scaling.
+SetupIconFile=assets\goalforgex.ico
+UninstallDisplayIcon={uninstallexe}
+WizardImageFile=assets\wizard-164.bmp,assets\wizard-192.bmp,assets\wizard-246.bmp,assets\wizard-328.bmp
+WizardSmallImageFile=assets\small-55.bmp,assets\small-83.bmp,assets\small-110.bmp
+DisableWelcomePage=no
+
 UninstallDisplayName=GoalForgeX for OBS
 CloseApplications=no
 
 [Messages]
-FinishedLabel=GoalForgeX for OBS is installed.%n%nOpen OBS Studio and choose Docks → GoalForgeX, then click Connect GoalForgeX.
+WelcomeLabel1=Welcome to GoalForgeX for OBS
+WelcomeLabel2=This adds the GoalForgeX dock to OBS Studio: one-click widgets, live controls for your timers, goals, wheel and alerts, scene reactions and a setup health check.%n%nPlease close OBS Studio before you continue.
+FinishedHeadingLabel=You're ready to go live
+FinishedLabelNoIcons=GoalForgeX for OBS {#AppVersion} is installed.%n%nOpen OBS Studio, choose Docks → GoalForgeX, then click Connect GoalForgeX to link your account.
+FinishedLabel=GoalForgeX for OBS {#AppVersion} is installed.%n%nOpen OBS Studio, choose Docks → GoalForgeX, then click Connect GoalForgeX to link your account.
 
 [Files]
 ; OBS 33+ (new layout)
