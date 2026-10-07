@@ -16,16 +16,23 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QHBoxLayout>
+#include <QHash>
+#include <QIcon>
+#include <QImage>
 #include <QJsonArray>
 #include <QJsonValue>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPixmap>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollBar>
+#include <QSize>
 #include <QTextBrowser>
 #include <QTextDocument>
 #include <QTimer>
 #include <QUrl>
+#include <QVariant>
 #include <QVBoxLayout>
 
 #include <utility>
@@ -34,10 +41,52 @@ using namespace gfx;
 
 namespace {
 
-constexpr int kKeep = 300;                 // messages kept in the panel
-constexpr int kMaxLen = 500;               // Twitch and Kick both cap at 500
-constexpr const char *kTwitch = "#9146ff"; // platform brand colours
-constexpr const char *kKick = "#53fc18";
+constexpr int kKeep = 300;   // messages kept in the panel
+constexpr int kMaxLen = 500; // Twitch and Kick both cap at 500
+constexpr int kIconPx = 15;  // platform icon size in a chat line (logical px)
+
+// Platform icon (src/resources/*.png, 64 px) scaled once per size + screen
+// scale with smooth filtering — the text renderer would otherwise shrink it
+// on every repaint and blur it.
+QImage platformIcon(const QString &platform, int logicalPx, qreal dpr)
+{
+	static QHash<QString, QImage> cache;
+	const bool kick = platform == QLatin1String("kick");
+	const QString key = QStringLiteral("%1/%2/%3").arg(kick ? 1 : 0).arg(logicalPx).arg(dpr);
+	auto it = cache.constFind(key);
+	if (it != cache.constEnd())
+		return it.value();
+	const QImage src(kick ? QStringLiteral(":/goalforgex/kick.png") : QStringLiteral(":/goalforgex/twitch.png"));
+	QImage img;
+	if (!src.isNull()) {
+		const int px = qMax(1, qRound(logicalPx * dpr));
+		img = src.scaled(px, px, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+		img.setDevicePixelRatio(dpr);
+	}
+	cache.insert(key, img);
+	return img;
+}
+
+// Profile links: only plain usernames ever become a URL.
+const QRegularExpression &loginRe()
+{
+	static const QRegularExpression re(QStringLiteral("^[A-Za-z0-9_][A-Za-z0-9_-]{0,39}$"));
+	return re;
+}
+
+// The feed: serves the platform icons to the HTML as gfx:twitch / gfx:kick.
+class ChatView : public QTextBrowser {
+public:
+	using QTextBrowser::QTextBrowser;
+
+protected:
+	QVariant loadResource(int type, const QUrl &name) override
+	{
+		if (type == QTextDocument::ImageResource && name.scheme() == QLatin1String("gfx"))
+			return QVariant::fromValue(platformIcon(name.path(), kIconPx, devicePixelRatioF()));
+		return QTextBrowser::loadResource(type, name);
+	}
+};
 
 // Chatter colours are picked for light AND dark chats — lift the dark ones so
 // they stay readable on the dock's graphite background.
@@ -124,9 +173,25 @@ void GfxChatPanel::buildUi()
 	root->addLayout(top);
 
 	// Feed
-	view_ = new QTextBrowser(main_);
+	view_ = new ChatView(main_);
 	view_->setObjectName(QStringLiteral("gfxChatView"));
 	view_->setOpenLinks(false);
+	// Names link to profile:<platform>:<login> → open that chatter's channel page.
+	connect(view_, &QTextBrowser::anchorClicked, this, [](const QUrl &u) {
+		if (u.scheme() != QLatin1String("profile"))
+			return;
+		const QString path = u.path();
+		const qsizetype colon = path.indexOf(QLatin1Char(':'));
+		if (colon <= 0)
+			return;
+		const QString platform = path.left(colon), login = path.mid(colon + 1).toLower();
+		if (!loginRe().match(login).hasMatch())
+			return;
+		if (platform == QLatin1String("twitch"))
+			QDesktopServices::openUrl(QUrl(QStringLiteral("https://www.twitch.tv/") + login));
+		else if (platform == QLatin1String("kick"))
+			QDesktopServices::openUrl(QUrl(QStringLiteral("https://kick.com/") + login));
+	});
 	view_->setOpenExternalLinks(false);
 	view_->setFrameShape(QFrame::NoFrame);
 	view_->setMinimumHeight(160);
@@ -160,6 +225,11 @@ void GfxChatPanel::buildUi()
 	};
 	toTwitch_ = target(QStringLiteral("Twitch"), "twitch");
 	toKick_ = target(QStringLiteral("Kick"), "kick");
+	for (QPushButton *b : {toTwitch_, toKick_}) {
+		const QString p = b == toKick_ ? QStringLiteral("kick") : QStringLiteral("twitch");
+		b->setIcon(QIcon(QPixmap::fromImage(platformIcon(p, 16, devicePixelRatioF()))));
+		b->setIconSize(QSize(16, 16));
+	}
 	toTwitch_->setChecked(settings().chatToTwitch);
 	toKick_->setChecked(settings().chatToKick);
 	input_ = new QLineEdit(main_);
@@ -296,12 +366,10 @@ QString GfxChatPanel::lineHtml(const ChatMessage &m) const
 	const bool kick = m.platform == QLatin1String("kick");
 	QString h = QStringLiteral("<p style='margin:0 0 5px 0;%1'>")
 			    .arg(m.host ? QStringLiteral("background-color:#1f1a10;") : QString());
-	// platform chip
-	h += QStringLiteral(
-		     "<span style='background-color:%1;color:%2;font-weight:800;font-size:7pt;'>&nbsp;%3&nbsp;</span> ")
-		     .arg(QLatin1String(kick ? kKick : kTwitch),
-			  kick ? QStringLiteral("#0b1a04") : QStringLiteral("#ffffff"),
-			  kick ? QStringLiteral("K") : QStringLiteral("T"));
+	// platform icon (served by ChatView::loadResource)
+	h += QStringLiteral("<img src='gfx:%1' width='%2' height='%2' style='vertical-align:middle'>&nbsp;")
+		     .arg(kick ? QStringLiteral("kick") : QStringLiteral("twitch"))
+		     .arg(kIconPx);
 	if (settings().chatTimestamps && m.ts > 0)
 		h += QStringLiteral("<span style='color:#5b6270;font-size:8pt;'>%1</span> ")
 			     .arg(QDateTime::fromMSecsSinceEpoch(m.ts).toString(QStringLiteral("HH:mm")));
@@ -313,9 +381,15 @@ QString GfxChatPanel::lineHtml(const ChatMessage &m) const
 		h += tag("VIP", "#f472b6");
 	if (m.sub)
 		h += tag("SUB", "#ffb020");
-	h += QStringLiteral("<b style='color:%1'>%2</b><span style='color:#5b6270'>:</span> ")
-		     .arg(m.color.isEmpty() ? QStringLiteral("#c9ced8") : readableColor(m.color),
-			  m.user.toHtmlEscaped());
+	const QString nameColor = m.color.isEmpty() ? QStringLiteral("#c9ced8") : readableColor(m.color);
+	if (loginRe().match(m.login).hasMatch())
+		h += QStringLiteral("<a href='profile:%1:%2' title='Open %3 on %4' "
+				    "style='color:%5;text-decoration:none;font-weight:bold;'>%3</a>")
+			     .arg(m.platform, m.login, m.user.toHtmlEscaped(),
+				  kick ? QStringLiteral("Kick") : QStringLiteral("Twitch"), nameColor);
+	else
+		h += QStringLiteral("<b style='color:%1'>%2</b>").arg(nameColor, m.user.toHtmlEscaped());
+	h += QStringLiteral("<span style='color:#5b6270'>:</span> ");
 	if (m.deleted) {
 		h += QStringLiteral("<i style='color:#5b6270'>message deleted</i>");
 	} else {

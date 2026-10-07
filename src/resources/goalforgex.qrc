@@ -1,0 +1,8 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <!-- Platform icons for the Chat tab (64 px, made by tools/make-chat-icons.js). -->
+  <qresource prefix="/goalforgex">
+    <file>twitch.png</file>
+    <file>kick.png</file>
+  </qresource>
+</RCC>

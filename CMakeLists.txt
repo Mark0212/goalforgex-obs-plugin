@@ -80,6 +80,7 @@ target_sources(
     src/gfx-theme.hpp
     src/gfx-update.cpp
     src/gfx-update.hpp
+    src/resources/goalforgex.qrc
 )
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
