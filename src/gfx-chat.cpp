@@ -237,8 +237,9 @@ int GfxChatPanel::applyPoll(const QJsonObject &o)
 	}
 	int added = 0;
 	const QJsonArray items = o.value(QStringLiteral("items")).toArray();
-	for (const QJsonValue &v : items) {
-		const QJsonObject it = v.toObject();
+	// index loop: a range-for over QJsonArray binds to temporaries (-Wrange-loop-analysis on macOS)
+	for (qsizetype i = 0; i < items.size(); ++i) {
+		const QJsonObject it = items.at(i).toObject();
 		if (it.value(QStringLiteral("kind")).toString() == QLatin1String("delete")) {
 			const QString id = it.value(QStringLiteral("id")).toString();
 			const QString login = it.value(QStringLiteral("login")).toString();
