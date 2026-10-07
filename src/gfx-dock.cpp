@@ -506,7 +506,7 @@ void GfxDock::rebuildTabs()
 	if (s.tabLive)
 		tabs_->addTab(livePanel_, QStringLiteral("Live"));
 	if (s.tabChat)
-		tabs_->addTab(chatPanel_, QStringLiteral("Chat"));
+		tabs_->addTab(chatPanel_, QStringLiteral("MultiChat"));
 	if (s.tabWidgets)
 		tabs_->addTab(widgetsPage_, QStringLiteral("Widgets"));
 	if (s.tabReactions)
@@ -550,10 +550,11 @@ void GfxDock::openSettings()
 	};
 	group(QStringLiteral("Tabs"), {{QStringLiteral("Live"), &s.tabLive},
 				       {QStringLiteral("Widgets"), &s.tabWidgets},
-				       {QStringLiteral("Chat (Twitch + Kick)"), &s.tabChat},
+				       {QStringLiteral("MultiChat (Twitch + Kick)"), &s.tabChat},
 				       {QStringLiteral("Reactions"), &s.tabReactions},
 				       {QStringLiteral("Health"), &s.tabHealth}});
-	group(QStringLiteral("Chat tab"), {{QStringLiteral("Show the time next to each message"), &s.chatTimestamps}});
+	group(QStringLiteral("MultiChat tab"),
+	      {{QStringLiteral("Show the time next to each message"), &s.chatTimestamps}});
 	group(QStringLiteral("Live tab"), {{QStringLiteral("Stream stats line"), &s.cardStats},
 					   {QStringLiteral("Subathon timer"), &s.cardTimer},
 					   {QStringLiteral("Action timer"), &s.cardActionTimer},
@@ -1298,10 +1299,10 @@ void GfxDock::updateChatTabTitle()
 	const int i = chatPanel_ ? tabs_->indexOf(chatPanel_) : -1;
 	if (i < 0)
 		return;
-	tabs_->setTabText(i, chatUnread_ > 0 ? QStringLiteral("Chat · %1")
+	tabs_->setTabText(i, chatUnread_ > 0 ? QStringLiteral("MultiChat · %1")
 						       .arg(chatUnread_ > 99 ? QStringLiteral("99+")
 									     : QString::number(chatUnread_))
-					     : QStringLiteral("Chat"));
+					     : QStringLiteral("MultiChat"));
 }
 
 void GfxDock::renderUpdate()

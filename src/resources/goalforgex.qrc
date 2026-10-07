@@ -4,5 +4,10 @@
   <qresource prefix="/goalforgex">
     <file>twitch.png</file>
     <file>kick.png</file>
+    <!-- Tab bar scroll chevrons (tools/make-ui-icons.js). -->
+    <file>chevron-right.png</file>
+    <file>chevron-left.png</file>
+    <file>chevron-right-off.png</file>
+    <file>chevron-left-off.png</file>
   </qresource>
 </RCC>

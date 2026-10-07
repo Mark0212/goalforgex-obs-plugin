@@ -370,7 +370,7 @@ void GfxChatPanel::setLocked(const QString &message)
 	const bool locked = !message.isEmpty();
 	lockLbl_->setText(
 		QStringLiteral(
-			"<b style='color:#fff'>Twitch + Kick chat in OBS</b><br><br>%1<br>Read both chats in one feed and reply to either — or both — without leaving OBS.")
+			"<b style='color:#fff'>MultiChat — Twitch + Kick in OBS</b><br><br>%1<br>Read both chats in one feed and reply to either — or both — without leaving OBS.")
 			.arg(message.toHtmlEscaped()));
 	lockLbl_->setTextFormat(Qt::RichText);
 	lockPanel_->setVisible(locked);

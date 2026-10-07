@@ -130,10 +130,25 @@ QTabWidget::pane { border: 0; top: -1px; }
 QTabBar { qproperty-drawBase: 0; }
 QTabBar::tab {
 	background: transparent; color: #8b93a3; border: 0; border-bottom: 2px solid transparent;
-	padding: 7px 11px; margin-right: 2px; font-weight: 600;
+	padding: 7px 9px; margin-right: 1px; font-weight: 600;
 }
 QTabBar::tab:hover:!selected { color: #d3d7df; border-bottom-color: #3a4150; }
 QTabBar::tab:selected { color: #ffffff; border-bottom: 2px solid #ffb020; }
+
+/* Tabs that don't fit scroll: a slim see-through panel with chevrons instead of
+   the boxed buttons (the generic QToolButton rule above would otherwise apply). */
+QTabBar::scroller { width: 44px; }
+QTabBar QToolButton {
+	background: rgba(18, 20, 25, 0.92); border: 0; border-left: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 0; padding: 0; margin: 0;
+}
+QTabBar QToolButton:hover { background: rgba(42, 47, 58, 0.95); }
+QTabBar QToolButton:pressed { background: rgba(30, 34, 42, 0.95); }
+QTabBar QToolButton:disabled { background: rgba(18, 20, 25, 0.92); }
+QTabBar QToolButton::right-arrow { image: url(:/goalforgex/chevron-right.png); width: 11px; height: 11px; }
+QTabBar QToolButton::left-arrow { image: url(:/goalforgex/chevron-left.png); width: 11px; height: 11px; }
+QTabBar QToolButton::right-arrow:disabled { image: url(:/goalforgex/chevron-right-off.png); }
+QTabBar QToolButton::left-arrow:disabled { image: url(:/goalforgex/chevron-left-off.png); }
 
 QGroupBox {
 	background: #181b22; border: 1px solid #262a33; border-radius: 10px;
