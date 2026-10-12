@@ -53,6 +53,11 @@ static const BoolField kBools[] = {
 	{"chatToKick", &Settings::chatToKick},
 	{"chatTimestamps", &Settings::chatTimestamps},
 	{"chatStats", &Settings::chatStats},
+	{"chatHighlightMentions", &Settings::chatHighlightMentions},
+	{"chatQuickMod", &Settings::chatQuickMod},
+	{"chatShowDeleted", &Settings::chatShowDeleted},
+	{"chatAltRows", &Settings::chatAltRows},
+	{"chatPauseOnHover", &Settings::chatPauseOnHover},
 	{"cardStats", &Settings::cardStats},
 	{"cardTimer", &Settings::cardTimer},
 	{"cardActionTimer", &Settings::cardActionTimer},
@@ -80,6 +85,13 @@ void loadSettings()
 		if (v.isBool())
 			g_settings.*(b.member) = v.toBool();
 	}
+	g_settings.chatFontSize = qBound(0, o.value(QStringLiteral("chatFontSize")).toInt(0), 24);
+	const QJsonArray hw = o.value(QStringLiteral("chatHighlightWords")).toArray();
+	for (qsizetype i = 0; i < hw.size() && i < 30; ++i) {
+		const QString w = hw.at(i).toString().trimmed().left(40);
+		if (!w.isEmpty() && !g_settings.chatHighlightWords.contains(w, Qt::CaseInsensitive))
+			g_settings.chatHighlightWords << w;
+	}
 	const QJsonArray rs = o.value(QStringLiteral("reactions")).toArray();
 	for (qsizetype i = 0; i < rs.size() && i < 50; ++i) {
 		const QJsonObject ro = rs.at(i).toObject();
@@ -106,6 +118,8 @@ void saveSettings()
 	QJsonObject o;
 	for (const BoolField &b : kBools)
 		o.insert(QLatin1String(b.key), g_settings.*(b.member));
+	o.insert(QStringLiteral("chatFontSize"), g_settings.chatFontSize);
+	o.insert(QStringLiteral("chatHighlightWords"), QJsonArray::fromStringList(g_settings.chatHighlightWords));
 	QJsonArray rs;
 	for (const Reaction &r : g_settings.reactions) {
 		QJsonObject ro;

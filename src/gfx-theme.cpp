@@ -253,6 +253,12 @@ QPushButton#gfxSeg {
 QPushButton#gfxSeg:hover { color: #e8eaf0; background: #1d2129; }
 QPushButton#gfxSeg:checked { color: #ffffff; background: #262b36; border-color: #3a4150; }
 QLabel#gfxChatStatus { font-size: 8pt; }
+QPushButton#gfxIconBtn {
+	background: transparent; color: #8b93a3; border: 1px solid transparent; border-radius: 6px;
+	padding: 3px 5px; min-width: 18px;
+}
+QPushButton#gfxIconBtn:hover { color: #e8eaf0; background: #1d2129; }
+QPushButton#gfxIconBtn:checked { color: #ffffff; background: #3a2a0c; border-color: #ffb020; }
 
 QFrame#gfxStatCard { background: #15181e; border: 1px solid #262a33; border-radius: 8px; }
 QFrame#gfxStatCard:hover { border-color: #3a4150; }

@@ -555,7 +555,12 @@ void GfxDock::openSettings()
 				       {QStringLiteral("Health"), &s.tabHealth}});
 	group(QStringLiteral("MultiChat tab"),
 	      {{QStringLiteral("Show the time next to each message"), &s.chatTimestamps},
-	       {QStringLiteral("Viewers, uptime and stream info for Twitch and Kick"), &s.chatStats}});
+	       {QStringLiteral("Viewers, uptime and stream info for Twitch and Kick"), &s.chatStats},
+	       {QStringLiteral("Highlight messages that mention me or my highlight words"), &s.chatHighlightMentions},
+	       {QStringLiteral("Quick moderation buttons on each message (delete / 10 min timeout)"), &s.chatQuickMod},
+	       {QStringLiteral("Keep the text of deleted messages (struck through)"), &s.chatShowDeleted},
+	       {QStringLiteral("Shade every other message"), &s.chatAltRows},
+	       {QStringLiteral("Pause the chat while my mouse is over it"), &s.chatPauseOnHover}});
 	group(QStringLiteral("Live tab"), {{QStringLiteral("Stream stats line"), &s.cardStats},
 					   {QStringLiteral("Subathon timer"), &s.cardTimer},
 					   {QStringLiteral("Action timer"), &s.cardActionTimer},
@@ -590,6 +595,8 @@ void GfxDock::openSettings()
 		*o.value = o.box->isChecked();
 	saveSettings();
 	rebuildTabs();
+	if (chatPanel_)
+		chatPanel_->refresh();
 	scheduleChat(0);
 	checkForUpdate();
 }

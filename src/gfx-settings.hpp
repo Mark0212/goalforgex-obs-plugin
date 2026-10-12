@@ -50,6 +50,20 @@ struct Settings {
 	bool chatTimestamps = true;
 	// Viewers / uptime / title per platform above the chat
 	bool chatStats = true;
+	// Highlight lines that mention the streamer or a highlight word
+	bool chatHighlightMentions = true;
+	// One-click delete / 10-minute timeout links at the start of each line
+	bool chatQuickMod = false;
+	// Keep a deleted message's text (struck through) instead of hiding it
+	bool chatShowDeleted = true;
+	// Subtle alternating background on every other line
+	bool chatAltRows = false;
+	// Freeze the feed while the mouse is over it, so lines don't move under the cursor
+	bool chatPauseOnHover = false;
+	// Feed text size in points; 0 = the dock's normal size
+	int chatFontSize = 0;
+	// Extra words that highlight a line (besides the streamer's own name)
+	QStringList chatHighlightWords;
 	// Automation
 	bool autoStartTimer = false;
 	bool autoPauseTimer = false;

@@ -11,6 +11,7 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include <QJsonObject>
 #include <QList>
+#include <QRegularExpression>
 #include <QString>
 #include <QStringList>
 #include <QWidget>
@@ -19,6 +20,7 @@ the Free Software Foundation; either version 2 of the License, or
 
 class QEvent;
 class QFrame;
+class QKeyEvent;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -44,13 +46,15 @@ struct ChatMessage {
 	bool deleted = false;
 	int bits = 0;
 	qint64 ts = 0;
+	qint64 seq = 0; // panel-local, increasing — ties a feed line to its message
 };
 
 } // namespace gfx
 
-// The "Chat" tab: Twitch + Kick chat in one feed (or filtered to one), and a
-// composer that sends as the streamer to Twitch, Kick or both. The dock owns
-// the polling and the network calls; this panel only renders and collects input.
+// The "MultiChat" tab: Twitch + Kick chat in one feed (or filtered to one, to
+// mentions, to one chatter or to a search), and a composer that sends as the
+// streamer to Twitch, Kick or both. The dock owns the polling and the network
+// calls; this panel only renders and collects input.
 class GfxChatPanel : public QWidget {
 public:
 	using SendFn = std::function<void(const QStringList &platforms, const QString &text)>;
@@ -70,9 +74,11 @@ public:
 	// The dock calls this when a send finishes.
 	void sendFinished(bool anyDelivered);
 	void clearChat();
+	// Settings changed (⚙ dialog): re-read them and redraw the feed.
+	void refresh();
 
 protected:
-	// Click on a platform's stats card → opens that channel.
+	// Stats card clicks, feed hover / Ctrl+wheel, composer keys.
 	bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
@@ -83,34 +89,87 @@ private:
 		QLabel *head = nullptr; // ● 1,234 viewers / Offline / Not connected
 		QLabel *sub = nullptr;  // uptime · category (elided)
 	};
+	// One line in the feed: which message it shows and its alternating-row parity.
+	struct Shown {
+		qint64 seq = 0;
+		bool odd = false;
+	};
 	void buildStatCard(StatCard &c, const QString &platform);
 	// Viewers / uptime / title per platform + chatters and messages per minute.
 	void renderStats();
 	void renderStatCard(StatCard &c);
 	qint64 serverNow() const;
 	void buildUi();
-	void render(int newlyAdded = 0, bool forceBottom = false);
+
+	// ── Feed ──
+	// Redraws every line (filter / search / settings changed, or a reset).
+	void rebuild();
+	// Adds one line at the bottom.
+	void appendLine(const gfx::ChatMessage &m);
+	// Redraws one line in place (deleted message).
+	void updateLine(qint64 seq);
+	// Drops lines whose messages fell out of the buffer, keeping the view still.
+	void trimTop();
+	void showPlaceholder();
+	const gfx::ChatMessage *findMsg(qint64 seq) const;
+	QString lineInnerHtml(const gfx::ChatMessage &m) const;
+	QString textHtml(const QString &text) const;
+	bool isHighlighted(const gfx::ChatMessage &m) const;
+	// Returns true when the pattern changed (names arrived, words edited).
+	bool rebuildHighlightRe();
+	qreal baseFontPt() const;
+	void applyFontSize();
+	void zoom(int steps);
+
+	// ── Scrolling ──
+	// The feed follows new lines unless the reader scrolled up or paused it.
+	bool autoScrolling() const;
 	void scrollToBottom();
+	void setPaused(bool paused);
+	void updateJump();
+
 	bool matches(const gfx::ChatMessage &m) const;
-	QString lineHtml(const gfx::ChatMessage &m) const;
 	void renderStatus();
 	void updateTargets();
 	void updateSendState();
 	void setFilter(const QString &f);
+	void setUserFilter(const QString &platform, const QString &login, const QString &shown);
 	void doSend();
 	bool platformConnected(const QString &p) const;
-	// Click on a chatter's name: profile / copy / delete / timeout / ban / unban.
+	// Click on a chatter's name: profile / reply / copy / delete / timeout / ban / unban.
 	void showUserMenu(const QString &platform, const QString &login, const QString &messageId);
+	void showOptionsMenu();
+	// Composer: ↑/↓ recall sent messages, Tab completes chatter names.
+	bool composerKey(QKeyEvent *e);
+	void completeName(bool backwards);
 
 	QList<gfx::ChatMessage> msgs_;
+	QList<Shown> shown_;
+	qint64 nextSeq_ = 1;
+	bool placeholder_ = true;
 	QJsonObject status_;
-	QJsonObject streams_;  // "streams" from the poll; empty = older server, strip hidden
-	qint64 clockSkew_ = 0; // server clock − ours, so uptime matches the server's start times
-	QString filter_ = QStringLiteral("all");
+	QJsonObject streams_;                    // "streams" from the poll; empty = older server, strip hidden
+	qint64 clockSkew_ = 0;                   // server clock − ours, so uptime matches the server's start times
+	QString filter_ = QStringLiteral("all"); // all | twitch | kick | mentions
+	QString search_;
+	QString userFilterPlatform_, userFilterLogin_;
+	QRegularExpression highlightRe_;
 	SendFn send_;
 	ModFn mod_;
 	bool sending_ = false;
+
+	bool follow_ = true;       // the reader is at the bottom
+	bool paused_ = false;      // ⏸ pressed
+	bool hoverPaused_ = false; // mouse over the feed (setting)
+	int programmatic_ = 0;     // > 0 while the panel itself moves the scroll bar
 	int pendingNew_ = 0;
+
+	QStringList history_; // sent messages, newest last
+	int historyPos_ = -1;
+	QString historyDraft_;
+	QStringList tabMatches_;
+	int tabIndex_ = -1;
+	int tabStart_ = -1;
 
 	QWidget *main_ = nullptr;
 	QWidget *lockPanel_ = nullptr;
@@ -121,9 +180,17 @@ private:
 	StatCard kkCard_;
 	QLabel *summary_ = nullptr;
 	QTimer *tick_ = nullptr; // 1 s: uptime + chat pace
+	QTimer *searchDelay_ = nullptr;
 	QPushButton *fAll_ = nullptr;
 	QPushButton *fTwitch_ = nullptr;
 	QPushButton *fKick_ = nullptr;
+	QPushButton *fMentions_ = nullptr;
+	QPushButton *searchBtn_ = nullptr;
+	QPushButton *pauseBtn_ = nullptr;
+	QPushButton *moreBtn_ = nullptr;
+	QWidget *searchRow_ = nullptr;
+	QLineEdit *searchEdit_ = nullptr;
+	QPushButton *userChip_ = nullptr;
 	QTextBrowser *view_ = nullptr;
 	QPushButton *jump_ = nullptr;
 	QPushButton *toTwitch_ = nullptr;
