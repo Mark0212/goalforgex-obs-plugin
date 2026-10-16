@@ -12,6 +12,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <obs-module.h>
 #include <plugin-support.h>
 
+#include <QColor>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -49,8 +50,10 @@ static const BoolField kBools[] = {
 	{"tabReactions", &Settings::tabReactions},
 	{"tabHealth", &Settings::tabHealth},
 	{"tabChat", &Settings::tabChat},
+	{"tabEvents", &Settings::tabEvents},
 	{"chatToTwitch", &Settings::chatToTwitch},
 	{"chatToKick", &Settings::chatToKick},
+	{"chatToYouTube", &Settings::chatToYouTube},
 	{"chatTimestamps", &Settings::chatTimestamps},
 	{"chatStats", &Settings::chatStats},
 	{"chatHighlightMentions", &Settings::chatHighlightMentions},
@@ -58,6 +61,21 @@ static const BoolField kBools[] = {
 	{"chatShowDeleted", &Settings::chatShowDeleted},
 	{"chatAltRows", &Settings::chatAltRows},
 	{"chatPauseOnHover", &Settings::chatPauseOnHover},
+	{"chatYouTube", &Settings::chatYouTube},
+	{"chatTikTok", &Settings::chatTikTok},
+	{"chatIcons", &Settings::chatIcons},
+	{"chatBadges", &Settings::chatBadges},
+	{"chatNameColors", &Settings::chatNameColors},
+	{"chatCompact", &Settings::chatCompact},
+	{"evGiftBombs", &Settings::evGiftBombs},
+	{"evPoints", &Settings::evPoints},
+	{"evStreaks", &Settings::evStreaks},
+	{"evAlerts", &Settings::evAlerts},
+	{"evTikTok", &Settings::evTikTok},
+	{"evYouTube", &Settings::evYouTube},
+	{"evTimers", &Settings::evTimers},
+	{"evAutoExpand", &Settings::evAutoExpand},
+	{"compact", &Settings::compact},
 	{"cardStats", &Settings::cardStats},
 	{"cardTimer", &Settings::cardTimer},
 	{"cardActionTimer", &Settings::cardActionTimer},
@@ -92,6 +110,17 @@ void loadSettings()
 		if (!w.isEmpty() && !g_settings.chatHighlightWords.contains(w, Qt::CaseInsensitive))
 			g_settings.chatHighlightWords << w;
 	}
+	// Appearance — anything unknown or out of range falls back to the default.
+	static const QStringList kThemes = {QStringLiteral("graphite"), QStringLiteral("midnight"),
+					    QStringLiteral("oled"), QStringLiteral("slate"), QStringLiteral("warm")};
+	const QString th = o.value(QStringLiteral("theme")).toString();
+	if (kThemes.contains(th))
+		g_settings.theme = th;
+	const QString ac = o.value(QStringLiteral("accent")).toString();
+	if (ac.size() == 7 && ac.startsWith(QLatin1Char('#')) && QColor(ac).isValid())
+		g_settings.accent = ac.toLower();
+	const int ts = o.value(QStringLiteral("textScale")).toInt(100);
+	g_settings.textScale = qBound(80, ts, 140);
 	const QJsonArray rs = o.value(QStringLiteral("reactions")).toArray();
 	for (qsizetype i = 0; i < rs.size() && i < 50; ++i) {
 		const QJsonObject ro = rs.at(i).toObject();
@@ -120,6 +149,9 @@ void saveSettings()
 		o.insert(QLatin1String(b.key), g_settings.*(b.member));
 	o.insert(QStringLiteral("chatFontSize"), g_settings.chatFontSize);
 	o.insert(QStringLiteral("chatHighlightWords"), QJsonArray::fromStringList(g_settings.chatHighlightWords));
+	o.insert(QStringLiteral("theme"), g_settings.theme);
+	o.insert(QStringLiteral("accent"), g_settings.accent);
+	o.insert(QStringLiteral("textScale"), g_settings.textScale);
 	QJsonArray rs;
 	for (const Reaction &r : g_settings.reactions) {
 		QJsonObject ro;
@@ -154,6 +186,11 @@ QList<QPair<QString, QString>> reactionTriggers()
 		{QStringLiteral("bits"), QStringLiteral("Bits alert")},
 		{QStringLiteral("follower"), QStringLiteral("Follow alert")},
 		{QStringLiteral("timer_ended"), QStringLiteral("Subathon timer ended")},
+		{QStringLiteral("gift_bomb"), QStringLiteral("Gift bomb (5+ subs)")},
+		{QStringLiteral("channel_points"), QStringLiteral("Channel points redeemed")},
+		{QStringLiteral("watch_streak"), QStringLiteral("Watch streak shared")},
+		{QStringLiteral("tiktok_gift"), QStringLiteral("TikTok gift")},
+		{QStringLiteral("youtube_superchat"), QStringLiteral("YouTube Super Chat / Sticker")},
 	};
 }
 

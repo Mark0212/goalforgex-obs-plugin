@@ -20,6 +20,7 @@ the Free Software Foundation; either version 2 of the License, or
 
 class QEvent;
 class QFrame;
+class QGridLayout;
 class QKeyEvent;
 class QLabel;
 class QLineEdit;
@@ -29,10 +30,10 @@ class QTimer;
 
 namespace gfx {
 
-// One Twitch / Kick chat line from GET /api/obs/chat.
+// One chat line from GET /api/obs/chat (Twitch, Kick, YouTube or TikTok).
 struct ChatMessage {
 	QString id;
-	QString platform; // twitch | kick
+	QString platform; // twitch | kick | youtube | tiktok
 	QString user;     // display name
 	QString login;
 	QString color;
@@ -51,9 +52,9 @@ struct ChatMessage {
 
 } // namespace gfx
 
-// The "MultiChat" tab: Twitch + Kick chat in one feed (or filtered to one, to
-// mentions, to one chatter or to a search), and a composer that sends as the
-// streamer to Twitch, Kick or both. The dock owns the polling and the network
+// The "MultiChat" tab: Twitch, Kick, YouTube and TikTok chat in one feed (or
+// filtered to one, to mentions, to one chatter or to a search), and a composer
+// that sends as the streamer to Twitch, Kick and/or YouTube (TikTok is read-only). The dock owns the polling and the network
 // calls; this panel only renders and collects input.
 class GfxChatPanel : public QWidget {
 public:
@@ -63,6 +64,10 @@ public:
 					 int seconds, const QString &messageId, const QString &displayName)>;
 
 	explicit GfxChatPanel(QWidget *parent = nullptr);
+
+	// Platforms the dock asks the server for (Settings → MultiChat): Twitch and
+	// Kick always, YouTube / TikTok when switched on.
+	static QStringList wantedPlatforms();
 
 	void setSendHandler(SendFn fn);
 	void setModHandler(ModFn fn);
@@ -98,6 +103,8 @@ private:
 	// Viewers / uptime / title per platform + chatters and messages per minute.
 	void renderStats();
 	void renderStatCard(StatCard &c);
+	// Two cards per row, only the platforms that are connected.
+	void layoutCards(const QStringList &visible);
 	qint64 serverNow() const;
 	void buildUi();
 
@@ -130,7 +137,9 @@ private:
 
 	bool matches(const gfx::ChatMessage &m) const;
 	void renderStatus();
+	void updateFilters();
 	void updateTargets();
+	QList<QPushButton *> targetButtons() const;
 	void updateSendState();
 	void setFilter(const QString &f);
 	void setUserFilter(const QString &platform, const QString &login, const QString &shown);
@@ -176,14 +185,20 @@ private:
 	QLabel *lockLbl_ = nullptr;
 	QLabel *statusLbl_ = nullptr;
 	QWidget *stats_ = nullptr;
+	QGridLayout *cardsGrid_ = nullptr;
+	QString cardsKey_; // which cards the grid holds now, e.g. "twitch,youtube"
 	StatCard twCard_;
 	StatCard kkCard_;
+	StatCard ytCard_;
+	StatCard ttCard_;
 	QLabel *summary_ = nullptr;
 	QTimer *tick_ = nullptr; // 1 s: uptime + chat pace
 	QTimer *searchDelay_ = nullptr;
 	QPushButton *fAll_ = nullptr;
 	QPushButton *fTwitch_ = nullptr;
 	QPushButton *fKick_ = nullptr;
+	QPushButton *fYouTube_ = nullptr;
+	QPushButton *fTikTok_ = nullptr;
 	QPushButton *fMentions_ = nullptr;
 	QPushButton *searchBtn_ = nullptr;
 	QPushButton *pauseBtn_ = nullptr;
@@ -195,6 +210,8 @@ private:
 	QPushButton *jump_ = nullptr;
 	QPushButton *toTwitch_ = nullptr;
 	QPushButton *toKick_ = nullptr;
+	QPushButton *toYouTube_ = nullptr;
+	QLabel *readOnlyLbl_ = nullptr; // only TikTok connected → can't send
 	QLineEdit *input_ = nullptr;
 	QPushButton *sendBtn_ = nullptr;
 	QLabel *countLbl_ = nullptr;

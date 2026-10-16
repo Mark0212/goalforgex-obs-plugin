@@ -11,6 +11,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-api.hpp"
 #include "gfx-auth.hpp"
 #include "gfx-chat.hpp"
+#include "gfx-events.hpp"
 #include "gfx-health.hpp"
 #include "gfx-http.hpp"
 #include "gfx-live.hpp"
@@ -23,6 +24,8 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QAction>
 #include <QCheckBox>
 #include <QClipboard>
+#include <QColor>
+#include <QColorDialog>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDesktopServices>
@@ -42,6 +45,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QMessageBox>
 #include <QPair>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSpinBox>
 #include <QSysInfo>
 #include <QTabWidget>
@@ -95,8 +99,8 @@ GfxDock::GfxDock(QWidget *parent) : QWidget(parent), reactions_(this)
 	// the dock's children (and the dialogs/menus it opens) and nothing else.
 	setObjectName(QStringLiteral("GfxDock"));
 	setAttribute(Qt::WA_StyledBackground, true);
+	loadSettings(); // before the style sheet — it carries Settings → Appearance
 	setStyleSheet(theme::dockStyleSheet());
-	loadSettings();
 	buildUi();
 
 	statusTimer_.setInterval(2000);
@@ -262,6 +266,7 @@ void GfxDock::buildUi()
 	wl->setContentsMargins(18, 20, 18, 18);
 	wl->setSpacing(10);
 	auto *heroMark = new QLabel(welcomePanel_);
+	heroMark_ = heroMark;
 	heroMark->setPixmap(theme::brandMark(56, devicePixelRatioF()));
 	heroMark->setAlignment(Qt::AlignHCenter);
 	auto *hero = new QLabel(QStringLiteral("Run your stream from OBS"), welcomePanel_);
@@ -284,10 +289,12 @@ void GfxDock::buildUi()
 			"<table cellspacing='0' cellpadding='3'>"
 			"<tr><td style='color:%1'>▸</td><td>Widgets added to your scenes, already sized and placed</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>Live controls and OBS hotkeys for timers, goals and alerts</td></tr>"
+			"<tr><td style='color:%1'>▸</td><td>Twitch, Kick, YouTube and TikTok chat in one MultiChat feed</td></tr>"
+			"<tr><td style='color:%1'>▸</td><td>Gift bombs with every recipient, channel points and watch streaks</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>Reactions that switch scenes when alerts fire</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>A health check that fixes setup problems in one click</td></tr>"
 			"</table>")
-			.arg(QLatin1String(theme::kAmber)));
+			.arg(theme::accentColor()));
 	auto *welcomeBtn = new QPushButton(QStringLiteral("Connect GoalForgeX"), welcomePanel_);
 	welcomeBtn->setObjectName(QStringLiteral("gfxBigBtn"));
 	welcomeBtn->setCursor(Qt::PointingHandCursor);
@@ -374,6 +381,7 @@ void GfxDock::buildUi()
 	widgetsPage_ = buildWidgetsPage();
 	reactionsPanel_ = new GfxReactionsPanel(&reactions_, tabs_);
 	healthPanel_ = new GfxHealthPanel(tabs_);
+	eventsPanel_ = new GfxEventsPanel(tabs_);
 	chatPanel_ = new GfxChatPanel(tabs_);
 	chatPanel_->setSendHandler(
 		[this](const QStringList &platforms, const QString &text) { sendChat(platforms, text); });
@@ -386,6 +394,10 @@ void GfxDock::buildUi()
 			chatUnread_ = 0;
 			updateChatTabTitle();
 			scheduleChat(0); // switch to the fast cadence right away
+		}
+		if (eventsPanel_ && tabs_->currentWidget() == eventsPanel_) {
+			eventsUnread_ = 0;
+			updateEventsTabTitle();
 		}
 	});
 	body->addWidget(tabs_, 1);
@@ -505,6 +517,8 @@ void GfxDock::rebuildTabs()
 	const Settings &s = settings();
 	if (s.tabLive)
 		tabs_->addTab(livePanel_, QStringLiteral("Live"));
+	if (s.tabEvents)
+		tabs_->addTab(eventsPanel_, QStringLiteral("Events"));
 	if (s.tabChat)
 		tabs_->addTab(chatPanel_, QStringLiteral("MultiChat"));
 	if (s.tabWidgets)
@@ -519,26 +533,48 @@ void GfxDock::rebuildTabs()
 	if (i >= 0)
 		tabs_->setCurrentIndex(i);
 	livePanel_->applySettings();
+	eventsPanel_->applySettings();
+	chatPanel_->refresh();
 	updateChatTabTitle();
+	updateEventsTabTitle();
 }
 
 void GfxDock::openSettings()
 {
 	Settings &s = settings();
+	const Settings before = s; // Cancel restores this (Appearance previews live)
 	QDialog dlg(this);
 	dlg.setWindowTitle(QStringLiteral("GoalForgeX settings"));
-	dlg.setMinimumWidth(440);
+	dlg.setMinimumWidth(460);
+	dlg.setMinimumHeight(520);
 	auto *root = new QVBoxLayout(&dlg);
-	root->setContentsMargins(14, 12, 14, 12);
-	root->setSpacing(6);
+	root->setContentsMargins(12, 10, 12, 10);
+	root->setSpacing(8);
+	auto *pages = new QTabWidget(&dlg);
+	pages->setDocumentMode(true);
+	root->addWidget(pages, 1);
 
 	struct Opt {
 		QCheckBox *box;
 		bool *value;
 	};
 	QList<Opt> opts;
-	const auto group = [&dlg, root, &opts](const QString &title, const QList<QPair<QString, bool *>> &items) {
-		auto *g = new QGroupBox(title, &dlg);
+	// A scrollable page; returns its layout.
+	const auto page = [pages](const QString &title) {
+		auto *scroll = new QScrollArea(pages);
+		scroll->setWidgetResizable(true);
+		scroll->setFrameShape(QFrame::NoFrame);
+		auto *inner = new QWidget(scroll);
+		auto *l = new QVBoxLayout(inner);
+		l->setContentsMargins(2, 6, 6, 6);
+		l->setSpacing(6);
+		scroll->setWidget(inner);
+		pages->addTab(scroll, title);
+		return l;
+	};
+	const auto group = [&opts](QVBoxLayout *into, const QString &title,
+				   const QList<QPair<QString, bool *>> &items) {
+		auto *g = new QGroupBox(title, into->parentWidget());
 		auto *l = new QVBoxLayout(g);
 		for (const auto &it : items) {
 			auto *c = new QCheckBox(it.first, g);
@@ -546,59 +582,264 @@ void GfxDock::openSettings()
 			l->addWidget(c);
 			opts.push_back({c, it.second});
 		}
-		root->addWidget(g);
+		into->addWidget(g);
+		return l;
 	};
-	group(QStringLiteral("Tabs"), {{QStringLiteral("Live"), &s.tabLive},
-				       {QStringLiteral("Widgets"), &s.tabWidgets},
-				       {QStringLiteral("MultiChat (Twitch + Kick)"), &s.tabChat},
-				       {QStringLiteral("Reactions"), &s.tabReactions},
-				       {QStringLiteral("Health"), &s.tabHealth}});
-	group(QStringLiteral("MultiChat tab"),
-	      {{QStringLiteral("Show the time next to each message"), &s.chatTimestamps},
-	       {QStringLiteral("Viewers, uptime and stream info for Twitch and Kick"), &s.chatStats},
-	       {QStringLiteral("Highlight messages that mention me or my highlight words"), &s.chatHighlightMentions},
-	       {QStringLiteral("Quick moderation buttons on each message (delete / 10 min timeout)"), &s.chatQuickMod},
-	       {QStringLiteral("Keep the text of deleted messages (struck through)"), &s.chatShowDeleted},
-	       {QStringLiteral("Shade every other message"), &s.chatAltRows},
-	       {QStringLiteral("Pause the chat while my mouse is over it"), &s.chatPauseOnHover}});
-	group(QStringLiteral("Live tab"), {{QStringLiteral("Stream stats line"), &s.cardStats},
-					   {QStringLiteral("Subathon timer"), &s.cardTimer},
-					   {QStringLiteral("Action timer"), &s.cardActionTimer},
-					   {QStringLiteral("Goal"), &s.cardGoal},
-					   {QStringLiteral("Spin wheel"), &s.cardWheel},
-					   {QStringLiteral("Counters"), &s.cardCounters},
-					   {QStringLiteral("Alerts (test / replay / clear chat)"), &s.cardAlerts},
-					   {QStringLiteral("Activity feed"), &s.cardActivity}});
-	group(QStringLiteral("Automation"),
+	const auto note = [](QVBoxLayout *into, const QString &text) {
+		auto *lbl = new QLabel(text, into->parentWidget());
+		lbl->setWordWrap(true);
+		lbl->setObjectName(QStringLiteral("gfxMuted"));
+		into->addWidget(lbl);
+	};
+
+	// ── General ──
+	QVBoxLayout *gen = page(QStringLiteral("General"));
+	group(gen, QStringLiteral("Tabs"),
+	      {{QStringLiteral("Live"), &s.tabLive},
+	       {QStringLiteral("Events (gift bombs, channel points, watch streaks, TikTok / YouTube)"), &s.tabEvents},
+	       {QStringLiteral("MultiChat (Twitch, Kick, YouTube, TikTok)"), &s.tabChat},
+	       {QStringLiteral("Widgets"), &s.tabWidgets},
+	       {QStringLiteral("Reactions"), &s.tabReactions},
+	       {QStringLiteral("Health"), &s.tabHealth}});
+	group(gen, QStringLiteral("Live tab"),
+	      {{QStringLiteral("Stream stats line"), &s.cardStats},
+	       {QStringLiteral("Subathon timer"), &s.cardTimer},
+	       {QStringLiteral("Action timer"), &s.cardActionTimer},
+	       {QStringLiteral("Goal"), &s.cardGoal},
+	       {QStringLiteral("Spin wheel"), &s.cardWheel},
+	       {QStringLiteral("Counters"), &s.cardCounters},
+	       {QStringLiteral("Alerts (test / replay / clear chat)"), &s.cardAlerts},
+	       {QStringLiteral("Activity feed"), &s.cardActivity}});
+	group(gen, QStringLiteral("Automation"),
 	      {{QStringLiteral("Start / resume the subathon timer when I start streaming"), &s.autoStartTimer},
 	       {QStringLiteral("Pause the subathon timer when I stop streaming"), &s.autoPauseTimer}});
-	group(QStringLiteral("Updates"),
+	group(gen, QStringLiteral("Updates"),
 	      {{QStringLiteral("Tell me when a new version of the plugin is out"), &s.checkUpdates},
 	       {QStringLiteral("Download updates automatically and install them when I close OBS"),
 		&s.autoInstallUpdates}});
-	auto *hint = new QLabel(
-		QStringLiteral(
-			"Hotkeys for timers, goal, wheel, counters and alerts are in OBS → Settings → Hotkeys (search “GoalForgeX”)."),
-		&dlg);
-	hint->setWordWrap(true);
-	hint->setObjectName(QStringLiteral("gfxMuted"));
-	root->addWidget(hint);
+	note(gen,
+	     QStringLiteral(
+		     "Hotkeys for timers, goal, wheel, counters and alerts are in OBS → Settings → Hotkeys (search “GoalForgeX”)."));
+	gen->addStretch(1);
+
+	// ── MultiChat ──
+	QVBoxLayout *mc = page(QStringLiteral("MultiChat"));
+	group(mc, QStringLiteral("Platforms"),
+	      {{QStringLiteral("YouTube chat (read + reply)"), &s.chatYouTube},
+	       {QStringLiteral("TikTok LIVE chat (read-only)"), &s.chatTikTok}});
+	note(mc, QStringLiteral("Twitch and Kick are always included. Each platform shows up once it's connected on "
+				"goalforgex.com → Account. YouTube and TikTok chat appear while you're live there."));
+	group(mc, QStringLiteral("Look"),
+	      {{QStringLiteral("Platform icon on each message"), &s.chatIcons},
+	       {QStringLiteral("HOST / MOD / VIP / SUB badges"), &s.chatBadges},
+	       {QStringLiteral("Chatters' own name colours"), &s.chatNameColors},
+	       {QStringLiteral("Show the time next to each message"), &s.chatTimestamps},
+	       {QStringLiteral("Compact lines"), &s.chatCompact},
+	       {QStringLiteral("Shade every other message"), &s.chatAltRows},
+	       {QStringLiteral("Viewers, uptime and stream info per platform"), &s.chatStats}});
+	group(mc, QStringLiteral("Behaviour"),
+	      {{QStringLiteral("Highlight messages that mention me or my highlight words"), &s.chatHighlightMentions},
+	       {QStringLiteral("Quick moderation buttons on each message (delete / 10 min timeout)"), &s.chatQuickMod},
+	       {QStringLiteral("Keep the text of deleted messages (struck through)"), &s.chatShowDeleted},
+	       {QStringLiteral("Pause the chat while my mouse is over it"), &s.chatPauseOnHover}});
+	auto *chatSizeRow = new QHBoxLayout();
+	auto *chatSizeLbl = new QLabel(QStringLiteral("Chat text size"), mc->parentWidget());
+	chatSizeLbl->setObjectName(QStringLiteral("gfxFieldLabel"));
+	auto *chatSize = new QComboBox(mc->parentWidget());
+	chatSize->addItem(QStringLiteral("Same as the dock"), 0);
+	for (int pt = 7; pt <= 22; ++pt)
+		chatSize->addItem(QStringLiteral("%1 pt").arg(pt), pt);
+	chatSize->setCurrentIndex(qMax(0, chatSize->findData(s.chatFontSize)));
+	chatSize->setToolTip(QStringLiteral("Also Ctrl + scroll over the chat"));
+	chatSizeRow->addWidget(chatSizeLbl);
+	chatSizeRow->addWidget(chatSize, 1);
+	mc->addLayout(chatSizeRow);
+	mc->addStretch(1);
+
+	// ── Events ──
+	QVBoxLayout *ev = page(QStringLiteral("Events"));
+	group(ev, QStringLiteral("Show in the Events tab"),
+	      {{QStringLiteral("🎁  Gift bombs — with the list of who got a sub"), &s.evGiftBombs},
+	       {QStringLiteral("🎯  Channel point redemptions"), &s.evPoints},
+	       {QStringLiteral("🔥  Watch streaks"), &s.evStreaks},
+	       {QStringLiteral("🔔  Sub / resub / bits / raid / follow alerts"), &s.evAlerts},
+	       {QStringLiteral("🎵  TikTok gifts, follows and subs"), &s.evTikTok},
+	       {QStringLiteral("▶️  YouTube Super Chats, Super Stickers and memberships"), &s.evYouTube},
+	       {QStringLiteral("⏱  Timer and spin-wheel activity"), &s.evTimers}});
+	group(ev, QStringLiteral("Gift bombs"),
+	      {{QStringLiteral("Open each gift bomb with its recipients showing"), &s.evAutoExpand}});
+	note(ev,
+	     QStringLiteral(
+		     "Right-click a gift bomb to copy every recipient's name, or a ready-made thank-you "
+		     "message. Gift bombs, redemptions and streaks can also trigger scene changes — see the Reactions tab."));
+	ev->addStretch(1);
+
+	// ── Appearance (previews live on the dock) ──
+	QVBoxLayout *ap = page(QStringLiteral("Appearance"));
+	QWidget *apParent = ap->parentWidget();
+	auto *form = new QGridLayout();
+	form->setHorizontalSpacing(10);
+	form->setVerticalSpacing(8);
+	const auto label = [apParent](const QString &t) {
+		auto *l = new QLabel(t, apParent);
+		l->setObjectName(QStringLiteral("gfxFieldLabel"));
+		return l;
+	};
+	auto *themeBox = new QComboBox(apParent);
+	const QList<QPair<QString, QString>> themes = {
+		{QStringLiteral("graphite"), QStringLiteral("Graphite (default)")},
+		{QStringLiteral("midnight"), QStringLiteral("Midnight blue")},
+		{QStringLiteral("oled"), QStringLiteral("OLED black")},
+		{QStringLiteral("slate"), QStringLiteral("Slate (lighter)")},
+		{QStringLiteral("warm"), QStringLiteral("Warm")},
+	};
+	for (const auto &t : themes)
+		themeBox->addItem(t.second, t.first);
+	themeBox->setCurrentIndex(qMax(0, themeBox->findData(s.theme)));
+	form->addWidget(label(QStringLiteral("Theme")), 0, 0);
+	form->addWidget(themeBox, 0, 1);
+
+	// Accent: swatches + a custom colour.
+	auto *swatchRow = new QHBoxLayout();
+	swatchRow->setSpacing(5);
+	const QList<QPair<QString, QString>> swatches = {
+		{QStringLiteral("#ffb020"), QStringLiteral("Amber (default)")},
+		{QStringLiteral("#8b5cf6"), QStringLiteral("Violet")},
+		{QStringLiteral("#3b82f6"), QStringLiteral("Blue")},
+		{QStringLiteral("#06b6d4"), QStringLiteral("Cyan")},
+		{QStringLiteral("#22c55e"), QStringLiteral("Green")},
+		{QStringLiteral("#ec4899"), QStringLiteral("Pink")},
+		{QStringLiteral("#ef4444"), QStringLiteral("Red")},
+		{QStringLiteral("#f97316"), QStringLiteral("Orange")},
+	};
+	QList<QPushButton *> swatchBtns;
+	const auto paintSwatch = [](QPushButton *b, const QString &color, bool selected) {
+		b->setStyleSheet(
+			QStringLiteral(
+				"QPushButton { background: %1; border: 2px solid %2; border-radius: 11px; "
+				"min-width: 18px; max-width: 18px; min-height: 18px; max-height: 18px; padding: 0; }")
+				.arg(color, selected ? QStringLiteral("#ffffff") : QStringLiteral("transparent")));
+	};
+	for (const auto &sw : swatches) {
+		auto *b = new QPushButton(apParent);
+		b->setToolTip(sw.second);
+		b->setCursor(Qt::PointingHandCursor);
+		b->setProperty("gfxColor", sw.first);
+		paintSwatch(b, sw.first, s.accent == sw.first);
+		swatchRow->addWidget(b);
+		swatchBtns << b;
+	}
+	auto *customBtn = new QPushButton(QStringLiteral("Custom…"), apParent);
+	theme::setRole(customBtn, "ghost");
+	swatchRow->addWidget(customBtn);
+	swatchRow->addStretch(1);
+	form->addWidget(label(QStringLiteral("Accent")), 1, 0);
+	form->addLayout(swatchRow, 1, 1);
+
+	auto *sizeBox = new QComboBox(apParent);
+	const QList<QPair<int, QString>> sizes = {{90, QStringLiteral("Small")},
+						  {100, QStringLiteral("Default")},
+						  {115, QStringLiteral("Large")},
+						  {130, QStringLiteral("Extra large")}};
+	for (const auto &z : sizes)
+		sizeBox->addItem(z.second, z.first);
+	sizeBox->setCurrentIndex(qMax(0, sizeBox->findData(s.textScale)));
+	form->addWidget(label(QStringLiteral("Text size")), 2, 0);
+	form->addWidget(sizeBox, 2, 1);
+
+	auto *compactBox = new QCheckBox(QStringLiteral("Compact — tighter buttons and lists"), apParent);
+	compactBox->setChecked(s.compact);
+	form->addWidget(compactBox, 3, 1);
+	form->setColumnStretch(1, 1);
+	ap->addLayout(form);
+
+	auto *resetBtn = new QPushButton(QStringLiteral("Reset appearance"), apParent);
+	theme::setRole(resetBtn, "ghost");
+	ap->addWidget(resetBtn, 0, Qt::AlignLeft);
+	note(ap, QStringLiteral(
+			 "Changes show on the dock right away; Cancel puts everything back. Live / ON-AIR red and "
+			 "the Twitch, Kick, YouTube and TikTok colours always stay the same so they're easy to spot."));
+	ap->addStretch(1);
+
+	// Live preview: write straight into the settings, restyle; Cancel restores `before`.
+	const auto preview = [this, themeBox, sizeBox, compactBox, &s] {
+		s.theme = themeBox->currentData().toString();
+		s.textScale = sizeBox->currentData().toInt();
+		s.compact = compactBox->isChecked();
+		applyAppearance();
+	};
+	const auto setAccent = [&s, swatchBtns, paintSwatch, preview](const QString &color) {
+		s.accent = color.toLower();
+		for (QPushButton *b : swatchBtns) {
+			const QString c = b->property("gfxColor").toString();
+			paintSwatch(b, c, c == s.accent);
+		}
+		preview();
+	};
+	for (QPushButton *b : swatchBtns)
+		connect(b, &QPushButton::clicked, &dlg,
+			[b, setAccent] { setAccent(b->property("gfxColor").toString()); });
+	connect(customBtn, &QPushButton::clicked, &dlg, [&dlg, &s, setAccent] {
+		const QColor c = QColorDialog::getColor(QColor(s.accent), &dlg, QStringLiteral("Accent colour"));
+		if (c.isValid())
+			setAccent(c.name());
+	});
+	connect(themeBox, &QComboBox::currentIndexChanged, &dlg, [preview](int) { preview(); });
+	connect(sizeBox, &QComboBox::currentIndexChanged, &dlg, [preview](int) { preview(); });
+	connect(compactBox, &QCheckBox::toggled, &dlg, [preview](bool) { preview(); });
+	connect(resetBtn, &QPushButton::clicked, &dlg, [themeBox, sizeBox, compactBox, setAccent] {
+		const Settings d;
+		themeBox->setCurrentIndex(qMax(0, themeBox->findData(d.theme)));
+		sizeBox->setCurrentIndex(qMax(0, sizeBox->findData(d.textScale)));
+		compactBox->setChecked(d.compact);
+		setAccent(d.accent);
+	});
+
 	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
 	if (QPushButton *okBtn = buttons->button(QDialogButtonBox::Ok))
 		theme::setRole(okBtn, "primary");
 	root->addWidget(buttons);
 	connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
 	connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-	if (dlg.exec() != QDialog::Accepted)
+	if (dlg.exec() != QDialog::Accepted) {
+		s = before;
+		applyAppearance();
 		return;
+	}
 	for (const Opt &o : opts)
 		*o.value = o.box->isChecked();
+	s.chatFontSize = chatSize->currentData().toInt();
 	saveSettings();
 	rebuildTabs();
-	if (chatPanel_)
-		chatPanel_->refresh();
+	applyAppearance();
 	scheduleChat(0);
 	checkForUpdate();
+}
+
+void GfxDock::applyAppearance()
+{
+	theme::applyTo(this);
+	const qreal dpr = devicePixelRatioF();
+	if (brandLbl_)
+		brandLbl_->setPixmap(theme::brandMark(28, dpr));
+	if (heroMark_)
+		heroMark_->setPixmap(theme::brandMark(56, dpr));
+	livePanel_->applySettings();
+	eventsPanel_->applySettings();
+	chatPanel_->refresh();
+	// Rich-text labels that carry the accent colour.
+	setState(state_);
+}
+
+void GfxDock::updateEventsTabTitle()
+{
+	const int i = eventsPanel_ ? tabs_->indexOf(eventsPanel_) : -1;
+	if (i < 0)
+		return;
+	tabs_->setTabText(i, eventsUnread_ > 0 ? QStringLiteral("Events · %1")
+							 .arg(eventsUnread_ > 99 ? QStringLiteral("99+")
+										 : QString::number(eventsUnread_))
+					       : QStringLiteral("Events"));
 }
 
 // ── State + messages ─────────────────────────────────────────────
@@ -620,8 +861,8 @@ void GfxDock::setState(State s, const QString &message, bool isError)
 			QStringLiteral("<span style='color:%1'>●</span> %2").arg(QLatin1String(theme::kGreen), who));
 		break;
 	case State::NeedsReconnect:
-		statusLbl_->setText(QStringLiteral("<span style='color:%1'>⚠ Needs reconnecting</span>")
-					    .arg(QLatin1String(theme::kAmber)));
+		statusLbl_->setText(
+			QStringLiteral("<span style='color:%1'>⚠ Needs reconnecting</span>").arg(theme::accentColor()));
 		break;
 	}
 	// Disconnected has the big Connect button on the welcome card instead.
@@ -878,6 +1119,8 @@ void GfxDock::pollState()
 			if (firstOrReset) {
 				feedId_ = st.feed;
 				livePanel_->clearEvents();
+				eventsPanel_->clearEvents();
+				eventsUnread_ = 0;
 			}
 			QList<FeedEvent> fresh;
 			for (const FeedEvent &e : st.events)
@@ -888,6 +1131,13 @@ void GfxDock::pollState()
 			lastState_ = st;
 			livePanel_->setState(st);
 			livePanel_->addEvents(fresh);
+			eventsPanel_->setChannelPointsStatus(st.channelPoints);
+			const int shownNew = eventsPanel_->addEvents(fresh);
+			// History from before OBS connected isn't "unread".
+			if (!firstOrReset && shownNew > 0 && !(isVisible() && tabs_->currentWidget() == eventsPanel_)) {
+				eventsUnread_ += shownNew;
+				updateEventsTabTitle();
+			}
 			renderAirChip();
 			// History from before OBS connected is shown, never reacted to.
 			if (!firstOrReset)
@@ -1188,9 +1438,12 @@ void GfxDock::pollChat()
 	if (state_ != State::Connected || !settings().tabChat || chatInFlight_)
 		return;
 	chatInFlight_ = true;
-	const QString path = QStringLiteral("/api/obs/chat?feed=%1&since=%2")
+	// The platforms list also tells the server which chats to keep connected
+	// (YouTube / TikTok only while switched on here).
+	const QString path = QStringLiteral("/api/obs/chat?feed=%1&since=%2&platforms=%3")
 				     .arg(chatFeed_.isEmpty() ? QStringLiteral("none") : chatFeed_)
-				     .arg(chatSeq_);
+				     .arg(chatSeq_)
+				     .arg(GfxChatPanel::wantedPlatforms().join(QLatin1Char(',')));
 	runAsync(
 		this, [path] { return apiGet(path); },
 		[this](const ApiResult &r) {

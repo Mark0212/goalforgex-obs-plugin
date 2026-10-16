@@ -379,7 +379,7 @@ void GfxLivePanel::setState(const LiveState &s)
 
 	// Goal
 	goalLbl_->setText(QStringLiteral("Subs  <b style='color:%1'>%2</b> / %3")
-				  .arg(QLatin1String(gfx::theme::kAmber))
+				  .arg(gfx::theme::accentColor())
 				  .arg(s.goalCurrent)
 				  .arg(s.goalTarget));
 	goalBar_->setRange(0, qMax(1, s.goalTarget));

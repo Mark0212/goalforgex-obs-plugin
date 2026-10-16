@@ -8,8 +8,13 @@ the Free Software Foundation; either version 2 of the License, or
 (at your option) any later version.
 */
 #include "gfx-theme.hpp"
+#include "gfx-settings.hpp"
 
+#include <QApplication>
 #include <QColor>
+#include <QRegularExpression>
+#include <QRegularExpressionMatch>
+#include <QStringView>
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
@@ -23,8 +28,228 @@ the Free Software Foundation; either version 2 of the License, or
 
 namespace gfx::theme {
 
-// Split into several literals: MSVC caps a single string literal at ~16 KB.
+// ── Appearance ──────────────────────────────────────────────────────
+// The style sheet below is written once in the default "graphite + amber"
+// palette. Settings → Appearance re-colours it on the way out instead of
+// keeping five copies: every colour literal is classified and remapped —
+//   • the amber family (hue ≈ 25–50°, saturated) follows the chosen accent,
+//     keeping each shade's lightness, so hover/pressed/soft variants stay
+//     consistent for any accent;
+//   • the graphite neutrals (low saturation) are re-tinted by the preset;
+//   • everything else (ON-AIR red, live green, Twitch purple, Kick green)
+//     is left alone — those colours mean something.
+// Text size scales every `pt` and adds a base size; Compact shrinks paddings.
+
+namespace {
+
+constexpr double kAmberHue = 39.0 / 360.0; // #ffb020
+
+bool isAmberFamily(const QColor &c)
+{
+	const double h = c.hslHueF(), s = c.hslSaturationF();
+	return h >= 0 && h >= 25.0 / 360.0 && h <= 50.0 / 360.0 && s >= 0.35;
+}
+
+bool isNeutral(const QColor &c)
+{
+	return c.hslSaturationF() < 0.35 || c.lightnessF() < 0.06;
+}
+
+struct Preset {
+	double hue = -1;     // neutral tint hue (0–1), −1 = keep
+	double satMul = 1.0; // neutral saturation
+	double satAdd = 0.0;
+	double darkMul = 1.0; // lightness of dark surfaces (L < 0.5)
+	double darkAdd = 0.0;
+};
+
+Preset presetFor(const QString &name)
+{
+	Preset p;
+	if (name == QLatin1String("midnight")) {
+		p.hue = 228.0 / 360.0;
+		p.satMul = 1.6;
+		p.satAdd = 0.10;
+		p.darkMul = 0.92;
+	} else if (name == QLatin1String("oled")) {
+		p.satMul = 0.5;
+		p.darkMul = 0.55;
+	} else if (name == QLatin1String("slate")) {
+		p.hue = 215.0 / 360.0;
+		p.satMul = 0.9;
+		p.darkMul = 1.22;
+		p.darkAdd = 0.035;
+	} else if (name == QLatin1String("warm")) {
+		p.hue = 28.0 / 360.0;
+		p.satMul = 1.3;
+		p.satAdd = 0.04;
+	}
+	return p;
+}
+
+QColor remapColor(const QColor &in)
+{
+	if (!in.isValid())
+		return in;
+	const gfx::Settings &s = gfx::settings();
+	const QColor accent(s.accent);
+	QColor c = in;
+	if (isAmberFamily(in) && accent.isValid() && accent.name() != QLatin1String("#ffb020")) {
+		// Same lightness, accent hue; saturation follows the accent's own.
+		const double aSat = accent.hslSaturationF() < 0 ? 0.0 : accent.hslSaturationF();
+		const double hue = accent.hslHueF() < 0 ? kAmberHue : accent.hslHueF();
+		double sat = in.hslSaturationF() * qBound(0.0, aSat / 1.0, 1.0);
+		double light = in.lightnessF();
+		// Very light/dark accents: pull the mid-tones toward the accent's own lightness.
+		if (light > 0.45 && light < 0.8)
+			light = light + (accent.lightnessF() - 0.56) * 0.8;
+		c.setHslF(static_cast<float>(hue), static_cast<float>(qBound(0.0, sat, 1.0)),
+			  static_cast<float>(qBound(0.0, light, 1.0)), in.alphaF());
+		return c;
+	}
+	if (isNeutral(in) && s.theme != QLatin1String("graphite")) {
+		const Preset p = presetFor(s.theme);
+		const double l = in.lightnessF();
+		double sat = qBound(0.0, in.hslSaturationF() * p.satMul + (l < 0.5 ? p.satAdd : p.satAdd * 0.3), 1.0);
+		double hue = p.hue >= 0 ? p.hue : (in.hslHueF() < 0 ? 0.0 : in.hslHueF());
+		double light = l < 0.5 ? qBound(0.0, l * p.darkMul + p.darkAdd, 0.5) : l;
+		if (in.hslSaturationF() <= 0.0 && l >= 0.98)
+			return in; // pure white stays white
+		c.setHslF(static_cast<float>(hue), static_cast<float>(sat), static_cast<float>(light), in.alphaF());
+		return c;
+	}
+	return in;
+}
+
+QString hex(const QColor &c)
+{
+	return c.name(QColor::HexRgb);
+}
+
+// Primary buttons print dark text on the accent; a dark accent needs white.
+QString primaryTextColor()
+{
+	const QColor a(gfx::settings().accent);
+	return a.isValid() && a.lightnessF() < 0.55 ? QStringLiteral("#ffffff") : QStringLiteral("#1b1300");
+}
+
+QString applyAppearance(QString qss)
+{
+	const gfx::Settings &s = gfx::settings();
+	// Text on the primary (accent) button — decided before the generic remap.
+	qss.replace(QStringLiteral("color: #1b1300;"), QStringLiteral("color: @PRIMARYTEXT@;"));
+
+	// #rrggbb literals
+	static const QRegularExpression hexRe(QStringLiteral("#([0-9a-fA-F]{6})\\b"));
+	QString out;
+	out.reserve(qss.size());
+	qsizetype last = 0;
+	auto it = hexRe.globalMatch(qss);
+	while (it.hasNext()) {
+		const QRegularExpressionMatch m = it.next();
+		out += QStringView(qss).mid(last, m.capturedStart() - last);
+		out += hex(remapColor(QColor(m.captured(0))));
+		last = m.capturedEnd();
+	}
+	out += QStringView(qss).mid(last);
+	qss = out;
+
+	// rgba(r, g, b, a) literals (tab-bar scroller)
+	static const QRegularExpression rgbaRe(QStringLiteral("rgba\\((\\d+),\\s*(\\d+),\\s*(\\d+),\\s*([0-9.]+)\\)"));
+	out.clear();
+	last = 0;
+	it = rgbaRe.globalMatch(qss);
+	while (it.hasNext()) {
+		const QRegularExpressionMatch m = it.next();
+		out += QStringView(qss).mid(last, m.capturedStart() - last);
+		const QColor c =
+			remapColor(QColor(m.captured(1).toInt(), m.captured(2).toInt(), m.captured(3).toInt()));
+		out += QStringLiteral("rgba(%1, %2, %3, %4)")
+			       .arg(c.red())
+			       .arg(c.green())
+			       .arg(c.blue())
+			       .arg(m.captured(4));
+		last = m.capturedEnd();
+	}
+	out += QStringView(qss).mid(last);
+	qss = out;
+	qss.replace(QStringLiteral("@PRIMARYTEXT@"), primaryTextColor());
+
+	// Text size: every explicit pt size, plus a base size for everything else.
+	if (s.textScale != 100) {
+		const double f = s.textScale / 100.0;
+		static const QRegularExpression ptRe(QStringLiteral("(\\d+(?:\\.\\d+)?)pt\\b"));
+		out.clear();
+		last = 0;
+		it = ptRe.globalMatch(qss);
+		while (it.hasNext()) {
+			const QRegularExpressionMatch m = it.next();
+			out += QStringView(qss).mid(last, m.capturedStart() - last);
+			out += QString::number(qMax(6.0, m.captured(1).toDouble() * f), 'f', 1) + QStringLiteral("pt");
+			last = m.capturedEnd();
+		}
+		out += QStringView(qss).mid(last);
+		qss = out;
+		const double basePt = QApplication::font().pointSizeF() > 0 ? QApplication::font().pointSizeF() : 9.0;
+		qss.prepend(QStringLiteral("QWidget { font-size: %1pt; }\n").arg(QString::number(basePt * f, 'f', 1)));
+	}
+
+	// Compact: tighter padding everywhere (layout margins stay as they are).
+	if (s.compact) {
+		static const QRegularExpression padRe(QStringLiteral("padding:([^;}]*)"));
+		static const QRegularExpression pxRe(QStringLiteral("(\\d+)px"));
+		out.clear();
+		last = 0;
+		it = padRe.globalMatch(qss);
+		while (it.hasNext()) {
+			const QRegularExpressionMatch m = it.next();
+			out += QStringView(qss).mid(last, m.capturedStart() - last);
+			QString vals = m.captured(1);
+			QString shrunk;
+			qsizetype l2 = 0;
+			auto pit = pxRe.globalMatch(vals);
+			while (pit.hasNext()) {
+				const QRegularExpressionMatch pm = pit.next();
+				shrunk += QStringView(vals).mid(l2, pm.capturedStart() - l2);
+				shrunk += QString::number(qRound(pm.captured(1).toInt() * 0.6)) + QStringLiteral("px");
+				l2 = pm.capturedEnd();
+			}
+			shrunk += QStringView(vals).mid(l2);
+			out += QStringLiteral("padding:") + shrunk;
+			last = m.capturedEnd();
+		}
+		out += QStringView(qss).mid(last);
+		qss = out;
+	}
+	return qss;
+}
+
+} // namespace
+
+QString mapColor(const QString &hexColor)
+{
+	return hex(remapColor(QColor(hexColor)));
+}
+
+QString accentColor()
+{
+	const QColor a(gfx::settings().accent);
+	return a.isValid() ? a.name() : QString::fromLatin1(kAmber);
+}
+
+void applyTo(QWidget *dockRoot)
+{
+	if (dockRoot)
+		dockRoot->setStyleSheet(dockStyleSheet());
+}
+
 QString dockStyleSheet()
+{
+	return applyAppearance(baseStyleSheet());
+}
+
+// Split into several literals: MSVC caps a single string literal at ~16 KB.
+QString baseStyleSheet()
 {
 	QString qss;
 
@@ -195,6 +420,14 @@ QListWidget::item:hover:!selected { background: #1d2129; }
 QListWidget::item:selected { background: #2a2212; color: #ffffff; border: 1px solid #6b4d14; }
 QListWidget#gfxActivity::item { padding: 4px 6px; color: #c9ced8; }
 
+QTreeWidget#gfxEvents {
+	background: #0f1115; color: #e8eaf0; border: 1px solid #262a33; border-radius: 10px; padding: 4px; outline: 0;
+}
+QTreeWidget#gfxEvents::item { padding: 4px 4px; border-radius: 5px; }
+QTreeWidget#gfxEvents::item:hover { background: #1a1d24; }
+QTreeWidget#gfxEvents::item:selected { background: #2a2212; color: #ffffff; }
+QTreeWidget#gfxEvents::branch { background: transparent; }
+
 QProgressBar { background: #232731; border: 0; border-radius: 3px; }
 QProgressBar::chunk {
 	border-radius: 3px;
@@ -264,6 +497,8 @@ QFrame#gfxStatCard { background: #15181e; border: 1px solid #262a33; border-radi
 QFrame#gfxStatCard:hover { border-color: #3a4150; }
 QFrame#gfxStatCard[gfxState="twitch"] { background: #1a1528; border-color: #4b2f8f; }
 QFrame#gfxStatCard[gfxState="kick"] { background: #12200c; border-color: #2c6b12; }
+QFrame#gfxStatCard[gfxState="youtube"] { background: #261012; border-color: #8f2430; }
+QFrame#gfxStatCard[gfxState="tiktok"] { background: #0b1f24; border-color: #1d7480; }
 QLabel#gfxStatSub, QLabel#gfxStatSummary { color: #8b93a3; font-size: 8pt; }
 
 QTextBrowser#gfxChatView {
@@ -278,6 +513,7 @@ QPushButton#gfxTarget {
 QPushButton#gfxTarget:hover { color: #c9ced8; border-color: #3d4452; }
 QPushButton#gfxTarget[gfxState="twitch"]:checked { color: #ffffff; background: #2a1f4d; border-color: #9146ff; }
 QPushButton#gfxTarget[gfxState="kick"]:checked { color: #d9ffc7; background: #16300a; border-color: #53fc18; }
+QPushButton#gfxTarget[gfxState="youtube"]:checked { color: #ffffff; background: #3a1216; border-color: #ff3048; }
 QPushButton#gfxTarget:disabled { color: #3f4552; background: #15171c; border-color: #22262d; }
 
 QLineEdit#gfxChatInput { padding: 6px 10px; border-radius: 8px; background: #0f1115; }
@@ -299,10 +535,10 @@ QPixmap brandMark(int px, qreal devicePixelRatio)
 	const QRectF r(0.5, 0.5, px - 1.0, px - 1.0);
 	const qreal radius = px * 0.26;
 
-	// Tile: red → amber
+	// Tile: red → accent (amber by default)
 	QLinearGradient tile(r.topLeft(), r.bottomRight());
 	tile.setColorAt(0.0, QColor(0xff, 0x3b, 0x4f));
-	tile.setColorAt(1.0, QColor(0xff, 0xb0, 0x20));
+	tile.setColorAt(1.0, QColor(accentColor()));
 	QPainterPath path;
 	path.addRoundedRect(r, radius, radius);
 	p.fillPath(path, tile);

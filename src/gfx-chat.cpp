@@ -58,6 +58,13 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QVariant>
 #include <QVBoxLayout>
 #include <QWheelEvent>
+#include <QFont>
+#include <QGridLayout>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPointF>
+#include <QPolygonF>
+#include <QRectF>
 
 #include <utility>
 
@@ -66,42 +73,121 @@ using namespace gfx;
 namespace {
 
 constexpr int kKeep = 500;   // messages kept in the panel
-constexpr int kMaxLen = 500; // Twitch and Kick both cap at 500
+constexpr int kMaxLen = 500; // Twitch / Kick cap at 500 (YouTube 200 — the server reports a rejection)
 constexpr int kHistory = 50; // sent messages ↑/↓ can recall
 constexpr int kQuickTimeout = 600;
 
-// Platform icon (src/resources/*.png, 64 px) scaled once per size + screen
-// scale with smooth filtering — the text renderer would otherwise shrink it
-// on every repaint and blur it.
+// Everything platform-specific in one place.
+struct PlatformInfo {
+	const char *key;
+	const char *name;
+	bool canSend;        // the streamer can post there from OBS
+	bool canMod;         // delete / timeout / ban from a chat line
+	const char *profile; // profile URL prefix (+ login)
+	const char *channel; // the streamer's own channel URL must start with this
+};
+const PlatformInfo kInfo[] = {
+	{"twitch", "Twitch", true, true, "https://www.twitch.tv/", "https://www.twitch.tv/"},
+	{"kick", "Kick", true, true, "https://kick.com/", "https://kick.com/"},
+	{"youtube", "YouTube", true, false, "https://www.youtube.com/channel/", "https://www.youtube.com/"},
+	{"tiktok", "TikTok", false, false, "https://www.tiktok.com/@", "https://www.tiktok.com/"},
+};
+
+const PlatformInfo *info(const QString &p)
+{
+	for (const PlatformInfo &i : kInfo)
+		if (p == QLatin1String(i.key))
+			return &i;
+	return nullptr;
+}
+
+QString platformName(const QString &p)
+{
+	const PlatformInfo *i = info(p);
+	return i ? QString::fromLatin1(i->name) : p;
+}
+
+bool canMod(const QString &p)
+{
+	const PlatformInfo *i = info(p);
+	return i && i->canMod;
+}
+
+// YouTube / TikTok have no bundled artwork — drawn at the requested size.
+QImage drawnIcon(const QString &platform, int px)
+{
+	QImage img(px, px, QImage::Format_ARGB32_Premultiplied);
+	img.fill(Qt::transparent);
+	QPainter p(&img);
+	p.setRenderHint(QPainter::Antialiasing, true);
+	const qreal s = px;
+	if (platform == QLatin1String("youtube")) {
+		QPainterPath path;
+		path.addRoundedRect(QRectF(0, s * 0.16, s, s * 0.68), s * 0.18, s * 0.18);
+		p.fillPath(path, QColor(0xff, 0x00, 0x33));
+		QPolygonF tri;
+		tri << QPointF(s * 0.40, s * 0.33) << QPointF(s * 0.40, s * 0.67) << QPointF(s * 0.69, s * 0.50);
+		p.setPen(Qt::NoPen);
+		p.setBrush(Qt::white);
+		p.drawPolygon(tri);
+	} else { // tiktok
+		QPainterPath path;
+		path.addRoundedRect(QRectF(0, 0, s, s), s * 0.24, s * 0.24);
+		p.fillPath(path, QColor(0x01, 0x01, 0x01));
+		QFont f;
+		f.setBold(true);
+		f.setPixelSize(qMax(6, qRound(s * 0.78)));
+		p.setFont(f);
+		const QRectF box(0, -s * 0.04, s, s);
+		const qreal o = qMax<qreal>(0.6, s * 0.05);
+		p.setPen(QColor(0x25, 0xf4, 0xee));
+		p.drawText(box.translated(-o, -o), Qt::AlignCenter, QStringLiteral("♪"));
+		p.setPen(QColor(0xfe, 0x2c, 0x55));
+		p.drawText(box.translated(o, o), Qt::AlignCenter, QStringLiteral("♪"));
+		p.setPen(Qt::white);
+		p.drawText(box, Qt::AlignCenter, QStringLiteral("♪"));
+	}
+	p.end();
+	return img;
+}
+
+// Platform icon (Twitch / Kick: src/resources/*.png, 64 px; YouTube / TikTok:
+// drawn) scaled once per size + screen scale with smooth filtering — the text
+// renderer would otherwise shrink it on every repaint and blur it.
 QImage platformIcon(const QString &platform, int logicalPx, qreal dpr)
 {
 	static QHash<QString, QImage> cache;
-	const bool kick = platform == QLatin1String("kick");
-	const QString key = QStringLiteral("%1/%2/%3").arg(kick ? 1 : 0).arg(logicalPx).arg(dpr);
+	const QString key = QStringLiteral("%1/%2/%3").arg(platform).arg(logicalPx).arg(dpr);
 	auto it = cache.constFind(key);
 	if (it != cache.constEnd())
 		return it.value();
-	const QImage src(kick ? QStringLiteral(":/goalforgex/kick.png") : QStringLiteral(":/goalforgex/twitch.png"));
+	const int px = qMax(1, qRound(logicalPx * dpr));
 	QImage img;
-	if (!src.isNull()) {
-		const int px = qMax(1, qRound(logicalPx * dpr));
-		img = src.scaled(px, px, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-		img.setDevicePixelRatio(dpr);
+	if (platform == QLatin1String("twitch") || platform == QLatin1String("kick")) {
+		const QImage src(QStringLiteral(":/goalforgex/%1.png").arg(platform));
+		if (!src.isNull())
+			img = src.scaled(px, px, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+	} else if (platform == QLatin1String("youtube") || platform == QLatin1String("tiktok")) {
+		img = drawnIcon(platform, px);
 	}
+	if (!img.isNull())
+		img.setDevicePixelRatio(dpr);
 	cache.insert(key, img);
 	return img;
 }
 
-// Profile links: only plain usernames ever become a URL.
+// Profile links: only plain usernames / channel ids ever become a URL.
+// (TikTok names can contain dots; YouTube logins are channel ids.)
 const QRegularExpression &loginRe()
 {
-	static const QRegularExpression re(QStringLiteral("^[A-Za-z0-9_][A-Za-z0-9_-]{0,39}$"));
+	static const QRegularExpression re(QStringLiteral("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,39}$"));
 	return re;
 }
 
+// Message ids ride in the line links (user:… / mod:…), split on ':'.
 const QRegularExpression &msgIdRe()
 {
-	static const QRegularExpression re(QStringLiteral("^[A-Za-z0-9-]{1,80}$"));
+	static const QRegularExpression re(QStringLiteral("^[A-Za-z0-9._=-]{1,160}$"));
 	return re;
 }
 
@@ -114,15 +200,15 @@ const QRegularExpression &urlRe()
 
 void openProfile(const QString &platform, const QString &login)
 {
-	const QString l = login.toLower();
-	if (!loginRe().match(l).hasMatch())
+	const PlatformInfo *i = info(platform);
+	if (!i || !loginRe().match(login).hasMatch())
 		return;
-	QDesktopServices::openUrl(QUrl((platform == QLatin1String("kick") ? QStringLiteral("https://kick.com/")
-									  : QStringLiteral("https://www.twitch.tv/")) +
-				       l));
+	// Twitch / Kick / TikTok names are case-insensitive; YouTube channel ids are not.
+	const QString l = platform == QLatin1String("youtube") ? login : login.toLower();
+	QDesktopServices::openUrl(QUrl(QString::fromLatin1(i->profile) + l));
 }
 
-// The feed: serves the platform icons to the HTML as gfx:twitch/<px> / gfx:kick/<px>.
+// The feed: serves the platform icons to the HTML as gfx:<platform>/<px>.
 class ChatView : public QTextBrowser {
 public:
 	using QTextBrowser::QTextBrowser;
@@ -175,7 +261,7 @@ QString tag(const char *text, const char *color, qreal pt)
 QTextBlockFormat lineFormat(bool host, bool highlighted, bool firstTimer, bool shaded)
 {
 	QTextBlockFormat f;
-	f.setBottomMargin(4);
+	f.setBottomMargin(settings().chatCompact ? 1 : 4);
 	f.setLineHeight(112, QTextBlockFormat::ProportionalHeight);
 	QColor bg;
 	if (host)
@@ -193,9 +279,20 @@ QTextBlockFormat lineFormat(bool host, bool highlighted, bool firstTimer, bool s
 
 } // namespace
 
+QStringList GfxChatPanel::wantedPlatforms()
+{
+	QStringList p{QStringLiteral("twitch"), QStringLiteral("kick")};
+	if (settings().chatYouTube)
+		p << QStringLiteral("youtube");
+	if (settings().chatTikTok)
+		p << QStringLiteral("tiktok");
+	return p;
+}
+
 GfxChatPanel::GfxChatPanel(QWidget *parent) : QWidget(parent)
 {
 	buildUi();
+	updateFilters();
 	updateTargets();
 	rebuildHighlightRe();
 	applyFontSize();
@@ -249,7 +346,7 @@ void GfxChatPanel::buildUi()
 	root->setSpacing(6);
 	outer->addWidget(main_, 1);
 
-	// All | Twitch | Kick | @   ·   🔍 ⏸ ⋯ ●●
+	// All | Twitch | Kick | YouTube | TikTok | @   ·   🔍 ⏸ ⋯ ●●  (platform chips only while 2+ are connected)
 	auto *top = new QHBoxLayout();
 	top->setSpacing(3);
 	const auto seg = [this](const QString &text, const QString &key) {
@@ -263,6 +360,8 @@ void GfxChatPanel::buildUi()
 	fAll_ = seg(QStringLiteral("All"), QStringLiteral("all"));
 	fTwitch_ = seg(QStringLiteral("Twitch"), QStringLiteral("twitch"));
 	fKick_ = seg(QStringLiteral("Kick"), QStringLiteral("kick"));
+	fYouTube_ = seg(QStringLiteral("YouTube"), QStringLiteral("youtube"));
+	fTikTok_ = seg(QStringLiteral("TikTok"), QStringLiteral("tiktok"));
 	fMentions_ = seg(QStringLiteral("@"), QStringLiteral("mentions"));
 	fMentions_->setToolTip(
 		QStringLiteral("Only messages that mention you or one of your highlight words (⋯ → Highlight words)"));
@@ -285,6 +384,8 @@ void GfxChatPanel::buildUi()
 	top->addWidget(fAll_);
 	top->addWidget(fTwitch_);
 	top->addWidget(fKick_);
+	top->addWidget(fYouTube_);
+	top->addWidget(fTikTok_);
 	top->addWidget(fMentions_);
 	top->addStretch(1);
 	top->addWidget(searchBtn_);
@@ -347,18 +448,23 @@ void GfxChatPanel::buildUi()
 	connect(userChip_, &QPushButton::clicked, this, [this] { setUserFilter(QString(), QString(), QString()); });
 	searchEdit_->installEventFilter(this);
 
-	// Stats: [Twitch card] [Kick card] + chatters / pace line
+	// Stats: one card per connected platform, two per row + chatters / pace line
 	stats_ = new QWidget(main_);
 	auto *sl = new QVBoxLayout(stats_);
 	sl->setContentsMargins(0, 0, 0, 0);
 	sl->setSpacing(3);
-	auto *cards = new QHBoxLayout();
-	cards->setSpacing(6);
+	cardsGrid_ = new QGridLayout();
+	cardsGrid_->setHorizontalSpacing(6);
+	cardsGrid_->setVerticalSpacing(6);
+	cardsGrid_->setColumnStretch(0, 1);
+	cardsGrid_->setColumnStretch(1, 1);
 	buildStatCard(twCard_, QStringLiteral("twitch"));
 	buildStatCard(kkCard_, QStringLiteral("kick"));
-	cards->addWidget(twCard_.box, 1);
-	cards->addWidget(kkCard_.box, 1);
-	sl->addLayout(cards);
+	buildStatCard(ytCard_, QStringLiteral("youtube"));
+	buildStatCard(ttCard_, QStringLiteral("tiktok"));
+	for (StatCard *c : {&twCard_, &kkCard_, &ytCard_, &ttCard_})
+		c->box->hide();
+	sl->addLayout(cardsGrid_);
 	summary_ = new QLabel(stats_);
 	summary_->setObjectName(QStringLiteral("gfxStatSummary"));
 	summary_->setTextFormat(Qt::RichText);
@@ -396,8 +502,7 @@ void GfxChatPanel::buildUi()
 			if (parts.size() < 2)
 				return;
 			const QString platform = parts.at(0), login = parts.at(1);
-			if ((platform != QLatin1String("twitch") && platform != QLatin1String("kick")) ||
-			    !loginRe().match(login).hasMatch())
+			if (!info(platform) || !loginRe().match(login).hasMatch())
 				return;
 			showUserMenu(platform, login, parts.size() > 2 ? parts.at(2) : QString());
 			return;
@@ -406,8 +511,7 @@ void GfxChatPanel::buildUi()
 			const QString action = parts.at(0), platform = parts.at(1), login = parts.at(2),
 				      id = parts.at(3);
 			if ((action != QLatin1String("delete") && action != QLatin1String("timeout")) ||
-			    (platform != QLatin1String("twitch") && platform != QLatin1String("kick")) ||
-			    !loginRe().match(login).hasMatch() || !msgIdRe().match(id).hasMatch())
+			    !canMod(platform) || !loginRe().match(login).hasMatch() || !msgIdRe().match(id).hasMatch())
 				return;
 			QString shown = login;
 			for (const ChatMessage &m : msgs_)
@@ -457,7 +561,7 @@ void GfxChatPanel::buildUi()
 			scrollToBottom();
 	});
 
-	// Composer: [Twitch] [Kick] [ message…        ] [Send]
+	// Composer: [Twitch] [Kick] [YouTube] [ message…        ] [Send]   (TikTok is read-only)
 	auto *comp = new QHBoxLayout();
 	comp->setSpacing(4);
 	const auto target = [this](const QString &text, const char *platform) {
@@ -470,13 +574,17 @@ void GfxChatPanel::buildUi()
 	};
 	toTwitch_ = target(QStringLiteral("Twitch"), "twitch");
 	toKick_ = target(QStringLiteral("Kick"), "kick");
-	for (QPushButton *b : {toTwitch_, toKick_}) {
-		const QString p = b == toKick_ ? QStringLiteral("kick") : QStringLiteral("twitch");
+	toYouTube_ = target(QStringLiteral("YouTube"), "youtube");
+	for (QPushButton *b : {toTwitch_, toKick_, toYouTube_}) {
+		const QString p = b == toKick_
+					  ? QStringLiteral("kick")
+					  : (b == toYouTube_ ? QStringLiteral("youtube") : QStringLiteral("twitch"));
 		b->setIcon(QIcon(QPixmap::fromImage(platformIcon(p, 16, devicePixelRatioF()))));
 		b->setIconSize(QSize(16, 16));
 	}
 	toTwitch_->setChecked(settings().chatToTwitch);
 	toKick_->setChecked(settings().chatToKick);
+	toYouTube_->setChecked(settings().chatToYouTube);
 	input_ = new QLineEdit(main_);
 	input_->setObjectName(QStringLiteral("gfxChatInput"));
 	input_->setMaxLength(kMaxLen);
@@ -489,9 +597,17 @@ void GfxChatPanel::buildUi()
 	sendBtn_->setCursor(Qt::PointingHandCursor);
 	comp->addWidget(toTwitch_);
 	comp->addWidget(toKick_);
+	comp->addWidget(toYouTube_);
 	comp->addWidget(input_, 1);
 	comp->addWidget(sendBtn_);
 	root->addLayout(comp);
+
+	readOnlyLbl_ =
+		new QLabel(QStringLiteral("TikTok chat is read-only — TikTok doesn't let apps post as you."), main_);
+	readOnlyLbl_->setObjectName(QStringLiteral("gfxMuted"));
+	readOnlyLbl_->setWordWrap(true);
+	readOnlyLbl_->hide();
+	root->addWidget(readOnlyLbl_);
 
 	countLbl_ = new QLabel(main_);
 	countLbl_->setObjectName(QStringLiteral("gfxMuted"));
@@ -500,16 +616,22 @@ void GfxChatPanel::buildUi()
 	root->addWidget(countLbl_);
 
 	// Targets: always keep at least one selected, remember the choice.
-	const auto onTarget = [this](QPushButton *self, QPushButton *other) {
-		if (!self->isChecked() && !(other->isChecked() && other->isEnabled()))
-			self->setChecked(true);
-		settings().chatToTwitch = toTwitch_->isChecked();
-		settings().chatToKick = toKick_->isChecked();
-		saveSettings();
-		updateSendState();
-	};
-	connect(toTwitch_, &QPushButton::clicked, this, [this, onTarget] { onTarget(toTwitch_, toKick_); });
-	connect(toKick_, &QPushButton::clicked, this, [this, onTarget] { onTarget(toKick_, toTwitch_); });
+	for (QPushButton *b : targetButtons())
+		connect(b, &QPushButton::clicked, this, [this, b] {
+			if (!b->isChecked()) {
+				bool other = false;
+				for (QPushButton *o : targetButtons())
+					if (o != b && o->isChecked() && o->isEnabled())
+						other = true;
+				if (!other)
+					b->setChecked(true);
+			}
+			settings().chatToTwitch = toTwitch_->isChecked();
+			settings().chatToKick = toKick_->isChecked();
+			settings().chatToYouTube = toYouTube_->isChecked();
+			saveSettings();
+			updateSendState();
+		});
 	connect(input_, &QLineEdit::textChanged, this, [this](const QString &t) {
 		countLbl_->setVisible(t.size() > kMaxLen - 100);
 		countLbl_->setText(QStringLiteral("%1 / %2").arg(t.size()).arg(kMaxLen));
@@ -564,8 +686,7 @@ qint64 GfxChatPanel::serverNow() const
 void GfxChatPanel::renderStatCard(StatCard &c)
 {
 	const QJsonObject s = streams_.value(c.platform).toObject();
-	const bool kick = c.platform == QLatin1String("kick");
-	const QString name = kick ? QStringLiteral("Kick") : QStringLiteral("Twitch");
+	const QString name = platformName(c.platform);
 	const bool connected = s.value(QStringLiteral("connected")).toBool();
 	const bool live = connected && s.value(QStringLiteral("live")).toBool();
 	const QJsonValue viewers = s.value(QStringLiteral("viewers"));
@@ -610,9 +731,13 @@ void GfxChatPanel::renderStatCard(StatCard &c)
 			tip << QStringLiteral("Title: ") + title;
 		if (!category.isEmpty())
 			tip << QStringLiteral("Category: ") + category;
+		if (c.platform == QLatin1String("youtube"))
+			tip << QStringLiteral("(YouTube doesn't share viewer counts with chat apps)");
 	} else {
 		head = QStringLiteral("<span style='color:#9aa1b0;font-weight:600'>Offline</span>");
 		tip << QStringLiteral("%1 — offline").arg(name);
+		if (c.platform == QLatin1String("youtube") || c.platform == QLatin1String("tiktok"))
+			tip << QStringLiteral("Shows as live a few seconds after you go live there.");
 	}
 	// Channel totals: in the sub line while offline, always in the tooltip.
 	QStringList totals;
@@ -634,36 +759,63 @@ void GfxChatPanel::renderStatCard(StatCard &c)
 						       qMax(40, c.sub->width())));
 	c.box->setToolTip(tip.join(QLatin1Char('\n')));
 	c.box->setCursor(connected ? Qt::PointingHandCursor : Qt::ArrowCursor);
-	theme::setState(c.box, live ? (kick ? "kick" : "twitch") : "");
+	const QByteArray state = live ? c.platform.toLatin1() : QByteArray();
+	theme::setState(c.box, state.constData());
+}
+
+void GfxChatPanel::layoutCards(const QStringList &visible)
+{
+	const QString key = visible.join(QLatin1Char(','));
+	if (key == cardsKey_)
+		return;
+	cardsKey_ = key;
+	const int n = static_cast<int>(visible.size());
+	int slot = 0;
+	for (StatCard *c : {&twCard_, &kkCard_, &ytCard_, &ttCard_}) {
+		cardsGrid_->removeWidget(c->box);
+		if (!visible.contains(c->platform)) {
+			c->box->hide();
+			continue;
+		}
+		const int row = slot / 2, col = slot % 2;
+		const bool lone = slot == n - 1 && col == 0; // a last odd card spans the row
+		cardsGrid_->addWidget(c->box, row, col, 1, lone ? 2 : 1);
+		c->box->show();
+		++slot;
+	}
 }
 
 void GfxChatPanel::renderStats()
 {
-	// Only connected platforms get a card — no "not connected" clutter.
-	const bool tw = streams_.value(QStringLiteral("twitch")).toObject().value(QStringLiteral("connected")).toBool();
-	const bool kk = streams_.value(QStringLiteral("kick")).toObject().value(QStringLiteral("connected")).toBool();
-	const bool show = settings().chatStats && (tw || kk);
+	// Only connected (and switched-on) platforms get a card — no "not connected" clutter.
+	QStringList visible;
+	for (const QString &p : wantedPlatforms())
+		if (streams_.value(p).toObject().value(QStringLiteral("connected")).toBool())
+			visible << p;
+	const bool show = settings().chatStats && !visible.isEmpty();
 	stats_->setVisible(show);
 	if (!show)
 		return;
-	twCard_.box->setVisible(tw);
-	kkCard_.box->setVisible(kk);
-	if (tw)
-		renderStatCard(twCard_);
-	if (kk)
-		renderStatCard(kkCard_);
+	layoutCards(visible);
+	for (StatCard *c : {&twCard_, &kkCard_, &ytCard_, &ttCard_})
+		if (visible.contains(c->platform))
+			renderStatCard(*c);
 
 	QStringList parts;
 	qint64 total = 0;
 	int liveWithViewers = 0;
-	for (const QString &p : {QStringLiteral("twitch"), QStringLiteral("kick")}) {
+	bool anyLive = false;
+	for (const QString &p : visible) {
 		const QJsonObject s = streams_.value(p).toObject();
-		if (s.value(QStringLiteral("live")).toBool() && s.value(QStringLiteral("viewers")).isDouble()) {
+		if (!s.value(QStringLiteral("live")).toBool())
+			continue;
+		anyLive = true;
+		if (s.value(QStringLiteral("viewers")).isDouble()) {
 			total += static_cast<qint64>(s.value(QStringLiteral("viewers")).toDouble());
 			++liveWithViewers;
 		}
 	}
-	if (liveWithViewers == 2)
+	if (liveWithViewers >= 2)
 		parts << QStringLiteral("<b style='color:#e8eaf0'>%1</b> watching in total").arg(fmtCount(total));
 
 	// Chat pace from the messages the panel already has (host's own lines excluded).
@@ -684,9 +836,6 @@ void GfxChatPanel::renderStats()
 			++paced;
 	}
 	// Nothing live and nobody chatting → just the cards.
-	const bool anyLive =
-		streams_.value(QStringLiteral("twitch")).toObject().value(QStringLiteral("live")).toBool() ||
-		streams_.value(QStringLiteral("kick")).toObject().value(QStringLiteral("live")).toBool();
 	summary_->setVisible(anyLive || !chatters.isEmpty());
 	const double minutes = qMax(1.0, (now - paceStart) / 60000.0);
 	const double pace = paced / minutes;
@@ -704,14 +853,14 @@ bool GfxChatPanel::eventFilter(QObject *watched, QEvent *event)
 
 	// Stats card click → that channel.
 	if (t == QEvent::MouseButtonRelease && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) {
-		for (const StatCard *c : {&twCard_, &kkCard_}) {
+		for (const StatCard *c : {&twCard_, &kkCard_, &ytCard_, &ttCard_}) {
 			if (watched != c->box)
 				continue;
-			// Only ever the streamer's own channel page.
+			// Only ever the streamer's own channel page on that platform.
+			const PlatformInfo *pi = info(c->platform);
 			const QString url =
 				streams_.value(c->platform).toObject().value(QStringLiteral("url")).toString();
-			if (url.startsWith(QLatin1String("https://www.twitch.tv/")) ||
-			    url.startsWith(QLatin1String("https://kick.com/")))
+			if (pi && url.startsWith(QLatin1String(pi->channel)))
 				QDesktopServices::openUrl(QUrl(url));
 			return true;
 		}
@@ -766,8 +915,9 @@ void GfxChatPanel::showUserMenu(const QString &platform, const QString &login, c
 		for (const ChatMessage &m : msgs_)
 			if (m.id == messageId && m.platform == platform)
 				msg = &m;
-	const bool kick = platform == QLatin1String("kick");
-	const QString platName = kick ? QStringLiteral("Kick") : QStringLiteral("Twitch");
+	const QString platName = platformName(platform);
+	const PlatformInfo *pinfo = info(platform);
+	const bool sendable = pinfo && pinfo->canSend;
 	const QString shown = msg ? msg->user : login;
 	const bool isHost = msg && msg->host;
 	const QString msgText = msg ? msg->text : QString();
@@ -787,15 +937,17 @@ void GfxChatPanel::showUserMenu(const QString &platform, const QString &login, c
 	head->setEnabled(false);
 	menu.addSeparator();
 
-	if (!isHost && platformConnected(platform))
+	if (!isHost && sendable && platformConnected(platform))
 		connect(menu.addAction(QStringLiteral("💬   Reply to %1").arg(shown)), &QAction::triggered, this,
-			[this, platform, login] {
+			[this, platform, login, shown] {
 				// Reply goes to the chatter's own platform.
-				const bool kk = platform == QLatin1String("kick");
-				toTwitch_->setChecked(!kk);
-				toKick_->setChecked(kk);
+				toTwitch_->setChecked(platform == QLatin1String("twitch"));
+				toKick_->setChecked(platform == QLatin1String("kick"));
+				toYouTube_->setChecked(platform == QLatin1String("youtube"));
 				updateSendState();
-				const QString at = QStringLiteral("@") + login + QLatin1Char(' ');
+				// YouTube logins are channel ids — mention the name people see.
+				const QString handle = platform == QLatin1String("youtube") ? shown : login;
+				const QString at = QStringLiteral("@") + handle + QLatin1Char(' ');
 				QString t = input_->text();
 				if (!t.startsWith(at, Qt::CaseInsensitive))
 					t = at + t;
@@ -807,14 +959,20 @@ void GfxChatPanel::showUserMenu(const QString &platform, const QString &login, c
 		[this, platform, login, shown] { setUserFilter(platform, login, shown); });
 	connect(menu.addAction(QStringLiteral("👤   Open %1 profile").arg(platName)), &QAction::triggered, this,
 		[platform, login] { openProfile(platform, login); });
+	const QString copyName = platform == QLatin1String("youtube") ? shown : login;
 	connect(menu.addAction(QStringLiteral("📋   Copy username")), &QAction::triggered, this,
-		[login] { QGuiApplication::clipboard()->setText(login); });
+		[copyName] { QGuiApplication::clipboard()->setText(copyName); });
 	if (msg && !msgText.isEmpty())
 		connect(menu.addAction(QStringLiteral("📄   Copy message")), &QAction::triggered, this,
 			[msgText] { QGuiApplication::clipboard()->setText(msgText); });
 
+	// YouTube / TikTok moderation happens on those sites.
+	if (!isHost && !canMod(platform)) {
+		menu.addSeparator();
+		menu.addAction(QStringLiteral("Moderate %1 chat on %1 itself").arg(platName))->setEnabled(false);
+	}
 	// The broadcaster can't be moderated — the rest is for everyone else.
-	if (!isHost && mod_) {
+	if (!isHost && mod_ && canMod(platform)) {
 		menu.addSeparator();
 		if (msg && !msg->deleted && msgIdRe().match(messageId).hasMatch())
 			connect(menu.addAction(QStringLiteral("🗑   Delete this message")), &QAction::triggered, this,
@@ -872,6 +1030,10 @@ void GfxChatPanel::showOptionsMenu()
 	toggle(QStringLiteral("Shade every other message"), &s.chatAltRows);
 	toggle(QStringLiteral("Pause while my mouse is over the chat"), &s.chatPauseOnHover);
 	toggle(QStringLiteral("Viewers, uptime and stream info"), &s.chatStats);
+	toggle(QStringLiteral("Platform icon on each message"), &s.chatIcons);
+	toggle(QStringLiteral("HOST / MOD / VIP / SUB badges"), &s.chatBadges);
+	toggle(QStringLiteral("Chatters' own name colours"), &s.chatNameColors);
+	toggle(QStringLiteral("Compact lines"), &s.chatCompact);
 	menu.addSeparator();
 
 	const QString words = s.chatHighlightWords.isEmpty() ? QStringLiteral("none")
@@ -925,7 +1087,7 @@ void GfxChatPanel::setLocked(const QString &message)
 	const bool locked = !message.isEmpty();
 	lockLbl_->setText(
 		QStringLiteral(
-			"<b style='color:#fff'>MultiChat — Twitch + Kick in OBS</b><br><br>%1<br>Read both chats in one feed and reply to either — or both — without leaving OBS.")
+			"<b style='color:#fff'>MultiChat — Twitch, Kick, YouTube &amp; TikTok in OBS</b><br><br>%1<br>Read every chat in one feed and reply without leaving OBS.")
 			.arg(message.toHtmlEscaped()));
 	lockLbl_->setTextFormat(Qt::RichText);
 	lockPanel_->setVisible(locked);
@@ -934,7 +1096,12 @@ void GfxChatPanel::setLocked(const QString &message)
 
 bool GfxChatPanel::platformConnected(const QString &p) const
 {
-	return status_.value(p).toObject().value(QStringLiteral("connected")).toBool();
+	return wantedPlatforms().contains(p) && status_.value(p).toObject().value(QStringLiteral("connected")).toBool();
+}
+
+QList<QPushButton *> GfxChatPanel::targetButtons() const
+{
+	return {toTwitch_, toKick_, toYouTube_};
 }
 
 int GfxChatPanel::applyPoll(const QJsonObject &o)
@@ -945,6 +1112,7 @@ int GfxChatPanel::applyPoll(const QJsonObject &o)
 	if (serverTime > 0)
 		clockSkew_ = static_cast<qint64>(serverTime) - QDateTime::currentMSecsSinceEpoch();
 	renderStatus();
+	updateFilters();
 	updateTargets();
 	const bool namesChanged = rebuildHighlightRe();
 
@@ -989,7 +1157,7 @@ int GfxChatPanel::applyPoll(const QJsonObject &o)
 		m.first = it.value(QStringLiteral("first")).toBool();
 		m.bits = it.value(QStringLiteral("bits")).toInt();
 		m.ts = static_cast<qint64>(it.value(QStringLiteral("ts")).toDouble());
-		if (m.platform != QLatin1String("twitch") && m.platform != QLatin1String("kick"))
+		if (!info(m.platform))
 			continue;
 		m.seq = nextSeq_++;
 		msgs_.push_back(m);
@@ -1046,7 +1214,7 @@ bool GfxChatPanel::isHighlighted(const ChatMessage &m) const
 bool GfxChatPanel::rebuildHighlightRe()
 {
 	QStringList terms;
-	for (const QString &p : {QStringLiteral("twitch"), QStringLiteral("kick")}) {
+	for (const QString &p : wantedPlatforms()) {
 		const QJsonObject st = status_.value(p).toObject();
 		if (!st.value(QStringLiteral("connected")).toBool())
 			continue;
@@ -1074,7 +1242,9 @@ bool GfxChatPanel::rebuildHighlightRe()
 
 bool GfxChatPanel::matches(const ChatMessage &m) const
 {
-	if ((filter_ == QLatin1String("twitch") || filter_ == QLatin1String("kick")) && m.platform != filter_)
+	if (!wantedPlatforms().contains(m.platform))
+		return false;
+	if (info(filter_) && m.platform != filter_)
 		return false;
 	if (filter_ == QLatin1String("mentions") && !isHighlighted(m))
 		return false;
@@ -1133,35 +1303,38 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 	const qreal tagPt = qMax<qreal>(6.0, base * 0.78);
 	const qreal smallPt = qMax<qreal>(6.5, base * 0.88);
 	const int iconPx = qBound(12, qRound(base * 1.65), 32);
-	const bool kick = m.platform == QLatin1String("kick");
 	const bool validLogin = loginRe().match(m.login).hasMatch();
 	const bool validId = msgIdRe().match(m.id).hasMatch();
 
 	QString h;
 	// One-click moderation, for moderators who live in this tab.
-	if (s.chatQuickMod && mod_ && !m.host && validLogin && validId && !m.deleted)
+	if (s.chatQuickMod && mod_ && canMod(m.platform) && !m.host && validLogin && validId && !m.deleted)
 		h += QStringLiteral(
 			     "<a href='mod:delete:%1:%2:%3' style='color:#6b7280;text-decoration:none;'>🗑</a>"
 			     "&nbsp;<a href='mod:timeout:%1:%2:%3' style='color:#6b7280;text-decoration:none;'>⏱</a>"
 			     "&nbsp;")
 			     .arg(m.platform, m.login, m.id);
 	// platform icon (served by ChatView::loadResource)
-	h += QStringLiteral("<img src='gfx:%1/%2' width='%2' height='%2' style='vertical-align:middle'>&nbsp;")
-		     .arg(kick ? QStringLiteral("kick") : QStringLiteral("twitch"))
-		     .arg(iconPx);
+	if (s.chatIcons)
+		h += QStringLiteral("<img src='gfx:%1/%2' width='%2' height='%2' style='vertical-align:middle'>&nbsp;")
+			     .arg(m.platform)
+			     .arg(iconPx);
 	if (s.chatTimestamps && m.ts > 0)
 		h += QStringLiteral("<span style='color:#5b6270;font-size:%2pt;'>%1</span> ")
 			     .arg(QDateTime::fromMSecsSinceEpoch(m.ts).toString(QStringLiteral("HH:mm")),
 				  QString::number(smallPt, 'f', 1));
-	if (m.host)
-		h += tag("HOST", "#ff3b4f", tagPt);
-	else if (m.mod)
-		h += tag("MOD", "#34d399", tagPt);
-	if (m.vip)
-		h += tag("VIP", "#f472b6", tagPt);
-	if (m.sub)
-		h += tag("SUB", "#ffb020", tagPt);
-	const QString nameColor = m.color.isEmpty() ? QStringLiteral("#c9ced8") : readableColor(m.color);
+	if (s.chatBadges) {
+		if (m.host)
+			h += tag("HOST", "#ff3b4f", tagPt);
+		else if (m.mod)
+			h += tag("MOD", "#34d399", tagPt);
+		if (m.vip)
+			h += tag("VIP", "#f472b6", tagPt);
+		if (m.sub)
+			h += tag(m.platform == QLatin1String("youtube") ? "MEMBER" : "SUB", "#ffb020", tagPt);
+	}
+	const QString nameColor = (!s.chatNameColors || m.color.isEmpty()) ? QStringLiteral("#c9ced8")
+									   : readableColor(m.color);
 	if (validLogin)
 		h += QStringLiteral("<a href='user:%1:%2:%3' title='Click for options — reply, profile, timeout, ban' "
 				    "style='color:%4;text-decoration:none;font-weight:bold;'>%5</a>")
@@ -1313,8 +1486,12 @@ void GfxChatPanel::showPlaceholder()
 	placeholder_ = true;
 	QString text;
 	const bool filtered = !search_.isEmpty() || !userFilterLogin_.isEmpty() || filter_ != QLatin1String("all");
-	if (!platformConnected(QStringLiteral("twitch")) && !platformConnected(QStringLiteral("kick")))
-		text = QStringLiteral("Connect Twitch or Kick on goalforgex.com to see your chat here.");
+	bool anyConnected = false;
+	for (const QString &p : wantedPlatforms())
+		anyConnected = anyConnected || platformConnected(p);
+	if (!anyConnected)
+		text = QStringLiteral(
+			"Connect Twitch, Kick, YouTube or TikTok on goalforgex.com to see your chat here.");
 	else if (filter_ == QLatin1String("mentions") && search_.isEmpty() && userFilterLogin_.isEmpty())
 		text = QStringLiteral(
 			"No mentions yet. Messages with your name or a highlight word (⋯ → Highlight words) show up here.");
@@ -1438,44 +1615,73 @@ void GfxChatPanel::renderStatus()
 		tips << QStringLiteral("%1: %2").arg(label, state);
 		return QStringLiteral("<span style='color:%1'>●</span>").arg(color);
 	};
-	statusLbl_->setText(dot(QStringLiteral("twitch"), QStringLiteral("Twitch")) + QStringLiteral("&thinsp;") +
-			    dot(QStringLiteral("kick"), QStringLiteral("Kick")));
+	QStringList dots;
+	for (const QString &p : wantedPlatforms())
+		dots << dot(p, platformName(p));
+	statusLbl_->setText(dots.join(QStringLiteral("&thinsp;")));
 	statusLbl_->setToolTip(tips.join(QLatin1Char('\n')));
 }
 
+// Platform chips: only connected ones, and only while there's more than one.
+void GfxChatPanel::updateFilters()
+{
+	const QList<QPair<QString, QPushButton *>> chips = {{QStringLiteral("twitch"), fTwitch_},
+							    {QStringLiteral("kick"), fKick_},
+							    {QStringLiteral("youtube"), fYouTube_},
+							    {QStringLiteral("tiktok"), fTikTok_}};
+	int connected = 0;
+	for (const auto &c : chips)
+		if (platformConnected(c.first))
+			++connected;
+	for (const auto &c : chips)
+		c.second->setVisible(connected > 1 && platformConnected(c.first));
+	if (info(filter_) && (connected <= 1 || !platformConnected(filter_)))
+		setFilter(QStringLiteral("all"));
+}
+
+// Send targets: Twitch / Kick / YouTube, each only while connected. TikTok has none.
 void GfxChatPanel::updateTargets()
 {
-	const bool tw = platformConnected(QStringLiteral("twitch"));
-	const bool kk = platformConnected(QStringLiteral("kick"));
-	toTwitch_->setEnabled(tw);
-	toKick_->setEnabled(kk);
-	toTwitch_->setToolTip(tw ? QStringLiteral("Send to Twitch chat")
-				 : QStringLiteral("Connect Twitch on goalforgex.com"));
-	toKick_->setToolTip(kk ? QStringLiteral("Send to Kick chat")
-			       : QStringLiteral("Connect Kick on goalforgex.com"));
-	// Only one platform connected → that's where messages go.
-	if (tw && !kk)
-		toTwitch_->setChecked(true);
-	if (kk && !tw)
-		toKick_->setChecked(true);
+	int shown = 0;
+	QPushButton *only = nullptr;
+	for (QPushButton *b : targetButtons()) {
+		const QString p = b == toKick_
+					  ? QStringLiteral("kick")
+					  : (b == toYouTube_ ? QStringLiteral("youtube") : QStringLiteral("twitch"));
+		const bool on = platformConnected(p);
+		b->setEnabled(on);
+		b->setVisible(on || p != QLatin1String("youtube")); // YouTube's button only when it's there
+		b->setToolTip(on ? QStringLiteral("Send to %1 chat").arg(platformName(p))
+				 : QStringLiteral("Connect %1 on goalforgex.com").arg(platformName(p)));
+		if (on) {
+			++shown;
+			only = b;
+		}
+	}
+	// Only one place to send → that's where messages go.
+	if (shown == 1 && only)
+		only->setChecked(true);
+	readOnlyLbl_->setVisible(shown == 0 && platformConnected(QStringLiteral("tiktok")));
 	updateSendState();
 }
 
 void GfxChatPanel::updateSendState()
 {
-	const bool anyTarget = (toTwitch_->isChecked() && toTwitch_->isEnabled()) ||
-			       (toKick_->isChecked() && toKick_->isEnabled());
-	sendBtn_->setEnabled(!sending_ && anyTarget && !input_->text().trimmed().isEmpty());
+	QStringList where;
+	for (QPushButton *b : targetButtons())
+		if (b->isChecked() && b->isEnabled())
+			where << b->text();
+	sendBtn_->setEnabled(!sending_ && !where.isEmpty() && !input_->text().trimmed().isEmpty());
 	input_->setEnabled(!sending_);
-	QString where;
-	if (toTwitch_->isChecked() && toTwitch_->isEnabled() && toKick_->isChecked() && toKick_->isEnabled())
-		where = QStringLiteral("Twitch and Kick");
-	else if (toTwitch_->isChecked() && toTwitch_->isEnabled())
-		where = QStringLiteral("Twitch");
-	else if (toKick_->isChecked() && toKick_->isEnabled())
-		where = QStringLiteral("Kick");
-	input_->setPlaceholderText(where.isEmpty() ? QStringLiteral("Connect Twitch or Kick to chat")
-						   : QStringLiteral("Message %1 chat…").arg(where));
+	QString label;
+	if (where.size() == 1)
+		label = where.first() + QStringLiteral(" chat");
+	else if (where.size() == 2)
+		label = where.join(QStringLiteral(" and ")) + QStringLiteral(" chat");
+	else if (where.size() > 2)
+		label = QStringLiteral("every chat");
+	input_->setPlaceholderText(label.isEmpty() ? QStringLiteral("Connect Twitch, Kick or YouTube to chat")
+						   : QStringLiteral("Message %1…").arg(label));
 }
 
 void GfxChatPanel::setFilter(const QString &f)
@@ -1484,6 +1690,8 @@ void GfxChatPanel::setFilter(const QString &f)
 	fAll_->setChecked(f == QLatin1String("all"));
 	fTwitch_->setChecked(f == QLatin1String("twitch"));
 	fKick_->setChecked(f == QLatin1String("kick"));
+	fYouTube_->setChecked(f == QLatin1String("youtube"));
+	fTikTok_->setChecked(f == QLatin1String("tiktok"));
 	fMentions_->setChecked(f == QLatin1String("mentions"));
 	follow_ = true;
 	rebuild();
@@ -1511,6 +1719,8 @@ void GfxChatPanel::doSend()
 		platforms << QStringLiteral("twitch");
 	if (toKick_->isChecked() && toKick_->isEnabled())
 		platforms << QStringLiteral("kick");
+	if (toYouTube_->isChecked() && toYouTube_->isEnabled())
+		platforms << QStringLiteral("youtube");
 	if (platforms.isEmpty())
 		return;
 	if (history_.isEmpty() || history_.last() != text) {
@@ -1548,6 +1758,7 @@ void GfxChatPanel::clearChat()
 	follow_ = true;
 	renderStats();
 	renderStatus();
+	updateFilters();
 	updateTargets();
 	rebuildHighlightRe();
 	rebuild();
@@ -1559,6 +1770,10 @@ void GfxChatPanel::refresh()
 		hoverPaused_ = false;
 	rebuildHighlightRe();
 	applyFontSize();
+	cardsKey_.clear();
+	renderStatus();
+	updateFilters();
+	updateTargets();
 	renderStats();
 	rebuild();
 }

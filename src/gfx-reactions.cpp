@@ -144,6 +144,17 @@ void ReactionEngine::onEvents(const QList<FeedEvent> &events)
 			fire(e.alertType);
 		else if (e.kind == QLatin1String("timer") && e.event == QLatin1String("ended"))
 			fire(QStringLiteral("timer_ended"));
+		else if (e.kind == QLatin1String("giftbomb") && e.amount.toInt() >= 5)
+			fire(QStringLiteral("gift_bomb"));
+		else if (e.kind == QLatin1String("points"))
+			fire(QStringLiteral("channel_points"));
+		else if (e.kind == QLatin1String("streak"))
+			fire(QStringLiteral("watch_streak"));
+		else if (e.kind == QLatin1String("tiktok") && e.sub == QLatin1String("gift"))
+			fire(QStringLiteral("tiktok_gift"));
+		else if (e.kind == QLatin1String("youtube") &&
+			 (e.sub == QLatin1String("superchat") || e.sub == QLatin1String("supersticker")))
+			fire(QStringLiteral("youtube_superchat"));
 	}
 }
 

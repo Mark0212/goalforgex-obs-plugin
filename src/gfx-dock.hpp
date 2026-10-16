@@ -24,6 +24,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QWidget>
 
 class GfxChatPanel;
+class GfxEventsPanel;
 class GfxHealthPanel;
 class GfxLivePanel;
 class GfxReactionsPanel;
@@ -56,10 +57,14 @@ private:
 	void setState(State s, const QString &message = QString(), bool isError = false);
 	void showMessage(const QString &text, bool isError = false);
 	void openSettings();
+	// Settings → Appearance (and anything else that re-styles the dock): style
+	// sheet, brand mark and every panel's own colours / layout.
+	void applyAppearance();
+	void updateEventsTabTitle();
 	// Header ON AIR / REC chip (OBS's own output state + viewers from GoalForgeX)
 	void renderAirChip();
 
-	// Chat tab (Twitch + Kick): adaptive poll of /api/obs/chat, send as the streamer
+	// MultiChat tab (Twitch / Kick / YouTube / TikTok): adaptive poll of /api/obs/chat, send as the streamer
 	void scheduleChat(int ms);
 	void pollChat();
 	void sendChat(const QStringList &platforms, const QString &text);
@@ -132,6 +137,9 @@ private:
 	GfxReactionsPanel *reactionsPanel_ = nullptr;
 	GfxHealthPanel *healthPanel_ = nullptr;
 	GfxChatPanel *chatPanel_ = nullptr;
+	GfxEventsPanel *eventsPanel_ = nullptr;
+	QLabel *heroMark_ = nullptr; // welcome card's big brand mark (re-drawn on accent change)
+	int eventsUnread_ = 0;
 	// Widgets tab
 	QComboBox *sceneCombo_ = nullptr;
 	QListWidget *list_ = nullptr;

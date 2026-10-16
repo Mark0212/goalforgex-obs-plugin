@@ -17,6 +17,9 @@ An OBS Studio plugin that adds a **GoalForgeX** dock: connect a GoalForgeX accou
 - **No duplicates** — each source the plugin creates is tagged (`gfx_widget` / `gfx_account` private settings). Adding a widget that already exists re-uses that source in the new scene; adding it to a scene it's already in just selects it.
 - **Revocation** — removing a device at goalforgex.com/obs (or clicking Disconnect) kills that install's tokens and overlay key immediately and closes its overlays' live connections. Other installs, Streamlabs link sets, and the dashboard's own widget URLs are unaffected.
 - **Reconnecting** re-points this account's existing GoalForgeX sources at the new overlay key automatically.
+- **MultiChat** (Pro) — `GET /api/obs/chat?platforms=twitch,kick,youtube,tiktok` (the list is from Settings → MultiChat and also tells the server which chats to keep connected). Reply to Twitch / Kick / YouTube; TikTok is read-only. Mod actions on Twitch and Kick only.
+- **Events tab** — fed by the `/api/obs/state` poll: gift bombs with every recipient (Twitch EventSub gift + per-recipient subscribe events, collected server-side; Kick sends the list), channel-point redemptions (EventSub subscription added on demand while the plugin is open — older Twitch logins without the redemptions scope get a "reconnect Twitch" notice), watch streaks (Twitch IRC `viewermilestone`), TikTok gifts/follows/subs and YouTube Super Chats / Stickers / memberships.
+- **Appearance** — Settings → Appearance re-colours the one dock style sheet at runtime (`gfx-theme.cpp` `applyAppearance`): palette preset, accent colour, text size and compact density, previewed live.
 
 ## Release test checklist
 
@@ -31,6 +34,9 @@ Run on **OBS 32.2.x (stable)** and the **OBS 33.0 beta** (new CEF + plugin loade
 - [ ] Start OBS offline → dock says it can't reach GoalForgeX and retries; sources already in scenes keep their last state
 - [ ] Switch scene collections; Studio Mode; widgets inside groups; 1080p / 1440p / vertical canvases; 125–200% Windows display scaling
 - [ ] Free account → Pro widgets show 🔒 and can't be added
+- [ ] MultiChat with YouTube and TikTok connected: both feeds, filter chips, stat cards, YouTube reply; TikTok shows read-only; turning YouTube/TikTok off in Settings stops them
+- [ ] Events: gift bomb lists every recipient (right-click → copy names / thank-you), channel-point redemption, watch streak share; old Twitch login → reconnect notice
+- [ ] Appearance: each theme + a custom accent + Extra large + Compact; Cancel restores; settings survive an OBS restart
 - [ ] Portable OBS install via the zip
 - [ ] Uninstall removes the plugin; OBS still starts cleanly
 

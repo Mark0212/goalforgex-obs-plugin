@@ -35,6 +35,7 @@ struct Settings {
 	bool tabReactions = true;
 	bool tabHealth = true;
 	bool tabChat = true;
+	bool tabEvents = true;
 	// Live tab cards
 	bool cardStats = true;
 	bool cardTimer = true;
@@ -47,6 +48,7 @@ struct Settings {
 	// Chat tab: where messages go (remembered between sessions) + show times
 	bool chatToTwitch = true;
 	bool chatToKick = true;
+	bool chatToYouTube = true;
 	bool chatTimestamps = true;
 	// Viewers / uptime / title per platform above the chat
 	bool chatStats = true;
@@ -64,6 +66,30 @@ struct Settings {
 	int chatFontSize = 0;
 	// Extra words that highlight a line (besides the streamer's own name)
 	QStringList chatHighlightWords;
+	// Which connected platforms MultiChat reads (Twitch + Kick are always on).
+	// YouTube polls Google's API and TikTok opens a live connection — only
+	// while these are on and the account has them connected on the website.
+	bool chatYouTube = true;
+	bool chatTikTok = true;
+	// MultiChat look
+	bool chatIcons = true;      // platform icon at the start of each line
+	bool chatBadges = true;     // HOST / MOD / VIP / SUB tags
+	bool chatNameColors = true; // chatters' own name colours (off = one neutral colour)
+	bool chatCompact = false;   // tighter lines
+	// Events tab: which kinds are listed
+	bool evGiftBombs = true;
+	bool evPoints = true;
+	bool evStreaks = true;
+	bool evAlerts = true;
+	bool evTikTok = true;
+	bool evYouTube = true;
+	bool evTimers = false;    // subathon / action timer / wheel lines
+	bool evAutoExpand = true; // gift bombs open with their recipient list showing
+	// Appearance (gfx-theme): palette preset, accent colour, text size, density
+	QString theme = QStringLiteral("graphite"); // graphite | midnight | oled | slate | warm
+	QString accent = QStringLiteral("#ffb020");
+	int textScale = 100; // percent, 80–140
+	bool compact = false;
 	// Automation
 	bool autoStartTimer = false;
 	bool autoPauseTimer = false;

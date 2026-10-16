@@ -12,6 +12,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QJsonObject>
 #include <QList>
 #include <QString>
+#include <QStringList>
 
 namespace gfx {
 
@@ -31,12 +32,21 @@ struct CounterState {
 struct FeedEvent {
 	qint64 seq = 0;
 	qint64 at = 0;
-	QString kind;      // alert | timer | actiontimer | wheel
+	// alert | timer | actiontimer | wheel | giftbomb | points | streak | tiktok | youtube
+	QString kind;
 	QString type;      // raw broadcast type
 	QString alertType; // for kind == alert
 	QString event;     // e.g. "ended" for timer kinds
-	QString text;
-	QString by; // mod name, if a mod did it
+	QString text;      // ready-made one-line summary (every kind has one)
+	QString by;        // mod name, if a mod did it
+	// Structured fields (server 2.4+; empty on older servers)
+	QString sub;            // tiktok: gift|follow|sub · youtube: superchat|supersticker|member|milestone|gift
+	QString platform;       // twitch | kick | youtube | tiktok
+	QString user;           // who did it (gifter, redeemer, …)
+	QString title;          // reward name / TikTok gift name
+	QString amount;         // subs gifted, points cost, streak length, "$5.00", …
+	QString message;        // redemption input / streak or Super Chat message
+	QStringList recipients; // gift bomb: everyone who got a sub
 };
 
 // GET /api/obs/state
@@ -70,6 +80,9 @@ struct LiveState {
 	QString catalogueRev;
 	qint64 seq = 0;
 	QList<FeedEvent> events;
+	// Channel points for the Events tab: ok | pending | needs_reconnect |
+	// no_twitch | unavailable | error — empty on servers before 2.4.
+	QString channelPoints;
 
 	static LiveState fromJson(const QJsonObject &o);
 };

@@ -33,9 +33,19 @@ inline constexpr const char *kGreen = "#34d399";
 inline constexpr const char *kText = "#e8eaf0";
 inline constexpr const char *kMuted = "#9aa1b0";
 
+// The style sheet in the default graphite/amber palette, and the same sheet
+// with the streamer's Settings → Appearance applied (palette preset, accent,
+// text size, compact). Always set dockStyleSheet() — via applyTo().
+QString baseStyleSheet();
 QString dockStyleSheet();
+// Re-applies the current appearance to the dock root (live, from Settings).
+void applyTo(QWidget *dockRoot);
+// A palette colour from rich text (chat lines, event rows), remapped the
+// same way the style sheet is — e.g. mapColor("#ffb020") is the accent.
+QString mapColor(const QString &hexColor);
+QString accentColor();
 
-// The GoalForgeX mark: a red→amber tile with a broadcast ring, drawn in code
+// The GoalForgeX mark: a red→accent tile with a broadcast ring, drawn in code
 // (crisp at any size / DPI, no image resources to ship).
 QPixmap brandMark(int px, qreal devicePixelRatio);
 

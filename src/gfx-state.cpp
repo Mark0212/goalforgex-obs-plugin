@@ -29,6 +29,14 @@ static qint64 i64(const QJsonValue &v)
 	return static_cast<qint64>(v.toDouble());
 }
 
+// "amount" is a number (subs, points, streak) or text ("$5.00").
+static QString textOf(const QJsonValue &v)
+{
+	if (v.isDouble())
+		return QString::number(static_cast<qint64>(v.toDouble()));
+	return v.toString();
+}
+
 LiveState LiveState::fromJson(const QJsonObject &o)
 {
 	LiveState s;
@@ -87,8 +95,22 @@ LiveState LiveState::fromJson(const QJsonObject &o)
 		ev.event = e.value(QStringLiteral("event")).toString();
 		ev.text = e.value(QStringLiteral("text")).toString();
 		ev.by = e.value(QStringLiteral("by")).toString();
+		ev.sub = e.value(QStringLiteral("sub")).toString();
+		ev.platform = e.value(QStringLiteral("platform")).toString();
+		ev.user = e.value(QStringLiteral("user")).toString();
+		ev.title = e.value(QStringLiteral("title")).toString();
+		ev.amount = textOf(e.value(QStringLiteral("amount")));
+		ev.message = e.value(QStringLiteral("message")).toString();
+		const QJsonArray rs = e.value(QStringLiteral("recipients")).toArray();
+		for (qsizetype j = 0; j < rs.size(); ++j) {
+			const QString r = rs.at(j).toString();
+			if (!r.isEmpty())
+				ev.recipients << r;
+		}
 		s.events.push_back(ev);
 	}
+	s.channelPoints =
+		o.value(QStringLiteral("eventsStatus")).toObject().value(QStringLiteral("channelPoints")).toString();
 	return s;
 }
 
