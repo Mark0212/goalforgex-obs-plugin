@@ -60,12 +60,16 @@ target_sources(
     src/gfx-chat.hpp
     src/gfx-events.cpp
     src/gfx-events.hpp
+    src/gfx-flow.cpp
+    src/gfx-flow.hpp
     src/gfx-dock.cpp
     src/gfx-dock.hpp
     src/gfx-health.cpp
     src/gfx-health.hpp
     src/gfx-hotkeys.cpp
     src/gfx-hotkeys.hpp
+    src/gfx-images.cpp
+    src/gfx-images.hpp
     src/gfx-http.cpp
     src/gfx-http.hpp
     src/gfx-live.cpp

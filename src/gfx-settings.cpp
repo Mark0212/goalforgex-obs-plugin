@@ -67,6 +67,7 @@ static const BoolField kBools[] = {
 	{"chatBadges", &Settings::chatBadges},
 	{"chatNameColors", &Settings::chatNameColors},
 	{"chatCompact", &Settings::chatCompact},
+	{"chatEmotes", &Settings::chatEmotes},
 	{"evGiftBombs", &Settings::evGiftBombs},
 	{"evPoints", &Settings::evPoints},
 	{"evStreaks", &Settings::evStreaks},
@@ -110,6 +111,13 @@ void loadSettings()
 		if (!w.isEmpty() && !g_settings.chatHighlightWords.contains(w, Qt::CaseInsensitive))
 			g_settings.chatHighlightWords << w;
 	}
+	const QJsonArray cw = o.value(QStringLiteral("chatWatch")).toArray();
+	for (qsizetype i = 0; i < cw.size() && g_settings.chatWatch.size() < 6; ++i) {
+		const QString w = cw.at(i).toString().trimmed().left(220);
+		if (w.contains(QLatin1Char(':')) && !w.contains(QLatin1Char(',')) &&
+		    !g_settings.chatWatch.contains(w, Qt::CaseInsensitive))
+			g_settings.chatWatch << w;
+	}
 	// Appearance — anything unknown or out of range falls back to the default.
 	static const QStringList kThemes = {QStringLiteral("graphite"), QStringLiteral("midnight"),
 					    QStringLiteral("oled"), QStringLiteral("slate"), QStringLiteral("warm")};
@@ -149,6 +157,7 @@ void saveSettings()
 		o.insert(QLatin1String(b.key), g_settings.*(b.member));
 	o.insert(QStringLiteral("chatFontSize"), g_settings.chatFontSize);
 	o.insert(QStringLiteral("chatHighlightWords"), QJsonArray::fromStringList(g_settings.chatHighlightWords));
+	o.insert(QStringLiteral("chatWatch"), QJsonArray::fromStringList(g_settings.chatWatch));
 	o.insert(QStringLiteral("theme"), g_settings.theme);
 	o.insert(QStringLiteral("accent"), g_settings.accent);
 	o.insert(QStringLiteral("textScale"), g_settings.textScale);

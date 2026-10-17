@@ -9,6 +9,8 @@ the Free Software Foundation; either version 2 of the License, or
 */
 #pragma once
 
+#include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
 #include <QRegularExpression>
@@ -18,17 +20,26 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include <functional>
 
+class QBoxLayout;
 class QEvent;
 class QFrame;
 class QGridLayout;
+class QResizeEvent;
 class QKeyEvent;
 class QLabel;
 class QLineEdit;
+class QMenu;
 class QPushButton;
 class QTextBrowser;
 class QTimer;
 
 namespace gfx {
+
+// A piece of a message: plain text, or an emote (name + image URL).
+struct ChatPart {
+	QString text;  // the text, or the emote's name
+	QString image; // empty = plain text
+};
 
 // One chat line from GET /api/obs/chat (Twitch, Kick, YouTube or TikTok).
 struct ChatMessage {
@@ -47,7 +58,10 @@ struct ChatMessage {
 	bool deleted = false;
 	int bits = 0;
 	qint64 ts = 0;
-	qint64 seq = 0; // panel-local, increasing — ties a feed line to its message
+	qint64 seq = 0;        // panel-local, increasing — ties a feed line to its message
+	QList<ChatPart> parts; // set when the message has emotes
+	QString channel;       // watched channel key ("twitch:xqc"); empty = the streamer's own chat
+	QString channelName;   // how that channel is shown
 };
 
 } // namespace gfx
@@ -62,15 +76,21 @@ public:
 	// action: timeout | ban | unban | delete. displayName is for the confirmation line.
 	using ModFn = std::function<void(const QString &platform, const QString &action, const QString &login,
 					 int seconds, const QString &messageId, const QString &displayName)>;
+	// Chatter card lookup (GET /api/obs/chat/user). done(info, error) on the UI thread.
+	using InfoDone = std::function<void(const QJsonObject &info, const QString &error)>;
+	using InfoFn = std::function<void(const QString &platform, const QString &login, InfoDone done)>;
 
 	explicit GfxChatPanel(QWidget *parent = nullptr);
 
 	// Platforms the dock asks the server for (Settings → MultiChat): Twitch and
 	// Kick always, YouTube / TikTok when switched on.
 	static QStringList wantedPlatforms();
+	// Other channels to show, read-only (Settings → chatWatch), for ?watch=.
+	static QStringList watchList();
 
 	void setSendHandler(SendFn fn);
 	void setModHandler(ModFn fn);
+	void setInfoHandler(InfoFn fn);
 	// Applies one poll response. Returns how many new messages arrived that the
 	// current filter shows (for the unread badge on the tab).
 	int applyPoll(const QJsonObject &response);
@@ -85,6 +105,8 @@ public:
 protected:
 	// Stats card clicks, feed hover / Ctrl+wheel, composer keys.
 	bool eventFilter(QObject *watched, QEvent *event) override;
+	// Re-arranges the header, stats and composer for the dock's size.
+	void resizeEvent(QResizeEvent *event) override;
 
 private:
 	// One platform's card in the stats strip.
@@ -103,8 +125,11 @@ private:
 	// Viewers / uptime / title per platform + chatters and messages per minute.
 	void renderStats();
 	void renderStatCard(StatCard &c);
-	// Two cards per row, only the platforms that are connected.
+	// 1–4 cards per row (by width), only the platforms that are connected.
 	void layoutCards(const QStringList &visible);
+	// Picks the layout for this width / height (narrow ↔ wide); no-op when unchanged.
+	void applyLayoutMode(bool force = false);
+	void fitChips();
 	qint64 serverNow() const;
 	void buildUi();
 
@@ -121,6 +146,9 @@ private:
 	const gfx::ChatMessage *findMsg(qint64 seq) const;
 	QString lineInnerHtml(const gfx::ChatMessage &m) const;
 	QString textHtml(const QString &text) const;
+	QString partsHtml(const gfx::ChatMessage &m, qreal basePt) const;
+	int emoteSlot(const QString &url) const;
+	bool watchStatusHas(const QString &key) const;
 	bool isHighlighted(const gfx::ChatMessage &m) const;
 	// Returns true when the pattern changed (names arrived, words edited).
 	bool rebuildHighlightRe();
@@ -145,8 +173,18 @@ private:
 	void setUserFilter(const QString &platform, const QString &login, const QString &shown);
 	void doSend();
 	bool platformConnected(const QString &p) const;
-	// Click on a chatter's name: profile / reply / copy / delete / timeout / ban / unban.
-	void showUserMenu(const QString &platform, const QString &login, const QString &messageId);
+	// Click on a chatter's name: their card — what the platform says about them,
+	// their recent messages here, and reply / profile / timeout / ban / unban.
+	void showChatterCard(const QString &platform, const QString &login, const QString &messageId,
+			     const QString &channel);
+	// The same actions as a plain menu (right-click on a name).
+	void showUserMenu(const QString &platform, const QString &login, const QString &messageId,
+			  const QString &channel);
+	void replyTo(const QString &platform, const QString &login, const QString &shown);
+	void addModActions(QMenu *menu, const QString &platform, const QString &login, const QString &messageId,
+			   const QString &shown, bool canDelete);
+	void showWatchDialog();
+	void updateWatchStatus(const QJsonArray &watch);
 	void showOptionsMenu();
 	// Composer: ↑/↓ recall sent messages, Tab completes chatter names.
 	bool composerKey(QKeyEvent *e);
@@ -159,12 +197,14 @@ private:
 	QJsonObject status_;
 	QJsonObject streams_;                    // "streams" from the poll; empty = older server, strip hidden
 	qint64 clockSkew_ = 0;                   // server clock − ours, so uptime matches the server's start times
-	QString filter_ = QStringLiteral("all"); // all | twitch | kick | mentions
+	QString filter_ = QStringLiteral("all"); // all | twitch | kick | youtube | tiktok | watched | mentions
 	QString search_;
 	QString userFilterPlatform_, userFilterLogin_;
 	QRegularExpression highlightRe_;
 	SendFn send_;
 	ModFn mod_;
+	InfoFn info_;
+	QJsonArray watchStatus_;
 	bool sending_ = false;
 
 	bool follow_ = true;       // the reader is at the bottom
@@ -179,6 +219,18 @@ private:
 	QStringList tabMatches_;
 	int tabIndex_ = -1;
 	int tabStart_ = -1;
+
+	// Layout mode: 0 narrow (≲ 380 px), 1 medium, 2 wide (≳ 640 px); short = little height.
+	int mode_ = -1;
+	bool short_ = false;
+	int cardCols_ = 2;
+	QBoxLayout *compLayout_ = nullptr;
+	QWidget *targetsBox_ = nullptr;
+	QWidget *chipsBox_ = nullptr;
+	QPushButton *fWatch_ = nullptr;
+	// Emote images: <img src='emote:N/px'> → urls_[N] (the HTML never carries a raw URL).
+	mutable QStringList urls_;
+	mutable QHash<QString, int> urlSlot_;
 
 	QWidget *main_ = nullptr;
 	QWidget *lockPanel_ = nullptr;

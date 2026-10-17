@@ -66,6 +66,8 @@ struct Settings {
 	int chatFontSize = 0;
 	// Extra words that highlight a line (besides the streamer's own name)
 	QStringList chatHighlightWords;
+	// Other people's channels shown in the feed, read-only ("twitch:name", "kick:name", …)
+	QStringList chatWatch;
 	// Which connected platforms MultiChat reads (Twitch + Kick are always on).
 	// YouTube polls Google's API and TikTok opens a live connection — only
 	// while these are on and the account has them connected on the website.
@@ -76,6 +78,7 @@ struct Settings {
 	bool chatBadges = true;     // HOST / MOD / VIP / SUB tags
 	bool chatNameColors = true; // chatters' own name colours (off = one neutral colour)
 	bool chatCompact = false;   // tighter lines
+	bool chatEmotes = true;     // Twitch / Kick / BTTV / FFZ / 7TV emotes as images
 	// Events tab: which kinds are listed
 	bool evGiftBombs = true;
 	bool evPoints = true;

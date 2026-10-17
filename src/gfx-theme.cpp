@@ -518,6 +518,14 @@ QPushButton#gfxTarget:disabled { color: #3f4552; background: #15171c; border-col
 
 QLineEdit#gfxChatInput { padding: 6px 10px; border-radius: 8px; background: #0f1115; }
 QLineEdit#gfxChatInput:disabled { color: #6b7280; }
+
+QFrame#gfxCard { background: #15181e; border: 1px solid #3a4150; border-radius: 12px; }
+QLabel#gfxCardAvatar { background: #1d2129; border-radius: 22px; }
+QLabel#gfxCardFacts { color: #c9ced8; }
+QTextBrowser#gfxCardRecent {
+	background: #0f1115; color: #e8eaf0; border: 1px solid #262a33; border-radius: 8px; font-size: 8pt;
+}
+QPushButton#gfxCardBtn { padding: 4px 9px; border-radius: 6px; font-size: 8pt; font-weight: 600; }
 )QSS");
 
 	return qss;

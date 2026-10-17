@@ -389,6 +389,29 @@ void GfxDock::buildUi()
 					 int seconds, const QString &messageId, const QString &displayName) {
 		chatMod(platform, action, login, seconds, messageId, displayName);
 	});
+	// Chatter card: what the platform knows about a chatter (account age, follow date…).
+	chatPanel_->setInfoHandler([this](const QString &platform, const QString &login, GfxChatPanel::InfoDone done) {
+		const QString path = QStringLiteral("/api/obs/chat/user?platform=%1&login=%2")
+					     .arg(QString::fromLatin1(QUrl::toPercentEncoding(platform)),
+						  QString::fromLatin1(QUrl::toPercentEncoding(login)));
+		runAsync(
+			this, [path] { return apiGet(path); },
+			[done](const ApiResult &r) {
+				if (!r.ok()) {
+					// An older site without the lookup answers 404 — say so plainly.
+					done(QJsonObject(),
+					     r.http.status == 404 && r.http.errorCode().isEmpty()
+						     ? QStringLiteral("Chatter details need a newer GoalForgeX site.")
+						     : describe(r));
+					return;
+				}
+				const QJsonValue v = r.http.json().value(QStringLiteral("info"));
+				if (!v.isObject())
+					done(QJsonObject(), QStringLiteral("No details for this chatter."));
+				else
+					done(v.toObject(), QString());
+			});
+	});
 	connect(tabs_, &QTabWidget::currentChanged, this, [this](int) {
 		if (chatPanel_ && tabs_->currentWidget() == chatPanel_) {
 			chatUnread_ = 0;
@@ -1440,10 +1463,13 @@ void GfxDock::pollChat()
 	chatInFlight_ = true;
 	// The platforms list also tells the server which chats to keep connected
 	// (YouTube / TikTok only while switched on here).
-	const QString path = QStringLiteral("/api/obs/chat?feed=%1&since=%2&platforms=%3")
+	// watch= lists other people's channels to show (empty releases them).
+	const QString path = QStringLiteral("/api/obs/chat?feed=%1&since=%2&platforms=%3&watch=%4")
 				     .arg(chatFeed_.isEmpty() ? QStringLiteral("none") : chatFeed_)
 				     .arg(chatSeq_)
-				     .arg(GfxChatPanel::wantedPlatforms().join(QLatin1Char(',')));
+				     .arg(GfxChatPanel::wantedPlatforms().join(QLatin1Char(',')))
+				     .arg(QString::fromLatin1(QUrl::toPercentEncoding(
+					     GfxChatPanel::watchList().join(QLatin1Char(',')))));
 	runAsync(
 		this, [path] { return apiGet(path); },
 		[this](const ApiResult &r) {
@@ -1497,8 +1523,9 @@ void GfxDock::sendChat(const QStringList &platforms, const QString &text)
 					any = true;
 				else
 					failed << QStringLiteral("%1: %2").arg(
-						it.key() == QLatin1String("kick") ? QStringLiteral("Kick")
-										  : QStringLiteral("Twitch"),
+						it.key() == QLatin1String("kick")      ? QStringLiteral("Kick")
+						: it.key() == QLatin1String("youtube") ? QStringLiteral("YouTube")
+										       : QStringLiteral("Twitch"),
 						one.value(QStringLiteral("error")).toString());
 			}
 			chatPanel_->sendFinished(any);
