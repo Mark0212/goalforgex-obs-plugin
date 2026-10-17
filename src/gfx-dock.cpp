@@ -1453,9 +1453,11 @@ void GfxDock::scheduleChat(int ms)
 	chatTimer_.start(ms);
 }
 
-// Polls fast (1.5 s) while the Chat tab is on screen, slower otherwise so the
-// unread count on the tab stays current. Each poll also keeps the server's
-// Twitch/Kick chat connection up for this account.
+// Long-polls: the request carries wait=12 and the server holds it open until
+// a new message arrives (or 12 s pass), so chat shows up the moment it lands
+// instead of on the next 1.5 s tick. Servers that answer with longPoll:true
+// get re-asked straight away; older ones keep the original 1.5 s / 4 s timer.
+// Each poll also keeps the server's chat connections up for this account.
 void GfxDock::pollChat()
 {
 	if (state_ != State::Connected || !settings().tabChat || chatInFlight_)
@@ -1464,7 +1466,7 @@ void GfxDock::pollChat()
 	// The platforms list also tells the server which chats to keep connected
 	// (YouTube / TikTok only while switched on here).
 	// watch= lists other people's channels to show (empty releases them).
-	const QString path = QStringLiteral("/api/obs/chat?feed=%1&since=%2&platforms=%3&watch=%4")
+	const QString path = QStringLiteral("/api/obs/chat?feed=%1&since=%2&platforms=%3&watch=%4&wait=12")
 				     .arg(chatFeed_.isEmpty() ? QStringLiteral("none") : chatFeed_)
 				     .arg(chatSeq_)
 				     .arg(GfxChatPanel::wantedPlatforms().join(QLatin1Char(',')))
@@ -1497,7 +1499,13 @@ void GfxDock::pollChat()
 				chatUnread_ += added;
 				updateChatTabTitle();
 			}
-			scheduleChat(onTab ? 1500 : 4000);
+			// Long-poll server: the wait already happened server-side, so ask
+			// again almost immediately (a short floor keeps a busy chat well
+			// under the server's per-minute request limit).
+			if (o.value(QStringLiteral("longPoll")).toBool())
+				scheduleChat(onTab ? 300 : 1000);
+			else
+				scheduleChat(onTab ? 1500 : 4000);
 		});
 }
 
