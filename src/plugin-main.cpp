@@ -17,6 +17,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 */
 
 #include "gfx-dock.hpp"
+#include "gfx-events-dock.hpp"
 #include "gfx-hotkeys.hpp"
 #include "gfx-http.hpp"
 
@@ -57,6 +58,15 @@ bool obs_module_load(void)
 		return false;
 	}
 	g_dock = dock;
+	// "GoalForgeX Events" — the Events list as its own dock. If OBS won't add it,
+	// Events simply stay a tab in the main dock.
+	auto *eventsDock = new GfxEventsDock();
+	if (obs_frontend_add_dock_by_id("goalforgex_events_dock", "GoalForgeX Events", eventsDock)) {
+		dock->attachEventsDock(eventsDock);
+	} else {
+		obs_log(LOG_WARNING, "Could not add the GoalForgeX Events dock — Events stay a tab");
+		delete eventsDock;
+	}
 	obs_frontend_add_event_callback(onFrontendEvent, nullptr);
 	// OBS Settings → Hotkeys → "GoalForgeX: …" — same actions as the Live tab.
 	gfx::registerHotkeys([](const QString &id, const QJsonValue &arg) {

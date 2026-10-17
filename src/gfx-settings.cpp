@@ -68,6 +68,22 @@ static const BoolField kBools[] = {
 	{"chatNameColors", &Settings::chatNameColors},
 	{"chatCompact", &Settings::chatCompact},
 	{"chatEmotes", &Settings::chatEmotes},
+	{"chatNotices", &Settings::chatNotices},
+	{"ncSubs", &Settings::ncSubs},
+	{"ncGifts", &Settings::ncGifts},
+	{"ncGiftNames", &Settings::ncGiftNames},
+	{"ncRaids", &Settings::ncRaids},
+	{"ncCheers", &Settings::ncCheers},
+	{"ncTikTokGifts", &Settings::ncTikTokGifts},
+	{"ncFollows", &Settings::ncFollows},
+	{"ncTikTokFollows", &Settings::ncTikTokFollows},
+	{"ncShoutouts", &Settings::ncShoutouts},
+	{"ncStreaks", &Settings::ncStreaks},
+	{"ncPoints", &Settings::ncPoints},
+	{"ncAnnouncements", &Settings::ncAnnouncements},
+	{"ncOther", &Settings::ncOther},
+	{"eventsOwnDock", &Settings::eventsOwnDock},
+	{"eventsDockIntroduced", &Settings::eventsDockIntroduced},
 	{"evGiftBombs", &Settings::evGiftBombs},
 	{"evPoints", &Settings::evPoints},
 	{"evStreaks", &Settings::evStreaks},
@@ -105,6 +121,16 @@ void loadSettings()
 			g_settings.*(b.member) = v.toBool();
 	}
 	g_settings.chatFontSize = qBound(0, o.value(QStringLiteral("chatFontSize")).toInt(0), 24);
+	g_settings.ncTikTokMinCoins = qBound(0, o.value(QStringLiteral("ncTikTokMinCoins")).toInt(0), 100000);
+	static const QStringList kStyles = {QStringLiteral("card"), QStringLiteral("strip"), QStringLiteral("minimal")};
+	static const QStringList kTints = {QStringLiteral("platform"), QStringLiteral("event"),
+					   QStringLiteral("accent")};
+	const QString ns = o.value(QStringLiteral("noticeStyle")).toString();
+	if (kStyles.contains(ns))
+		g_settings.noticeStyle = ns;
+	const QString nt = o.value(QStringLiteral("noticeTint")).toString();
+	if (kTints.contains(nt))
+		g_settings.noticeTint = nt;
 	const QJsonArray hw = o.value(QStringLiteral("chatHighlightWords")).toArray();
 	for (qsizetype i = 0; i < hw.size() && i < 30; ++i) {
 		const QString w = hw.at(i).toString().trimmed().left(40);
@@ -156,6 +182,9 @@ void saveSettings()
 	for (const BoolField &b : kBools)
 		o.insert(QLatin1String(b.key), g_settings.*(b.member));
 	o.insert(QStringLiteral("chatFontSize"), g_settings.chatFontSize);
+	o.insert(QStringLiteral("ncTikTokMinCoins"), g_settings.ncTikTokMinCoins);
+	o.insert(QStringLiteral("noticeStyle"), g_settings.noticeStyle);
+	o.insert(QStringLiteral("noticeTint"), g_settings.noticeTint);
 	o.insert(QStringLiteral("chatHighlightWords"), QJsonArray::fromStringList(g_settings.chatHighlightWords));
 	o.insert(QStringLiteral("chatWatch"), QJsonArray::fromStringList(g_settings.chatWatch));
 	o.insert(QStringLiteral("theme"), g_settings.theme);

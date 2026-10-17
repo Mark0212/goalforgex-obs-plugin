@@ -47,6 +47,11 @@ struct FeedEvent {
 	QString amount;         // subs gifted, points cost, streak length, "$5.00", …
 	QString message;        // redemption input / streak or Super Chat message
 	QStringList recipients; // gift bomb: everyone who got a sub
+	// Gift bomb shown live (server 2.7+, ?live=1): rows sharing a bombId replace
+	// each other — partial while recipients are still arriving, update = not new.
+	QString bombId;
+	bool partial = false;
+	bool update = false;
 };
 
 // GET /api/obs/state
@@ -83,6 +88,9 @@ struct LiveState {
 	// Channel points for the Events tab: ok | pending | needs_reconnect |
 	// no_twitch | unavailable | error — empty on servers before 2.4.
 	QString channelPoints;
+	// Twitch's native /shoutout in MultiChat: ok | pending | needs_scope | … —
+	// empty on servers before 2.7.
+	QString shoutouts;
 
 	static LiveState fromJson(const QJsonObject &o);
 };

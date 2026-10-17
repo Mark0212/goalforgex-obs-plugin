@@ -16,6 +16,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QRegularExpression>
 #include <QString>
 #include <QStringList>
+#include <QTextBlockFormat>
 #include <QWidget>
 
 #include <functional>
@@ -62,6 +63,20 @@ struct ChatMessage {
 	QList<ChatPart> parts; // set when the message has emotes
 	QString channel;       // watched channel key ("twitch:xqc"); empty = the streamer's own chat
 	QString channelName;   // how that channel is shown
+	// Event notice (sub, gift bomb, raid, shoutout…) — empty for a normal
+	// message. `text` / `parts` then hold the viewer's own message, if any.
+	QString notice;
+	QString noticeId; // a later copy with the same id (gift bomb filling in) replaces this one
+	QString target;   // gift recipient / shoutout target
+	QString tier;     // "Tier 1", "Prime"…
+	QString value;    // reward name, Super Chat amount, TikTok gift name…
+	QString tone;     // announcement colour
+	QString sysText;  // the platform's own wording (Twitch system-msg)
+	QStringList recipients;
+	qint64 amount = 0; // viewers, bits, Kicks, diamonds, points…
+	int months = 0;
+	int streak = 0;
+	int total = 0;
 };
 
 } // namespace gfx
@@ -145,6 +160,11 @@ private:
 	void showPlaceholder();
 	const gfx::ChatMessage *findMsg(qint64 seq) const;
 	QString lineInnerHtml(const gfx::ChatMessage &m) const;
+	// Event notices + cheers: their own look (Settings → MultiChat → Event notices).
+	QString noticeHtml(const gfx::ChatMessage &m) const;
+	bool noticeWanted(const gfx::ChatMessage &m) const;
+	// The block format for any line (notice card, host, highlight, first-timer, shaded).
+	QTextBlockFormat blockFormat(const gfx::ChatMessage &m, bool odd) const;
 	QString textHtml(const QString &text) const;
 	QString partsHtml(const gfx::ChatMessage &m, qreal basePt) const;
 	int emoteSlot(const QString &url) const;

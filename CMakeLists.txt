@@ -58,10 +58,13 @@ target_sources(
     src/gfx-auth.hpp
     src/gfx-chat.cpp
     src/gfx-chat.hpp
+    src/gfx-events-dock.cpp
+    src/gfx-events-dock.hpp
     src/gfx-events.cpp
     src/gfx-events.hpp
     src/gfx-flow.cpp
     src/gfx-flow.hpp
+    src/gfx-notice.hpp
     src/gfx-dock.cpp
     src/gfx-dock.hpp
     src/gfx-health.cpp

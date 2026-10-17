@@ -79,6 +79,28 @@ struct Settings {
 	bool chatNameColors = true; // chatters' own name colours (off = one neutral colour)
 	bool chatCompact = false;   // tighter lines
 	bool chatEmotes = true;     // Twitch / Kick / BTTV / FFZ / 7TV emotes as images
+	// MultiChat event notices: subs, gift bombs, raids, shoutouts, watch streaks…
+	// as their own GoalForgeX-styled lines in the chat, per platform.
+	bool chatNotices = true;
+	bool ncSubs = true;      // subs, resubs, Prime, upgrades, YouTube members, TikTok subs
+	bool ncGifts = true;     // gifted subs, gift bombs, gifted memberships
+	bool ncGiftNames = true; // list who got a sub under a gift bomb
+	bool ncRaids = true;
+	bool ncCheers = true;         // bits (cheer messages), Kicks, Super Chats / Stickers
+	bool ncTikTokGifts = true;    // TikTok gifts (see ncTikTokMinCoins)
+	bool ncFollows = true;        // Twitch / Kick follows
+	bool ncTikTokFollows = false; // TikTok follows — can be a lot
+	bool ncShoutouts = true;      // ForgeBot !so and Twitch /shoutout, sent and received
+	bool ncStreaks = true;        // watch streaks
+	bool ncPoints = true;         // channel point redemptions
+	bool ncAnnouncements = true;  // Twitch /announce
+	bool ncOther = true;          // bits badges, charity, pay-it-forward, anything else Twitch posts
+	int ncTikTokMinCoins = 0;     // hide TikTok gifts worth fewer diamonds than this (0 = all)
+	QString noticeStyle = QStringLiteral("card");    // card | strip | minimal
+	QString noticeTint = QStringLiteral("platform"); // platform | event | accent
+	// Events: their own "GoalForgeX Events" dock (off = a tab in this dock)
+	bool eventsOwnDock = true;
+	bool eventsDockIntroduced = false; // shown once automatically after updating to 2.7
 	// Events tab: which kinds are listed
 	bool evGiftBombs = true;
 	bool evPoints = true;

@@ -11,6 +11,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-api.hpp"
 #include "gfx-auth.hpp"
 #include "gfx-chat.hpp"
+#include "gfx-events-dock.hpp"
 #include "gfx-events.hpp"
 #include "gfx-health.hpp"
 #include "gfx-http.hpp"
@@ -31,6 +32,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDockWidget>
 #include <QFont>
 #include <QFrame>
 #include <QGridLayout>
@@ -41,6 +43,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QJsonObject>
 #include <QLabel>
 #include <QListWidget>
+#include <QMainWindow>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPair>
@@ -49,6 +52,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QSpinBox>
 #include <QSysInfo>
 #include <QTabWidget>
+#include <QTimer>
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -177,6 +181,8 @@ void GfxDock::buildUi()
 	theme::setRole(menuBtn_, "ghost");
 	auto *menu = new QMenu(menuBtn_);
 	connect(menu->addAction(QStringLiteral("Settings…")), &QAction::triggered, this, [this] { openSettings(); });
+	connect(menu->addAction(QStringLiteral("Show the Events dock")), &QAction::triggered, this,
+		[this] { revealEventsDock(true); });
 	connect(menu->addAction(QStringLiteral("Manage connected devices…")), &QAction::triggered, this,
 		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/obs"))); });
 	connect(menu->addAction(QStringLiteral("Open GoalForgeX dashboard")), &QAction::triggered, this,
@@ -538,10 +544,19 @@ void GfxDock::rebuildTabs()
 	QWidget *current = tabs_->currentWidget();
 	tabs_->clear();
 	const Settings &s = settings();
+	// Events: their own OBS dock, or a tab here (also the fallback if OBS
+	// couldn't add the second dock).
+	const bool ownDock = eventsDock_ && s.eventsOwnDock;
+	if (eventsDock_ && !ownDock)
+		eventsDock_->setPanel(nullptr);
 	if (s.tabLive)
 		tabs_->addTab(livePanel_, QStringLiteral("Live"));
-	if (s.tabEvents)
+	if (s.tabEvents && !ownDock)
 		tabs_->addTab(eventsPanel_, QStringLiteral("Events"));
+	if (ownDock)
+		eventsDock_->setPanel(eventsPanel_);
+	else if (!s.tabEvents)
+		eventsPanel_->hide();
 	if (s.tabChat)
 		tabs_->addTab(chatPanel_, QStringLiteral("MultiChat"));
 	if (s.tabWidgets)
@@ -562,7 +577,7 @@ void GfxDock::rebuildTabs()
 	updateEventsTabTitle();
 }
 
-void GfxDock::openSettings()
+void GfxDock::openSettings(const QString &startPage)
 {
 	Settings &s = settings();
 	const Settings before = s; // Cancel restores this (Appearance previews live)
@@ -619,7 +634,8 @@ void GfxDock::openSettings()
 	QVBoxLayout *gen = page(QStringLiteral("General"));
 	group(gen, QStringLiteral("Tabs"),
 	      {{QStringLiteral("Live"), &s.tabLive},
-	       {QStringLiteral("Events (gift bombs, channel points, watch streaks, TikTok / YouTube)"), &s.tabEvents},
+	       {QStringLiteral("Events tab (only when Events aren't in their own dock — see the Events page)"),
+		&s.tabEvents},
 	       {QStringLiteral("MultiChat (Twitch, Kick, YouTube, TikTok)"), &s.tabChat},
 	       {QStringLiteral("Widgets"), &s.tabWidgets},
 	       {QStringLiteral("Reactions"), &s.tabReactions},
@@ -677,11 +693,73 @@ void GfxDock::openSettings()
 	chatSizeRow->addWidget(chatSizeLbl);
 	chatSizeRow->addWidget(chatSize, 1);
 	mc->addLayout(chatSizeRow);
+
+	// Event notices — styled lines between chat messages, like each platform's own chat.
+	group(mc, QStringLiteral("Event notices in the chat"),
+	      {{QStringLiteral("Show event notices in MultiChat"), &s.chatNotices},
+	       {QStringLiteral("⭐  Subs, resubs, Prime, upgrades · YouTube members · TikTok subs"), &s.ncSubs},
+	       {QStringLiteral("🎁  Gifted subs and gift bombs · gifted memberships"), &s.ncGifts},
+	       {QStringLiteral("      List who got a sub under each gift bomb"), &s.ncGiftNames},
+	       {QStringLiteral("🚀  Raids"), &s.ncRaids},
+	       {QStringLiteral("💎  Cheers · Kicks · Super Chats and Super Stickers"), &s.ncCheers},
+	       {QStringLiteral("🎁  TikTok gifts"), &s.ncTikTokGifts},
+	       {QStringLiteral("➕  Twitch and Kick follows"), &s.ncFollows},
+	       {QStringLiteral("➕  TikTok follows (can be a lot)"), &s.ncTikTokFollows},
+	       {QStringLiteral("📣  Shoutouts — ForgeBot !so and Twitch /shoutout, sent and received"), &s.ncShoutouts},
+	       {QStringLiteral("🔥  Watch streaks"), &s.ncStreaks},
+	       {QStringLiteral("🎯  Channel point redemptions"), &s.ncPoints},
+	       {QStringLiteral("📢  Announcements (/announce)"), &s.ncAnnouncements},
+	       {QStringLiteral("ℹ  Everything else Twitch posts (bits badges, charity, pay it forward…)"),
+		&s.ncOther}});
+	auto *noticeForm = new QGridLayout();
+	noticeForm->setHorizontalSpacing(10);
+	noticeForm->setVerticalSpacing(6);
+	const auto fieldLbl = [mc](const QString &t) {
+		auto *l = new QLabel(t, mc->parentWidget());
+		l->setObjectName(QStringLiteral("gfxFieldLabel"));
+		return l;
+	};
+	auto *noticeStyle = new QComboBox(mc->parentWidget());
+	noticeStyle->addItem(QStringLiteral("Card — pill, headline and message (default)"), QStringLiteral("card"));
+	noticeStyle->addItem(QStringLiteral("Strip — one tinted line"), QStringLiteral("strip"));
+	noticeStyle->addItem(QStringLiteral("Minimal — quiet, like Twitch's own system lines"),
+			     QStringLiteral("minimal"));
+	noticeStyle->setCurrentIndex(qMax(0, noticeStyle->findData(s.noticeStyle)));
+	auto *noticeTint = new QComboBox(mc->parentWidget());
+	noticeTint->addItem(QStringLiteral("Platform colour — Twitch purple, Kick green, YouTube red, TikTok pink"),
+			    QStringLiteral("platform"));
+	noticeTint->addItem(QStringLiteral("Event colour — gifts pink, raids red, streaks orange…"),
+			    QStringLiteral("event"));
+	noticeTint->addItem(QStringLiteral("My accent colour (Appearance)"), QStringLiteral("accent"));
+	noticeTint->setCurrentIndex(qMax(0, noticeTint->findData(s.noticeTint)));
+	auto *ttMin = new QComboBox(mc->parentWidget());
+	for (const int v : {0, 5, 10, 50, 100, 500, 1000})
+		ttMin->addItem(
+			v == 0 ? QStringLiteral("Every TikTok gift") : QStringLiteral("Worth %1+ diamonds").arg(v), v);
+	ttMin->setCurrentIndex(qMax(0, ttMin->findData(s.ncTikTokMinCoins)));
+	noticeForm->addWidget(fieldLbl(QStringLiteral("Look")), 0, 0);
+	noticeForm->addWidget(noticeStyle, 0, 1);
+	noticeForm->addWidget(fieldLbl(QStringLiteral("Colour")), 1, 0);
+	noticeForm->addWidget(noticeTint, 1, 1);
+	noticeForm->addWidget(fieldLbl(QStringLiteral("TikTok gifts")), 2, 0);
+	noticeForm->addWidget(ttMin, 2, 1);
+	noticeForm->setColumnStretch(1, 1);
+	mc->addLayout(noticeForm);
+	QString soNote = QStringLiteral(
+		"Notices show only in this dock — nothing is posted to your chat or shown on stream. Click a name for "
+		"that viewer's card. The look and colour can also be switched from the chat's ⋯ menu.");
+	if (lastState_.shoutouts == QLatin1String("needs_scope"))
+		soNote += QStringLiteral(" Twitch's own /shoutout needs an extra Twitch permission your login doesn't "
+					 "have yet, so only ForgeBot's !so shows for now.");
+	note(mc, soNote);
 	mc->addStretch(1);
 
 	// ── Events ──
 	QVBoxLayout *ev = page(QStringLiteral("Events"));
-	group(ev, QStringLiteral("Show in the Events tab"),
+	group(ev, QStringLiteral("Where"),
+	      {{QStringLiteral("Show Events in their own dock (“GoalForgeX Events” in OBS's Docks menu)"),
+		&s.eventsOwnDock}});
+	group(ev, QStringLiteral("Show in the Events list"),
 	      {{QStringLiteral("🎁  Gift bombs — with the list of who got a sub"), &s.evGiftBombs},
 	       {QStringLiteral("🎯  Channel point redemptions"), &s.evPoints},
 	       {QStringLiteral("🔥  Watch streaks"), &s.evStreaks},
@@ -818,6 +896,10 @@ void GfxDock::openSettings()
 		setAccent(d.accent);
 	});
 
+	for (int i = 0; i < pages->count() && !startPage.isEmpty(); ++i)
+		if (pages->tabText(i) == startPage)
+			pages->setCurrentIndex(i);
+
 	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
 	if (QPushButton *okBtn = buttons->button(QDialogButtonBox::Ok))
 		theme::setRole(okBtn, "primary");
@@ -829,12 +911,18 @@ void GfxDock::openSettings()
 		applyAppearance();
 		return;
 	}
+	const bool hadOwnDock = s.eventsOwnDock;
 	for (const Opt &o : opts)
 		*o.value = o.box->isChecked();
 	s.chatFontSize = chatSize->currentData().toInt();
+	s.noticeStyle = noticeStyle->currentData().toString();
+	s.noticeTint = noticeTint->currentData().toString();
+	s.ncTikTokMinCoins = ttMin->currentData().toInt();
 	saveSettings();
 	rebuildTabs();
 	applyAppearance();
+	if (s.eventsOwnDock && !hadOwnDock)
+		revealEventsDock(false); // just moved there — show it
 	scheduleChat(0);
 	checkForUpdate();
 }
@@ -850,12 +938,69 @@ void GfxDock::applyAppearance()
 	livePanel_->applySettings();
 	eventsPanel_->applySettings();
 	chatPanel_->refresh();
+	if (eventsDock_)
+		eventsDock_->applyAppearance();
 	// Rich-text labels that carry the accent colour.
 	setState(state_);
 }
 
+void GfxDock::attachEventsDock(GfxEventsDock *dock)
+{
+	eventsDock_ = dock;
+	if (!dock)
+		return;
+	dock->onOpenSettings = [this] {
+		openSettings(QStringLiteral("Events"));
+	};
+	dock->onShown = [this] {
+		if (eventsDock_ && eventsDock_->panel()) {
+			eventsUnread_ = 0;
+			updateEventsTabTitle();
+		}
+	};
+	dock->setConnected(state_ == State::Connected || state_ == State::NeedsReconnect);
+	rebuildTabs();
+}
+
+bool GfxDock::eventsVisibleNow() const
+{
+	if (eventsDock_ && eventsDock_->panel())
+		return eventsDock_->showingEvents();
+	return isVisible() && tabs_->currentWidget() == eventsPanel_;
+}
+
+void GfxDock::revealEventsDock(bool force)
+{
+	QDockWidget *ev = eventsDock_ ? eventsDock_->dockFrame() : nullptr;
+	if (!ev)
+		return;
+	if (!settings().eventsOwnDock) {
+		if (!force)
+			return;
+		settings().eventsOwnDock = true;
+		saveSettings();
+		rebuildTabs();
+	}
+	if (!ev->isVisible()) {
+		// Put it right under this dock when this one is docked; otherwise OBS decides.
+		QDockWidget *mine = nullptr;
+		for (QWidget *w = parentWidget(); w && !mine; w = w->parentWidget())
+			mine = qobject_cast<QDockWidget *>(w);
+		auto *mainWin = static_cast<QMainWindow *>(obs_frontend_get_main_window());
+		if (mainWin && mine && mine->isVisible() && !mine->isFloating() &&
+		    mainWin->dockWidgetArea(mine) != Qt::NoDockWidgetArea) {
+			ev->setFloating(false);
+			mainWin->splitDockWidget(mine, ev, Qt::Vertical);
+		}
+		ev->show();
+	}
+	ev->raise();
+}
+
 void GfxDock::updateEventsTabTitle()
 {
+	if (eventsDock_)
+		eventsDock_->setUnread(eventsDock_->panel() ? eventsUnread_ : 0);
 	const int i = eventsPanel_ ? tabs_->indexOf(eventsPanel_) : -1;
 	if (i < 0)
 		return;
@@ -896,6 +1041,8 @@ void GfxDock::setState(State s, const QString &message, bool isError)
 	linkPanel_->setVisible(s == State::Linking);
 	tabs_->setVisible((s == State::Connected || s == State::NeedsReconnect) && !updateRequired_);
 	requiredPanel_->setVisible(updateRequired_ && s != State::Linking);
+	if (eventsDock_)
+		eventsDock_->setConnected((s == State::Connected || s == State::NeedsReconnect) && !updateRequired_);
 	if (s == State::Connected) {
 		statusTimer_.start();
 		stateTimer_.start();
@@ -1115,14 +1262,22 @@ void GfxDock::disconnectAccount()
 
 void GfxDock::pollState()
 {
-	if (state_ != State::Connected || stateInFlight_)
+	if (state_ != State::Connected)
 		return;
+	if (stateInFlight_) {
+		stateAgain_ = true; // something new arrived meanwhile — fetch again as soon as this one lands
+		return;
+	}
 	stateInFlight_ = true;
-	const QString path = QStringLiteral("/api/obs/state?since=%1").arg(since_);
+	stateAgain_ = false;
+	// live=1: gift bombs show the moment they start and fill in (2.7+ server).
+	const QString path = QStringLiteral("/api/obs/state?since=%1&live=1").arg(since_);
 	runAsync(
 		this, [path] { return apiGet(path); },
 		[this](const ApiResult &r) {
 			stateInFlight_ = false;
+			if (stateAgain_)
+				QTimer::singleShot(0, this, [this] { pollState(); });
 			if (r.token == TokenStatus::NeedsReconnect) {
 				setState(
 					State::NeedsReconnect,
@@ -1152,19 +1307,32 @@ void GfxDock::pollState()
 			since_ = st.seq;
 			const LiveState prev = lastState_;
 			lastState_ = st;
+			// A gift bomb filling in (update) is the same event again — the Events
+			// list redraws it; the Live feed and reactions only take it once.
+			QList<FeedEvent> firstSeen;
+			for (const FeedEvent &e : fresh) {
+				if (!e.bombId.isEmpty()) {
+					if (seenBombs_.contains(e.bombId))
+						continue;
+					if (seenBombs_.size() > 200)
+						seenBombs_.clear();
+					seenBombs_.insert(e.bombId);
+				}
+				firstSeen.push_back(e);
+			}
 			livePanel_->setState(st);
-			livePanel_->addEvents(fresh);
+			livePanel_->addEvents(firstSeen);
 			eventsPanel_->setChannelPointsStatus(st.channelPoints);
 			const int shownNew = eventsPanel_->addEvents(fresh);
 			// History from before OBS connected isn't "unread".
-			if (!firstOrReset && shownNew > 0 && !(isVisible() && tabs_->currentWidget() == eventsPanel_)) {
+			if (!firstOrReset && shownNew > 0 && !eventsVisibleNow()) {
 				eventsUnread_ += shownNew;
 				updateEventsTabTitle();
 			}
 			renderAirChip();
 			// History from before OBS connected is shown, never reacted to.
 			if (!firstOrReset)
-				reactions_.onEvents(fresh);
+				reactions_.onEvents(firstSeen);
 			reactions_.onStateChange(prev, st);
 			updateHealthContext();
 			// Widget sizes/list changed on the site (e.g. Chat Box width in the
@@ -1466,12 +1634,19 @@ void GfxDock::pollChat()
 	// The platforms list also tells the server which chats to keep connected
 	// (YouTube / TikTok only while switched on here).
 	// watch= lists other people's channels to show (empty releases them).
-	const QString path = QStringLiteral("/api/obs/chat?feed=%1&since=%2&platforms=%3&watch=%4&wait=12")
-				     .arg(chatFeed_.isEmpty() ? QStringLiteral("none") : chatFeed_)
-				     .arg(chatSeq_)
-				     .arg(GfxChatPanel::wantedPlatforms().join(QLatin1Char(',')))
-				     .arg(QString::fromLatin1(QUrl::toPercentEncoding(
-					     GfxChatPanel::watchList().join(QLatin1Char(',')))));
+	// notices=1: subs / gifts / raids / shoutouts… as lines in the feed (2.7+ server; older ones ignore it).
+	QString path = QStringLiteral("/api/obs/chat?feed=%1&since=%2&platforms=%3&watch=%4&wait=12&notices=1")
+			       .arg(chatFeed_.isEmpty() ? QStringLiteral("none") : chatFeed_)
+			       .arg(chatSeq_)
+			       .arg(GfxChatPanel::wantedPlatforms().join(QLatin1Char(',')))
+			       .arg(QString::fromLatin1(
+				       QUrl::toPercentEncoding(GfxChatPanel::watchList().join(QLatin1Char(',')))));
+	// evseq/evfeed: the newest Events-dock event we have — a newer one answers
+	// this long-poll too, so events show at once instead of on the 2 s state timer.
+	if (!feedId_.isEmpty())
+		path += QStringLiteral("&evseq=%1&evfeed=%2")
+				.arg(since_)
+				.arg(QString::fromLatin1(QUrl::toPercentEncoding(feedId_)));
 	runAsync(
 		this, [path] { return apiGet(path); },
 		[this](const ApiResult &r) {
@@ -1499,11 +1674,17 @@ void GfxDock::pollChat()
 				chatUnread_ += added;
 				updateChatTabTitle();
 			}
+			// A new Events-dock event (or the server restarted its feed): fetch it now.
+			const QString evFeed = o.value(QStringLiteral("eventsFeed")).toString();
+			const qint64 evSeq = static_cast<qint64>(o.value(QStringLiteral("eventsSeq")).toDouble());
+			if (!evFeed.isEmpty() && !feedId_.isEmpty() && (evFeed != feedId_ || evSeq > since_))
+				pollState();
 			// Long-poll server: the wait already happened server-side, so ask
-			// again almost immediately (a short floor keeps a busy chat well
-			// under the server's per-minute request limit).
+			// again right away — the server's short batching window already
+			// groups a busy chat into a few responses a second. Older servers
+			// (no longPoll) keep the original timer.
 			if (o.value(QStringLiteral("longPoll")).toBool())
-				scheduleChat(onTab ? 300 : 1000);
+				scheduleChat(o.contains(QStringLiteral("eventsSeq")) ? 40 : (onTab ? 300 : 1000));
 			else
 				scheduleChat(onTab ? 1500 : 4000);
 		});
@@ -2176,6 +2357,12 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		}
 		// Even when not connected — an update may be required to connect at all.
 		checkForUpdate();
+		// 2.7 moved Events into their own dock: show it once so nobody loses them.
+		if (!settings().eventsDockIntroduced && eventsDock_) {
+			settings().eventsDockIntroduced = true;
+			saveSettings();
+			QTimer::singleShot(0, this, [this] { revealEventsDock(false); });
+		}
 		updateTimer_.start();
 		// Already live when OBS finished loading (rare) — start the clocks now.
 		if (obs_frontend_streaming_active() && !streamStartMs_)

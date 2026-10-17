@@ -107,10 +107,14 @@ LiveState LiveState::fromJson(const QJsonObject &o)
 			if (!r.isEmpty())
 				ev.recipients << r;
 		}
+		ev.bombId = e.value(QStringLiteral("bombId")).toString().left(24);
+		ev.partial = e.value(QStringLiteral("partial")).toBool();
+		ev.update = e.value(QStringLiteral("update")).toBool() && !ev.bombId.isEmpty();
 		s.events.push_back(ev);
 	}
-	s.channelPoints =
-		o.value(QStringLiteral("eventsStatus")).toObject().value(QStringLiteral("channelPoints")).toString();
+	const QJsonObject es = o.value(QStringLiteral("eventsStatus")).toObject();
+	s.channelPoints = es.value(QStringLiteral("channelPoints")).toString();
+	s.shoutouts = es.value(QStringLiteral("shoutouts")).toString();
 	return s;
 }
 

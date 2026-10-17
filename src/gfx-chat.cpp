@@ -11,6 +11,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-flow.hpp"
 #include "gfx-http.hpp"
 #include "gfx-images.hpp"
+#include "gfx-notice.hpp"
 #include "gfx-settings.hpp"
 #include "gfx-theme.hpp"
 
@@ -46,6 +47,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QMenu>
 #include <QMessageBox>
 #include <QMouseEvent>
+#include <QPaintEvent>
 #include <QPair>
 #include <QPixmap>
 #include <QPushButton>
@@ -77,6 +79,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QPolygonF>
 #include <QRectF>
 
+#include <iterator>
 #include <utility>
 
 using namespace gfx;
@@ -87,6 +90,8 @@ constexpr int kKeep = 500;   // messages kept in the panel
 constexpr int kMaxLen = 500; // Twitch / Kick cap at 500 (YouTube 200 — the server reports a rejection)
 constexpr int kHistory = 50; // sent messages ↑/↓ can recall
 constexpr int kQuickTimeout = 600;
+// Block property: the colour of the accent bar ChatView paints down a notice card's left edge.
+constexpr int kBarProp = QTextFormat::UserProperty + 7;
 
 // Everything platform-specific in one place.
 struct PlatformInfo {
@@ -252,6 +257,25 @@ public:
 	void forgetWaiting() { waiting_.clear(); }
 
 protected:
+	void paintEvent(QPaintEvent *e) override
+	{
+		QTextBrowser::paintEvent(e);
+		// Event notice cards: a full-height accent bar down the left edge
+		// (rich text can't draw a border on one block, so it's painted here).
+		QPainter p(viewport());
+		const QAbstractTextDocumentLayout *lay = document()->documentLayout();
+		const int dx = horizontalScrollBar()->value(), dy = verticalScrollBar()->value();
+		const int h = viewport()->height();
+		for (QTextBlock b = cursorForPosition(QPoint(0, 0)).block(); b.isValid(); b = b.next()) {
+			const QRectF r = lay->blockBoundingRect(b).translated(-dx, -dy);
+			if (r.top() > h)
+				break;
+			const QVariant bar = b.blockFormat().property(kBarProp);
+			if (bar.isValid())
+				p.fillRect(QRectF(r.left(), r.top(), 3, r.height()), bar.value<QColor>());
+		}
+	}
+
 	QVariant loadResource(int type, const QUrl &name) override
 	{
 		if (type == QTextDocument::ImageResource && name.scheme() == QLatin1String("gfx")) {
@@ -395,7 +419,148 @@ QTextBlockFormat lineFormat(bool host, bool highlighted, bool firstTimer, bool s
 	return f;
 }
 
+// ── Event notices ───────────────────────────────────────────────
+struct NoticeMeta {
+	const char *type;
+	const char *icon;
+	const char *label;
+	const char *color; // the event's own colour (pill text, "event" tint)
+	const char *group; // which Settings → Event notices switch it follows
+};
+const NoticeMeta kNotices[] = {
+	{"sub", "⭐", "NEW SUB", "#ffb020", "subs"},
+	{"resub", "⭐", "RESUB", "#ffb020", "subs"},
+	{"prime", "👑", "PRIME", "#38bdf8", "subs"},
+	{"upgrade", "⬆", "UPGRADE", "#ffb020", "subs"},
+	{"member", "⭐", "NEW MEMBER", "#34d399", "subs"},
+	{"milestone", "🏅", "MEMBER MILESTONE", "#34d399", "subs"},
+	{"giftsub", "🎁", "GIFT SUB", "#f472b6", "gifts"},
+	{"giftbomb", "🎁", "GIFT BOMB", "#f472b6", "gifts"},
+	{"ytgift", "🎁", "GIFTED MEMBERSHIPS", "#f472b6", "gifts"},
+	{"raid", "🚀", "RAID", "#fb7185", "raids"},
+	{"cheer", "💎", "CHEER", "#c084fc", "cheers"},
+	{"kicks", "💚", "KICKS", "#53fc18", "cheers"},
+	{"superchat", "💬", "SUPER CHAT", "#facc15", "cheers"},
+	{"supersticker", "🏷", "SUPER STICKER", "#facc15", "cheers"},
+	{"tiktok_gift", "🎁", "GIFT", "#fe2c55", "tiktokgifts"},
+	{"follow", "➕", "FOLLOW", "#a78bfa", "follows"},
+	{"shoutout", "📣", "SHOUTOUT", "#22d3ee", "shoutouts"},
+	{"shoutout_in", "📣", "SHOUTOUT", "#22d3ee", "shoutouts"},
+	{"streak", "🔥", "WATCH STREAK", "#fb923c", "streaks"},
+	{"points", "🎯", "REDEEMED", "#c4b5fd", "points"},
+	{"announcement", "📢", "ANNOUNCEMENT", "#9146ff", "announcements"},
+	{"bitsbadge", "💎", "BITS BADGE", "#c084fc", "other"},
+	{"payforward", "💞", "PAY IT FORWARD", "#f472b6", "other"},
+	{"charity", "💗", "CHARITY", "#f472b6", "other"},
+	{"system", "ℹ", "NOTICE", "#9aa1b0", "other"}, // last = fallback for anything new
+};
+
+const NoticeMeta &noticeMeta(const QString &type)
+{
+	for (const NoticeMeta &n : kNotices)
+		if (type == QLatin1String(n.type))
+			return n;
+	return kNotices[std::size(kNotices) - 1];
+}
+
+// Each platform's own brand colour — always the same, so a glance says where it happened.
+QString platformColor(const QString &p)
+{
+	if (p == QLatin1String("twitch"))
+		return QStringLiteral("#9146ff");
+	if (p == QLatin1String("kick"))
+		return QStringLiteral("#53fc18");
+	if (p == QLatin1String("youtube"))
+		return QStringLiteral("#ff0033");
+	if (p == QLatin1String("tiktok"))
+		return QStringLiteral("#fe2c55");
+	return QStringLiteral("#9aa1b0");
+}
+
+// Twitch /announce colours (PRIMARY = the channel's colour → Twitch purple here).
+QString announceColor(const QString &tone)
+{
+	const QString t = tone.toLower();
+	if (t == QLatin1String("blue"))
+		return QStringLiteral("#3b82f6");
+	if (t == QLatin1String("green"))
+		return QStringLiteral("#22c55e");
+	if (t == QLatin1String("orange"))
+		return QStringLiteral("#f97316");
+	if (t == QLatin1String("purple"))
+		return QStringLiteral("#a855f7");
+	return QStringLiteral("#9146ff");
+}
+
+QColor mixColor(const QColor &a, const QColor &b, qreal t)
+{
+	return QColor::fromRgbF(static_cast<float>(a.redF() * (1 - t) + b.redF() * t),
+				static_cast<float>(a.greenF() * (1 - t) + b.greenF() * t),
+				static_cast<float>(a.blueF() * (1 - t) + b.blueF() * t));
+}
+
+// A Twitch cheer is a real chat message — shown with the notice look when cheers are on.
+bool isCheer(const ChatMessage &m)
+{
+	const Settings &s = settings();
+	return m.notice.isEmpty() && m.bits > 0 && s.chatNotices && s.ncCheers;
+}
+
+QString eventColor(const ChatMessage &m)
+{
+	if (m.notice == QLatin1String("announcement"))
+		return announceColor(m.tone);
+	return QString::fromLatin1(noticeMeta(m.notice.isEmpty() ? QStringLiteral("cheer") : m.notice).color);
+}
+
+// Card background + accent bar colour, per Settings → Event notices → Colour.
+QString noticeTint(const ChatMessage &m)
+{
+	const QString t = settings().noticeTint;
+	if (t == QLatin1String("event"))
+		return eventColor(m);
+	if (t == QLatin1String("accent"))
+		return theme::accentColor();
+	return platformColor(m.platform);
+}
+
 } // namespace
+
+// ── Shared with the Events dock (gfx-notice.hpp) ────────────────
+namespace gfx::notice {
+
+Look look(const QString &type)
+{
+	const NoticeMeta &m = ::noticeMeta(type);
+	return {QString::fromUtf8(m.icon), QString::fromUtf8(m.label), QString::fromLatin1(m.color)};
+}
+
+QString platformColor(const QString &platform)
+{
+	return ::platformColor(platform);
+}
+
+QString tint(const QString &platform, const QString &eventColor)
+{
+	const QString t = settings().noticeTint;
+	if (t == QLatin1String("event"))
+		return eventColor;
+	if (t == QLatin1String("accent"))
+		return theme::accentColor();
+	return ::platformColor(platform);
+}
+
+QColor mix(const QColor &a, const QColor &b, qreal t)
+{
+	return ::mixColor(a, b, t);
+}
+
+QImage platformIcon(const QString &platform, int logicalPx, qreal dpr)
+{
+	return ::platformIcon(platform, logicalPx, dpr);
+}
+
+} // namespace gfx::notice
 
 QStringList GfxChatPanel::wantedPlatforms()
 {
@@ -1115,7 +1280,7 @@ void GfxChatPanel::renderStats()
 	QSet<QString> chatters;
 	int paced = 0;
 	for (const ChatMessage &m : msgs_) {
-		if (m.host || m.ts <= 0 || !m.channel.isEmpty())
+		if (m.host || m.ts <= 0 || !m.channel.isEmpty() || !m.notice.isEmpty())
 			continue;
 		if (now - m.ts <= kChattersWindow)
 			chatters.insert(m.platform + QLatin1Char(':') + m.login.toLower());
@@ -1312,7 +1477,8 @@ void GfxChatPanel::showUserMenu(const QString &platform, const QString &login, c
 	// How much they've said in what the panel holds.
 	int said = 0;
 	for (const ChatMessage &m : msgs_)
-		if (m.platform == platform && m.channel == channel && m.login.compare(login, Qt::CaseInsensitive) == 0)
+		if (m.notice.isEmpty() && m.platform == platform && m.channel == channel &&
+		    m.login.compare(login, Qt::CaseInsensitive) == 0)
 			++said;
 
 	QMenu menu(this);
@@ -1362,7 +1528,8 @@ void GfxChatPanel::showChatterCard(const QString &platform, const QString &login
 	const ChatMessage *msg = nullptr;
 	QList<const ChatMessage *> theirs;
 	for (const ChatMessage &m : msgs_) {
-		if (m.platform != platform || m.channel != channel || m.login.compare(login, Qt::CaseInsensitive) != 0)
+		if (!m.notice.isEmpty() || m.platform != platform || m.channel != channel ||
+		    m.login.compare(login, Qt::CaseInsensitive) != 0)
 			continue;
 		theirs << &m;
 		if (!messageId.isEmpty() && m.id == messageId)
@@ -1894,6 +2061,43 @@ void GfxChatPanel::showOptionsMenu()
 	toggle(QStringLiteral("Compact lines"), &s.chatCompact);
 	toggle(QStringLiteral("Show emotes as pictures"), &s.chatEmotes);
 	menu.addSeparator();
+
+	// Event notices: on/off, look and colour right from the chat (the rest is in ⚙ Settings → MultiChat).
+	QMenu *nm = menu.addMenu(QStringLiteral("🔔   Event notices"));
+	{
+		QAction *on = nm->addAction(QStringLiteral("Show subs, gifts, raids… in the chat"));
+		on->setCheckable(true);
+		on->setChecked(s.chatNotices);
+		connect(on, &QAction::toggled, this, [this](bool v) {
+			settings().chatNotices = v;
+			saveSettings();
+			refresh();
+		});
+		const auto choice = [this, nm](const QString &title, QString *value,
+					       const QList<QPair<QString, QString>> &options) {
+			nm->addSection(title);
+			for (const auto &o : options) {
+				QAction *a = nm->addAction(o.second);
+				a->setCheckable(true);
+				a->setChecked(*value == o.first);
+				const QString key = o.first;
+				connect(a, &QAction::triggered, this, [this, value, key] {
+					*value = key;
+					saveSettings();
+					refresh();
+				});
+			}
+		};
+		choice(QStringLiteral("Look"), &s.noticeStyle,
+		       {{QStringLiteral("card"), QStringLiteral("Card — pill, headline, message")},
+			{QStringLiteral("strip"), QStringLiteral("Strip — one tinted line")},
+			{QStringLiteral("minimal"), QStringLiteral("Minimal — quiet, like Twitch's own")}});
+		choice(QStringLiteral("Colour"), &s.noticeTint,
+		       {{QStringLiteral("platform"), QStringLiteral("Platform colour (Twitch purple, Kick green…)")},
+			{QStringLiteral("event"), QStringLiteral("Event colour (gifts pink, raids red…)")},
+			{QStringLiteral("accent"), QStringLiteral("My GoalForgeX accent")}});
+	}
+	menu.addSeparator();
 	connect(menu.addAction(QStringLiteral("📺   Watch other channels… (%1)").arg(s.chatWatch.size())),
 		&QAction::triggered, this, [this] { showWatchDialog(); });
 
@@ -1994,8 +2198,8 @@ int GfxChatPanel::applyPoll(const QJsonObject &o)
 			const QString plat = it.value(QStringLiteral("platform")).toString();
 			const QString chan = it.value(QStringLiteral("channel")).toString();
 			for (ChatMessage &m : msgs_) {
-				if (m.channel != chan)
-					continue; // a watched channel's removals only touch that channel
+				if (m.channel != chan || !m.notice.isEmpty())
+					continue; // a watched channel's removals only touch that channel; notices aren't messages
 				const bool hit = !id.isEmpty() ? m.id == id
 							       : (!login.isEmpty() &&
 								  m.login.compare(login, Qt::CaseInsensitive) == 0 &&
@@ -2008,12 +2212,34 @@ int GfxChatPanel::applyPoll(const QJsonObject &o)
 			continue;
 		}
 		ChatMessage m;
-		m.id = it.value(QStringLiteral("id")).toString();
+		const bool isNotice = it.value(QStringLiteral("kind")).toString() == QLatin1String("notice");
+		if (isNotice) {
+			m.notice = it.value(QStringLiteral("type")).toString().left(24);
+			m.noticeId = it.value(QStringLiteral("id")).toString().left(120);
+			m.target = it.value(QStringLiteral("target")).toString().left(40);
+			m.tier = it.value(QStringLiteral("tier")).toString().left(12);
+			m.value = it.value(QStringLiteral("value")).toString().left(60);
+			m.tone = it.value(QStringLiteral("tone")).toString().left(12);
+			m.sysText = it.value(QStringLiteral("text")).toString().left(300);
+			m.amount = static_cast<qint64>(it.value(QStringLiteral("amount")).toDouble());
+			m.months = it.value(QStringLiteral("months")).toInt();
+			m.streak = it.value(QStringLiteral("streak")).toInt();
+			m.total = it.value(QStringLiteral("total")).toInt();
+			const QJsonArray rs = it.value(QStringLiteral("recipients")).toArray();
+			for (qsizetype k = 0; k < rs.size() && k < 500; ++k) {
+				const QString r = rs.at(k).toString().left(40);
+				if (!r.isEmpty())
+					m.recipients << r;
+			}
+		} else {
+			m.id = it.value(QStringLiteral("id")).toString();
+		}
 		m.platform = it.value(QStringLiteral("platform")).toString();
 		m.user = it.value(QStringLiteral("user")).toString();
 		m.login = it.value(QStringLiteral("login")).toString();
 		m.color = it.value(QStringLiteral("color")).toString();
-		m.text = it.value(QStringLiteral("text")).toString();
+		// A notice's `message` is what the viewer wrote (resub message, Super Chat…).
+		m.text = it.value(isNotice ? QStringLiteral("message") : QStringLiteral("text")).toString();
 		m.replyTo = it.value(QStringLiteral("replyTo")).toString();
 		m.host = it.value(QStringLiteral("host")).toBool();
 		m.mod = it.value(QStringLiteral("mod")).toBool();
@@ -2044,6 +2270,20 @@ int GfxChatPanel::applyPoll(const QJsonObject &o)
 		}
 		if (!info(m.platform))
 			continue;
+		// Gift bomb recipients filling in: redraw the line already in the feed.
+		if (isNotice && it.value(QStringLiteral("update")).toBool()) {
+			bool replaced = false;
+			for (ChatMessage &old : msgs_) {
+				if (old.notice.isEmpty() || old.noticeId != m.noticeId)
+					continue;
+				m.seq = old.seq;
+				old = m;
+				edited.insert(m.seq);
+				replaced = true;
+			}
+			if (replaced)
+				continue;
+		}
 		m.seq = nextSeq_++;
 		msgs_.push_back(m);
 		fresh.push_back(m.seq);
@@ -2090,7 +2330,7 @@ int GfxChatPanel::applyPoll(const QJsonObject &o)
 
 bool GfxChatPanel::isHighlighted(const ChatMessage &m) const
 {
-	if (m.host || highlightRe_.pattern().isEmpty() || !highlightRe_.isValid())
+	if (m.host || !m.notice.isEmpty() || highlightRe_.pattern().isEmpty() || !highlightRe_.isValid())
 		return false;
 	return highlightRe_.match(m.text).hasMatch() ||
 	       (!m.replyTo.isEmpty() && highlightRe_.match(m.replyTo).hasMatch());
@@ -2129,6 +2369,8 @@ bool GfxChatPanel::matches(const ChatMessage &m) const
 {
 	if (m.channel.isEmpty() ? !wantedPlatforms().contains(m.platform) : !watchStatusHas(m.channel))
 		return false;
+	if (!m.notice.isEmpty() && !noticeWanted(m))
+		return false;
 	// Platform chips are about your own chats; 📺 Watching is everyone else's.
 	if (info(filter_) && (m.platform != filter_ || !m.channel.isEmpty()))
 		return false;
@@ -2140,9 +2382,40 @@ bool GfxChatPanel::matches(const ChatMessage &m) const
 	    (m.platform != userFilterPlatform_ || m.login.compare(userFilterLogin_, Qt::CaseInsensitive) != 0))
 		return false;
 	if (!search_.isEmpty() && !m.text.contains(search_, Qt::CaseInsensitive) &&
-	    !m.user.contains(search_, Qt::CaseInsensitive) && !m.login.contains(search_, Qt::CaseInsensitive))
+	    !m.user.contains(search_, Qt::CaseInsensitive) && !m.login.contains(search_, Qt::CaseInsensitive) &&
+	    !m.target.contains(search_, Qt::CaseInsensitive) && !m.value.contains(search_, Qt::CaseInsensitive) &&
+	    !m.recipients.contains(search_, Qt::CaseInsensitive))
 		return false;
 	return true;
+}
+
+bool GfxChatPanel::noticeWanted(const ChatMessage &m) const
+{
+	const Settings &s = settings();
+	if (!s.chatNotices)
+		return false;
+	const QLatin1String g(noticeMeta(m.notice).group);
+	if (g == QLatin1String("subs"))
+		return s.ncSubs;
+	if (g == QLatin1String("gifts"))
+		return s.ncGifts;
+	if (g == QLatin1String("raids"))
+		return s.ncRaids;
+	if (g == QLatin1String("cheers"))
+		return s.ncCheers;
+	if (g == QLatin1String("tiktokgifts"))
+		return s.ncTikTokGifts && (s.ncTikTokMinCoins <= 0 || m.amount >= s.ncTikTokMinCoins);
+	if (g == QLatin1String("follows"))
+		return m.platform == QLatin1String("tiktok") ? s.ncTikTokFollows : s.ncFollows;
+	if (g == QLatin1String("shoutouts"))
+		return s.ncShoutouts;
+	if (g == QLatin1String("streaks"))
+		return s.ncStreaks;
+	if (g == QLatin1String("points"))
+		return s.ncPoints;
+	if (g == QLatin1String("announcements"))
+		return s.ncAnnouncements;
+	return s.ncOther;
 }
 
 // ── Line HTML ───────────────────────────────────────────────────
@@ -2223,6 +2496,8 @@ QString GfxChatPanel::partsHtml(const ChatMessage &m, qreal basePt) const
 
 QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 {
+	if (!m.notice.isEmpty())
+		return noticeHtml(m);
 	const Settings &s = settings();
 	const qreal base = baseFontPt();
 	const qreal tagPt = qMax<qreal>(6.0, base * 0.78);
@@ -2233,6 +2508,9 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 	const bool own = m.channel.isEmpty();
 
 	QString h;
+	const bool cheer = isCheer(m);
+	if (cheer && s.noticeStyle != QLatin1String("minimal"))
+		h += QStringLiteral("&nbsp;&nbsp;"); // room for the accent bar
 	// One-click moderation, for moderators who live in this tab (own chat only).
 	if (own && s.chatQuickMod && mod_ && canMod(m.platform) && !m.host && validLogin && validId && !m.deleted)
 		h += QStringLiteral("<a href='mod:delete:%1' style='color:#6b7280;text-decoration:none;'>🗑</a>"
@@ -2281,8 +2559,15 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 		h += QStringLiteral("<span style='color:#6b7280'>↪ @%1</span> ").arg(m.replyTo.toHtmlEscaped());
 	if (m.first && !m.deleted)
 		h += QStringLiteral("<span style='color:#34d399;font-weight:700'>✨ first message</span> ");
-	if (m.bits > 0)
+	if (cheer) {
+		const QColor c(eventColor(m));
+		h += QStringLiteral("<span style='background-color:%1;color:%2;font-size:%3pt;font-weight:800;'>"
+				    "&nbsp;💎 CHEER %4&nbsp;</span>&nbsp;")
+			     .arg(mixColor(QColor(theme::mapColor(QStringLiteral("#121419"))), c, 0.28).name(),
+				  c.name(), QString::number(tagPt, 'f', 1), fmtCount(m.bits));
+	} else if (m.bits > 0) {
 		h += QStringLiteral("<span style='color:#c084fc;font-weight:700'>💎 %1</span> ").arg(m.bits);
+	}
 	if (m.deleted)
 		h += QStringLiteral(
 			     "<s style='color:#5b6270'>%1</s> <i style='color:#5b6270;font-size:%2pt'>(deleted)</i>")
@@ -2292,6 +2577,236 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 	else
 		h += QStringLiteral("<span style='color:#e8eaf0'>%1</span>").arg(textHtml(m.text));
 	return h;
+}
+
+// ── Event notice lines ──────────────────────────────────────────
+//
+//   card     ▌ [icon] [🎁 GIFT BOMB] 21:04
+//            ▌ Santa is gifting 20 Tier 1 subs to the community!
+//            ▌ → Kid1, Kid2, Kid3 …
+//   strip    ▌ [icon] [🎁 GIFT BOMB] Santa is gifting 20 Tier 1 subs — message
+//   minimal  [icon] 🎁 Santa is gifting 20 Tier 1 subs   (muted, like Twitch's own system lines)
+
+QString GfxChatPanel::noticeHtml(const ChatMessage &m) const
+{
+	const Settings &s = settings();
+	const NoticeMeta &meta = noticeMeta(m.notice);
+	const QString style = s.noticeStyle;
+	const bool card = style == QLatin1String("card");
+	const bool minimal = style == QLatin1String("minimal");
+	const qreal base = baseFontPt();
+	const qreal tagPt = qMax<qreal>(6.0, base * 0.78);
+	const qreal smallPt = qMax<qreal>(6.5, base * 0.88);
+	const int iconPx = qBound(12, qRound(base * 1.65), 32);
+	const QColor evColor(eventColor(m));
+	const QString bg = theme::mapColor(QStringLiteral("#121419"));
+	const QString strong = minimal ? QStringLiteral("#c9ced8") : QStringLiteral("#ffffff");
+	const QString soft = minimal ? QStringLiteral("#9aa1b0") : QStringLiteral("#d6d9e0");
+
+	// Names: the chatter's own colour (when that's on), clickable for their card.
+	const QString nameColor = (s.chatNameColors && !m.color.isEmpty()) ? readableColor(m.color) : strong;
+	const QString who = m.user.isEmpty() ? QStringLiteral("Someone") : m.user;
+	const QString N = loginRe().match(m.login).hasMatch()
+				  ? QStringLiteral("<a href='user:%1' title='Click for their card' "
+						   "style='color:%2;text-decoration:none;font-weight:bold;'>%3</a>")
+					    .arg(QString::number(m.seq), nameColor, who.toHtmlEscaped())
+				  : QStringLiteral("<b style='color:%1'>%2</b>").arg(nameColor, who.toHtmlEscaped());
+	const auto B = [&strong](const QString &t) {
+		return QStringLiteral("<b style='color:%1'>%2</b>").arg(strong, t.toHtmlEscaped());
+	};
+	const auto plural = [](qint64 n, const char *one, const char *many) {
+		return QStringLiteral("%1 %2").arg(fmtCount(n), QString::fromUtf8(n == 1 ? one : many));
+	};
+	const QString tierSp = m.tier.isEmpty() || m.tier == QLatin1String("Prime") ? QString()
+										    : m.tier + QLatin1Char(' ');
+
+	// Headline, per event type and platform.
+	const QString &t = m.notice;
+	const bool kick = m.platform == QLatin1String("kick");
+	const bool tiktok = m.platform == QLatin1String("tiktok");
+	QString head;
+	if (t == QLatin1String("sub")) {
+		head = N + QStringLiteral(" subscribed");
+		if (!m.tier.isEmpty() && !kick && !tiktok)
+			head += QStringLiteral(" at ") + B(m.tier);
+		head += QLatin1Char('!');
+	} else if (t == QLatin1String("resub")) {
+		head = N + QStringLiteral(" resubscribed");
+		if (m.months > 0)
+			head += QStringLiteral(" for ") + B(plural(m.months, "month", "months"));
+		if (!m.tier.isEmpty() && !kick)
+			head += QStringLiteral(" at ") + B(m.tier);
+		head += QLatin1Char('!');
+		if (m.streak > 1)
+			head += QStringLiteral(" <span style='color:%1'>· %2-month streak 🔥</span>")
+					.arg(soft)
+					.arg(m.streak);
+	} else if (t == QLatin1String("prime")) {
+		head = N + QStringLiteral(" subscribed with ") + B(QStringLiteral("Prime"));
+		if (m.months > 1)
+			head += QStringLiteral(" · ") + B(plural(m.months, "month", "months"));
+		head += QLatin1Char('!');
+	} else if (t == QLatin1String("giftsub")) {
+		head = N + QStringLiteral(" gifted a %1sub to ").arg(tierSp.toHtmlEscaped()) +
+		       B(m.target.isEmpty() ? QStringLiteral("someone") : m.target) + QLatin1Char('!');
+		if (m.total > 1)
+			head += QStringLiteral(" <span style='color:%1'>· %2 gifted in the channel</span>")
+					.arg(soft, fmtCount(m.total));
+	} else if (t == QLatin1String("giftbomb")) {
+		const int total = qMax(m.total, static_cast<int>(m.recipients.size()));
+		head = kick ? N + QStringLiteral(" gifted ") + B(plural(total, "sub", "subs")) + QLatin1Char('!')
+			    : N + QStringLiteral(" is gifting ") +
+				       B(QStringLiteral("%1 %2%3").arg(fmtCount(total), tierSp,
+								       total == 1 ? QStringLiteral("sub")
+										  : QStringLiteral("subs"))) +
+				       QStringLiteral(" to the community!");
+		if (m.value.toInt() > total)
+			head += QStringLiteral(" <span style='color:%1'>· %2 gifted in the channel</span>")
+					.arg(soft, fmtCount(m.value.toInt()));
+	} else if (t == QLatin1String("upgrade")) {
+		head = m.sysText.isEmpty() ? N + QStringLiteral(" upgraded their sub!") : textHtml(m.sysText);
+	} else if (t == QLatin1String("raid")) {
+		head = N + QStringLiteral(" is raiding with ") + B(plural(m.amount, "viewer", "viewers")) +
+		       QStringLiteral("!");
+	} else if (t == QLatin1String("follow")) {
+		head = N + QStringLiteral(" followed");
+	} else if (t == QLatin1String("shoutout")) {
+		head = N + QStringLiteral(" gave a shoutout to ") + B(m.target);
+		if (m.value == QLatin1String("ForgeBot"))
+			head += QStringLiteral(" <span style='color:%1'>· via ForgeBot</span>").arg(soft);
+	} else if (t == QLatin1String("shoutout_in")) {
+		head = N + QStringLiteral(" gave you a shoutout");
+		if (m.amount > 0)
+			head += QStringLiteral(" in front of ") + B(plural(m.amount, "viewer", "viewers"));
+		head += QLatin1Char('!');
+	} else if (t == QLatin1String("streak")) {
+		head = N + QStringLiteral(" is on a ") + B(QStringLiteral("%1-stream").arg(m.streak)) +
+		       QStringLiteral(" watch streak!");
+		if (m.amount > 0)
+			head += QStringLiteral(" <span style='color:%1'>· +%2 points</span>")
+					.arg(soft, fmtCount(m.amount));
+	} else if (t == QLatin1String("points")) {
+		head = N + QStringLiteral(" redeemed ") + B(m.value.isEmpty() ? QStringLiteral("a reward") : m.value);
+		if (m.amount > 0)
+			head += QStringLiteral(" <span style='color:%1'>· %2</span>").arg(soft, fmtCount(m.amount));
+	} else if (t == QLatin1String("announcement")) {
+		head = N;
+	} else if (t == QLatin1String("bitsbadge")) {
+		head = N + QStringLiteral(" just earned the ") + B(QStringLiteral("%1 bits").arg(fmtCount(m.amount))) +
+		       QStringLiteral(" badge!");
+	} else if (t == QLatin1String("kicks")) {
+		head = N + QStringLiteral(" sent ") + B(plural(m.amount, "Kick", "Kicks"));
+		if (!m.value.isEmpty())
+			head += QStringLiteral(" <span style='color:%1'>· %2</span>").arg(soft, m.value.toHtmlEscaped());
+	} else if (t == QLatin1String("superchat") || t == QLatin1String("supersticker")) {
+		head = N + QStringLiteral(" sent a %1")
+				   .arg(t == QLatin1String("superchat") ? QStringLiteral("Super Chat")
+									: QStringLiteral("Super Sticker"));
+		if (!m.value.isEmpty())
+			head += QStringLiteral(" · ") + B(m.value);
+	} else if (t == QLatin1String("member")) {
+		head = N + QStringLiteral(" became a member");
+		if (!m.value.isEmpty())
+			head += QStringLiteral(" · ") + B(m.value);
+		head += QLatin1Char('!');
+	} else if (t == QLatin1String("milestone")) {
+		head = N + QStringLiteral(" has been a member for ") + B(plural(m.months, "month", "months")) +
+		       QLatin1Char('!');
+	} else if (t == QLatin1String("ytgift")) {
+		head = N + QStringLiteral(" gifted ") + B(plural(qMax(1, m.total), "membership", "memberships")) +
+		       QLatin1Char('!');
+	} else if (t == QLatin1String("tiktok_gift")) {
+		head = N + QStringLiteral(" sent ") +
+		       B((m.total > 1 ? QStringLiteral("%1× ").arg(m.total) : QString()) +
+			 (m.value.isEmpty() ? QStringLiteral("a gift") : m.value));
+		if (m.amount > 0)
+			head += QStringLiteral(" <span style='color:%1'>· %2 💎</span>").arg(soft, fmtCount(m.amount));
+	} else {
+		// pay-it-forward, charity, anything new: the platform's own wording.
+		head = m.sysText.isEmpty() ? N : textHtml(m.sysText);
+	}
+	if (minimal)
+		head = QStringLiteral("<span style='color:%1'>%2</span>").arg(soft, head);
+
+	QString h;
+	if (!minimal)
+		h += QStringLiteral("&nbsp;&nbsp;"); // room for the accent bar
+	if (s.chatIcons)
+		h += QStringLiteral("<img src='gfx:%1/%2' width='%2' height='%2' style='vertical-align:middle'>&nbsp;")
+			     .arg(m.platform)
+			     .arg(iconPx);
+	if (minimal) {
+		h += QString::fromUtf8(meta.icon) + QStringLiteral("&nbsp;");
+	} else {
+		h += QStringLiteral("<span style='background-color:%1;color:%2;font-size:%3pt;font-weight:800;'>"
+				    "&nbsp;%4&nbsp;%5&nbsp;</span>&nbsp;")
+			     .arg(mixColor(QColor(bg), evColor, 0.28).name(), evColor.name(),
+				  QString::number(tagPt, 'f', 1), QString::fromUtf8(meta.icon),
+				  QString::fromUtf8(meta.label));
+	}
+	if (s.chatTimestamps && m.ts > 0 && !minimal)
+		h += QStringLiteral("<span style='color:#5b6270;font-size:%2pt;'>%1</span> ")
+			     .arg(QDateTime::fromMSecsSinceEpoch(m.ts).toString(QStringLiteral("HH:mm")),
+				  QString::number(smallPt, 'f', 1));
+	const QString indent = QStringLiteral("<br>&nbsp;&nbsp;");
+	h += card ? indent + head : head;
+
+	// What the viewer wrote (resub / Super Chat / announcement message…).
+	if (!m.text.trimmed().isEmpty()) {
+		const QString body = s.chatEmotes && !m.parts.isEmpty() ? partsHtml(m, base) : textHtml(m.text);
+		if (card)
+			h += indent + QStringLiteral("<span style='color:#e8eaf0;%1'>%2</span>")
+					      .arg(t == QLatin1String("announcement")
+							   ? QStringLiteral("font-weight:600;")
+							   : QString(),
+						   body);
+		else
+			h += QStringLiteral(" <span style='color:%1'>— %2</span>")
+				     .arg(minimal ? soft : QStringLiteral("#e8eaf0"), body);
+	}
+
+	// Gift bomb: who got one (fills in as Twitch announces each recipient).
+	if (t == QLatin1String("giftbomb") && s.ncGiftNames && card) {
+		const int total = qMax(m.total, static_cast<int>(m.recipients.size()));
+		QString line;
+		if (m.recipients.isEmpty()) {
+			line = QStringLiteral("Handing out gifts…");
+		} else {
+			constexpr int kShow = 40;
+			QStringList names;
+			for (qsizetype i = 0; i < m.recipients.size() && i < kShow; ++i)
+				names << m.recipients.at(i).toHtmlEscaped();
+			line = QStringLiteral("→ ") + names.join(QStringLiteral(", "));
+			if (m.recipients.size() > kShow)
+				line += QStringLiteral(" <b>+%1 more</b>").arg(m.recipients.size() - kShow);
+			else if (m.recipients.size() < total)
+				line += QStringLiteral(" …");
+		}
+		h += indent + QStringLiteral("<span style='color:#9aa1b0;font-size:%1pt'>%2</span>")
+				      .arg(QString::number(smallPt, 'f', 1), line);
+	}
+	return h;
+}
+
+QTextBlockFormat GfxChatPanel::blockFormat(const ChatMessage &m, bool odd) const
+{
+	const Settings &s = settings();
+	if (m.notice.isEmpty() && !isCheer(m))
+		return lineFormat(m.host, s.chatHighlightMentions && isHighlighted(m), m.first && !m.deleted,
+				  s.chatAltRows && odd);
+	QTextBlockFormat f;
+	f.setLineHeight(112, QTextBlockFormat::ProportionalHeight);
+	if (s.noticeStyle == QLatin1String("minimal")) {
+		f.setBottomMargin(s.chatCompact ? 1 : 4);
+		return f;
+	}
+	const bool card = s.noticeStyle == QLatin1String("card");
+	const QColor tint(noticeTint(m));
+	f.setTopMargin(card ? 3 : 1);
+	f.setBottomMargin(s.chatCompact ? 3 : (card ? 7 : 4));
+	f.setBackground(mixColor(QColor(theme::mapColor(QStringLiteral("#121419"))), tint, card ? 0.15 : 0.10));
+	f.setProperty(kBarProp, tint);
+	return f;
 }
 
 // ── Feed ────────────────────────────────────────────────────────
@@ -2323,9 +2838,7 @@ void GfxChatPanel::appendLine(const ChatMessage &m)
 		placeholder_ = false;
 	}
 	const bool odd = !shown_.isEmpty() && !shown_.last().odd;
-	const Settings &s = settings();
-	const QTextBlockFormat fmt = lineFormat(m.host, s.chatHighlightMentions && isHighlighted(m),
-						m.first && !m.deleted, s.chatAltRows && odd);
+	const QTextBlockFormat fmt = blockFormat(m, odd);
 	QTextCursor c(doc);
 	c.movePosition(QTextCursor::End);
 	if (!shown_.isEmpty())
@@ -2352,15 +2865,13 @@ void GfxChatPanel::updateLine(qint64 seq)
 	if (idx < 0 || !m)
 		return;
 	++programmatic_;
-	const Settings &s = settings();
 	QTextBlock b = view_->document()->findBlockByNumber(idx);
 	QTextCursor c(b);
 	c.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
 	c.removeSelectedText();
 	c.setCharFormat(QTextCharFormat());
 	c.insertHtml(lineInnerHtml(*m));
-	c.setBlockFormat(lineFormat(m->host, s.chatHighlightMentions && isHighlighted(*m), m->first && !m->deleted,
-				    s.chatAltRows && shown_.at(idx).odd));
+	c.setBlockFormat(blockFormat(*m, shown_.at(idx).odd));
 	--programmatic_;
 }
 
@@ -2399,10 +2910,8 @@ void GfxChatPanel::trimTop()
 		shown_.erase(shown_.begin(), shown_.begin() + n);
 		// The merged first block may keep the removed line's format — restore its own.
 		if (const ChatMessage *m = findMsg(shown_.first().seq)) {
-			const Settings &s = settings();
 			QTextCursor fc(doc->firstBlock());
-			fc.setBlockFormat(lineFormat(m->host, s.chatHighlightMentions && isHighlighted(*m),
-						     m->first && !m->deleted, s.chatAltRows && shown_.first().odd));
+			fc.setBlockFormat(blockFormat(*m, shown_.first().odd));
 		}
 		if (keep && anchor.isValid())
 			sb->setValue(qMax(0, qRound(lay->blockBoundingRect(anchor).top() + offset)));

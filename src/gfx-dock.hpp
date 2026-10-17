@@ -18,12 +18,14 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include <QJsonValue>
 #include <QList>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
 #include <QWidget>
 
 class GfxChatPanel;
+class GfxEventsDock;
 class GfxEventsPanel;
 class GfxHealthPanel;
 class GfxLivePanel;
@@ -47,6 +49,9 @@ public:
 	void onFrontendEvent(enum obs_frontend_event event);
 	// Shared by the Live tab buttons, OBS hotkeys and stream automation.
 	void performAction(const QString &id, const QJsonValue &arg);
+	// The separate "GoalForgeX Events" dock (plugin-main adds it to OBS). The
+	// Events panel moves there while Settings → Events → own dock is on.
+	void attachEventsDock(GfxEventsDock *dock);
 
 private:
 	enum class State { Disconnected, Linking, Connected, NeedsReconnect };
@@ -56,7 +61,13 @@ private:
 	void rebuildTabs();
 	void setState(State s, const QString &message = QString(), bool isError = false);
 	void showMessage(const QString &text, bool isError = false);
-	void openSettings();
+	// page = the Settings tab to open on ("Events", "MultiChat"…); empty = the first.
+	void openSettings(const QString &page = QString());
+	// Shows the Events dock (docked under this one the first time). force = also
+	// switch "own dock" back on and bring it to the front.
+	void revealEventsDock(bool force);
+	// The streamer can see the Events list right now (own dock or the tab).
+	bool eventsVisibleNow() const;
 	// Settings → Appearance (and anything else that re-styles the dock): style
 	// sheet, brand mark and every panel's own colours / layout.
 	void applyAppearance();
@@ -138,6 +149,7 @@ private:
 	GfxHealthPanel *healthPanel_ = nullptr;
 	GfxChatPanel *chatPanel_ = nullptr;
 	GfxEventsPanel *eventsPanel_ = nullptr;
+	GfxEventsDock *eventsDock_ = nullptr;
 	QLabel *heroMark_ = nullptr; // welcome card's big brand mark (re-drawn on accent change)
 	int eventsUnread_ = 0;
 	// Widgets tab
@@ -199,4 +211,6 @@ private:
 	bool loaded_ = false;
 	bool catalogueInFlight_ = false;
 	bool stateInFlight_ = false;
+	bool stateAgain_ = false; // asked for while a state poll was in flight → poll again right after
+	QSet<QString> seenBombs_; // gift bomb ids already given to the Live feed / reactions
 };
