@@ -677,6 +677,7 @@ void GfxDock::openSettings(const QString &startPage)
 	group(mc, QStringLiteral("Look"),
 	      {{QStringLiteral("Platform icon on each message"), &s.chatIcons},
 	       {QStringLiteral("HOST / MOD / VIP / SUB badges"), &s.chatBadges},
+	       {QStringLiteral("GoalForgeX STAFF badge on GoalForgeX team members"), &s.chatStaffBadge},
 	       {QStringLiteral("Chatters' own name colours"), &s.chatNameColors},
 	       {QStringLiteral("Show the time next to each message"), &s.chatTimestamps},
 	       {QStringLiteral("Compact lines"), &s.chatCompact},

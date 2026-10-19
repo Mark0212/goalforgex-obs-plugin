@@ -281,6 +281,9 @@ protected:
 		if (type == QTextDocument::ImageResource && name.scheme() == QLatin1String("gfx")) {
 			const QStringList parts = name.path().split(QLatin1Char('/'));
 			const int px = parts.size() > 1 ? qBound(8, parts.at(1).toInt(), 48) : 15;
+			// gfx:brand — the GoalForgeX mark on the STAFF badge.
+			if (parts.value(0) == QLatin1String("brand"))
+				return QVariant::fromValue(theme::brandMark(px, devicePixelRatioF()).toImage());
 			return QVariant::fromValue(platformIcon(parts.value(0), px, devicePixelRatioF()));
 		}
 		if (type == QTextDocument::ImageResource && name.scheme() == QLatin1String("emote")) {
@@ -2256,6 +2259,7 @@ int GfxChatPanel::applyPoll(const QJsonObject &o)
 		m.vip = it.value(QStringLiteral("vip")).toBool();
 		m.sub = it.value(QStringLiteral("sub")).toBool();
 		m.first = it.value(QStringLiteral("first")).toBool();
+		m.staff = it.value(QStringLiteral("staff")).toBool();
 		m.bits = it.value(QStringLiteral("bits")).toInt();
 		m.ts = static_cast<qint64>(it.value(QStringLiteral("ts")).toDouble());
 		m.channel = it.value(QStringLiteral("channel")).toString().left(240);
@@ -2524,7 +2528,8 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 
 	QString h;
 	const bool cheer = isCheer(m);
-	if (cheer && s.noticeStyle != QLatin1String("minimal"))
+	const bool staffLine = !cheer && m.staff && s.chatStaffBadge;
+	if ((cheer && s.noticeStyle != QLatin1String("minimal")) || staffLine)
 		h += QStringLiteral("&nbsp;&nbsp;"); // room for the accent bar
 	// One-click moderation, for moderators who live in this tab (own chat only).
 	if (own && s.chatQuickMod && mod_ && canMod(m.platform) && !m.host && validLogin && validId && !m.deleted)
@@ -2547,6 +2552,19 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 		h += QStringLiteral("<span style='color:#5b6270;font-size:%2pt;'>%1</span> ")
 			     .arg(QDateTime::fromMSecsSinceEpoch(m.ts).toString(QStringLiteral("HH:mm")),
 				  QString::number(smallPt, 'f', 1));
+	// GoalForgeX staff: the brand mark + STAFF, ahead of every other badge.
+	if (m.staff && s.chatStaffBadge) {
+		const int markPx = qBound(10, qRound(base * 1.3), 26);
+		h += QStringLiteral(
+			     "<span style='background-color:%1;color:#ffd27a;font-size:%2pt;font-weight:800;'>"
+			     "&nbsp;<img src='gfx:brand/%3' width='%3' height='%3' style='vertical-align:middle'>"
+			     "&nbsp;GOALFORGEX STAFF&nbsp;</span>&nbsp;")
+			     .arg(mixColor(QColor(theme::mapColor(QStringLiteral("#121419"))),
+					   QColor(QStringLiteral("#ff3b4f")), 0.35)
+					  .name(),
+				  QString::number(tagPt, 'f', 1))
+			     .arg(markPx);
+	}
 	if (s.chatBadges) {
 		if (m.host)
 			h += tag(own ? "HOST" : "STREAMER", "#ff3b4f", tagPt);
@@ -2806,6 +2824,14 @@ QString GfxChatPanel::noticeHtml(const ChatMessage &m) const
 QTextBlockFormat GfxChatPanel::blockFormat(const ChatMessage &m, bool odd) const
 {
 	const Settings &s = settings();
+	// GoalForgeX staff: a warm brand-tinted line with the red → amber accent bar.
+	if (m.notice.isEmpty() && !isCheer(m) && m.staff && s.chatStaffBadge) {
+		QTextBlockFormat f = lineFormat(false, false, false, false);
+		f.setBackground(mixColor(QColor(theme::mapColor(QStringLiteral("#121419"))),
+					 QColor(QStringLiteral("#ff5a36")), 0.13));
+		f.setProperty(kBarProp, QColor(QStringLiteral("#ff6a3d")));
+		return f;
+	}
 	if (m.notice.isEmpty() && !isCheer(m))
 		return lineFormat(m.host, s.chatHighlightMentions && isHighlighted(m), m.first && !m.deleted,
 				  s.chatAltRows && odd);

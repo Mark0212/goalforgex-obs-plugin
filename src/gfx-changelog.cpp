@@ -44,6 +44,10 @@ struct Release {
 };
 
 const Note k273[] = {
+	{"🛡", "GoalForgeX staff badge",
+	 "When a member of the GoalForgeX team chats in your Twitch, Kick or TikTok chat, MultiChat marks them with a "
+	 "GOALFORGEX STAFF badge and a highlighted line, so you always know it's really us. Switch it off in Settings → "
+	 "MultiChat."},
 	{"🔐", "Reconnect without signing out",
 	 "The Reconnect button in the Events dock now only refreshes your Twitch permissions. It no longer signs your "
 	 "browser in or out of the GoalForgeX dashboard, and it checks you approved the same Twitch channel."},

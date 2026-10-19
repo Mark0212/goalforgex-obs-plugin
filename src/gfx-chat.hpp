@@ -56,6 +56,7 @@ struct ChatMessage {
 	bool vip = false;
 	bool sub = false;
 	bool first = false;
+	bool staff = false; // GoalForgeX staff (server 2.7.3+)
 	bool deleted = false;
 	int bits = 0;
 	qint64 ts = 0;

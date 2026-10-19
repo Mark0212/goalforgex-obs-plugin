@@ -79,6 +79,7 @@ struct Settings {
 	bool chatNameColors = true; // chatters' own name colours (off = one neutral colour)
 	bool chatCompact = false;   // tighter lines
 	bool chatEmotes = true;     // Twitch / Kick / BTTV / FFZ / 7TV emotes as images
+	bool chatStaffBadge = true; // GoalForgeX staff stand out (badge + tinted line)
 	// MultiChat event notices: subs, gift bombs, raids, shoutouts, watch streaks…
 	// as their own GoalForgeX-styled lines in the chat, per platform.
 	bool chatNotices = true;

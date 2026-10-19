@@ -74,6 +74,7 @@ static const BoolField kBools[] = {
 	{"chatNameColors", &Settings::chatNameColors},
 	{"chatCompact", &Settings::chatCompact},
 	{"chatEmotes", &Settings::chatEmotes},
+	{"chatStaffBadge", &Settings::chatStaffBadge},
 	{"chatNotices", &Settings::chatNotices},
 	{"ncSubs", &Settings::ncSubs},
 	{"ncGifts", &Settings::ncGifts},
