@@ -43,6 +43,17 @@ struct Release {
 	int count;
 };
 
+const Note k280[] = {
+	{"📡", "Multistream",
+	 "Go live on Twitch, Kick, TikTok, YouTube or any RTMP server at the same time from the new GoalForgeX "
+	 "Multistream dock (Docks → GoalForgeX Multistream). Each destination can start with your OBS stream, "
+	 "share its encoder so it costs no extra CPU/GPU, and shows its own live time, bitrate and dropped frames."},
+	{"🔑", "Stream keys filled in for you",
+	 "Twitch stream keys come straight from your connected account (Pro), refreshed every time you go live. "
+	 "Kick fills in its server; paste the Kick key once. Keys are saved encrypted on this PC."},
+	{"✏️", "One title, every platform",
+	 "Change your stream title and category on Twitch and Kick at once from the Multistream dock (Pro)."},
+};
 const Note k273[] = {
 	{"🛡", "GoalForgeX staff badge",
 	 "When a member of the GoalForgeX team chats in your Twitch, Kick or TikTok chat, MultiChat marks them with a "
@@ -78,6 +89,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"2.8.0", "October 2026", k280, static_cast<int>(std::size(k280))},
 	{"2.7.3", "October 2026", k273, static_cast<int>(std::size(k273))},
 	{"2.7.2", "October 2026", k272, static_cast<int>(std::size(k272))},
 	{"2.7.0", "October 2026", k270, static_cast<int>(std::size(k270))},

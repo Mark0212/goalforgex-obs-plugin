@@ -102,6 +102,7 @@ struct Settings {
 	// Events: their own "GoalForgeX Events" dock (off = a tab in this dock)
 	bool eventsOwnDock = true;
 	bool eventsDockIntroduced = false; // shown once automatically after updating to 2.7
+	bool msDockIntroduced = false;     // Multistream dock shown once after updating to 2.8
 	// Events tab: which kinds are listed
 	bool evGiftBombs = true;
 	bool evPoints = true;

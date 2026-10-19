@@ -79,6 +79,8 @@ target_sources(
     src/gfx-http.hpp
     src/gfx-live.cpp
     src/gfx-live.hpp
+    src/gfx-multistream.cpp
+    src/gfx-multistream.hpp
     src/gfx-reactions.cpp
     src/gfx-reactions.hpp
     src/gfx-settings.cpp

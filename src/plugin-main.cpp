@@ -18,6 +18,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include "gfx-dock.hpp"
 #include "gfx-events-dock.hpp"
+#include "gfx-multistream.hpp"
 #include "gfx-hotkeys.hpp"
 #include "gfx-http.hpp"
 
@@ -66,6 +67,14 @@ bool obs_module_load(void)
 	} else {
 		obs_log(LOG_WARNING, "Could not add the GoalForgeX Events dock — Events stay a tab");
 		delete eventsDock;
+	}
+	// "GoalForgeX Multistream" — go live on several platforms at once (2.8).
+	auto *msDock = new GfxMultistreamDock();
+	if (obs_frontend_add_dock_by_id("goalforgex_multistream_dock", "GoalForgeX Multistream", msDock)) {
+		dock->attachMultistreamDock(msDock);
+	} else {
+		obs_log(LOG_WARNING, "Could not add the GoalForgeX Multistream dock");
+		delete msDock;
 	}
 	obs_frontend_add_event_callback(onFrontendEvent, nullptr);
 	// OBS Settings → Hotkeys → "GoalForgeX: …" — same actions as the Live tab.

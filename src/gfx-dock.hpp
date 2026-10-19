@@ -26,6 +26,7 @@ the Free Software Foundation; either version 2 of the License, or
 
 class GfxChatPanel;
 class GfxEventsDock;
+class GfxMultistreamDock;
 class GfxEventsPanel;
 class GfxHealthPanel;
 class GfxLivePanel;
@@ -52,6 +53,8 @@ public:
 	// The separate "GoalForgeX Events" dock (plugin-main adds it to OBS). The
 	// Events panel moves there while Settings → Events → own dock is on.
 	void attachEventsDock(GfxEventsDock *dock);
+	// The "GoalForgeX Multistream" dock: gets OBS stream start/stop and appearance changes from here.
+	void attachMultistreamDock(GfxMultistreamDock *dock);
 
 private:
 	enum class State { Disconnected, Linking, Connected, NeedsReconnect };
@@ -152,7 +155,8 @@ private:
 	GfxChatPanel *chatPanel_ = nullptr;
 	GfxEventsPanel *eventsPanel_ = nullptr;
 	GfxEventsDock *eventsDock_ = nullptr;
-	QLabel *heroMark_ = nullptr; // welcome card's big brand mark (re-drawn on accent change)
+	GfxMultistreamDock *msDock_ = nullptr; // owned by OBS (a dock), lives as long as this one
+	QLabel *heroMark_ = nullptr;           // welcome card's big brand mark (re-drawn on accent change)
 	int eventsUnread_ = 0;
 	// Widgets tab
 	QComboBox *sceneCombo_ = nullptr;

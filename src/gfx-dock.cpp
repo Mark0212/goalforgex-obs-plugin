@@ -14,6 +14,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-chat.hpp"
 #include "gfx-events-dock.hpp"
 #include "gfx-events.hpp"
+#include "gfx-multistream.hpp"
 #include "gfx-health.hpp"
 #include "gfx-http.hpp"
 #include "gfx-live.hpp"
@@ -184,6 +185,15 @@ void GfxDock::buildUi()
 	connect(menu->addAction(QStringLiteral("Settings…")), &QAction::triggered, this, [this] { openSettings(); });
 	connect(menu->addAction(QStringLiteral("Show the Events dock")), &QAction::triggered, this,
 		[this] { revealEventsDock(true); });
+	connect(menu->addAction(QStringLiteral("Show the Multistream dock")), &QAction::triggered, this, [this] {
+		QDockWidget *frame = nullptr;
+		for (QWidget *w = msDock_ ? msDock_->parentWidget() : nullptr; w && !frame; w = w->parentWidget())
+			frame = qobject_cast<QDockWidget *>(w);
+		if (frame) {
+			frame->show();
+			frame->raise();
+		}
+	});
 	connect(menu->addAction(QStringLiteral("What's new")), &QAction::triggered, this,
 		[this] { changelog::show(this); });
 	connect(menu->addAction(QStringLiteral("Manage connected devices…")), &QAction::triggered, this,
@@ -949,8 +959,15 @@ void GfxDock::applyAppearance()
 	chatPanel_->refresh();
 	if (eventsDock_)
 		eventsDock_->applyAppearance();
+	if (msDock_)
+		msDock_->applyAppearance();
 	// Rich-text labels that carry the accent colour.
 	setState(state_);
+}
+
+void GfxDock::attachMultistreamDock(GfxMultistreamDock *dock)
+{
+	msDock_ = dock;
 }
 
 void GfxDock::attachEventsDock(GfxEventsDock *dock)
@@ -2410,6 +2427,32 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 			saveSettings();
 			QTimer::singleShot(0, this, [this] { revealEventsDock(false); });
 		}
+		// 2.8 added the Multistream dock: show it once, tabbed with the Events dock when that's docked.
+		if (!settings().msDockIntroduced && msDock_) {
+			settings().msDockIntroduced = true;
+			saveSettings();
+			QTimer::singleShot(300, this, [this] {
+				const auto frameOf = [](QWidget *w) -> QDockWidget * {
+					for (; w; w = w->parentWidget())
+						if (auto *d = qobject_cast<QDockWidget *>(w))
+							return d;
+					return nullptr;
+				};
+				QDockWidget *ms = frameOf(msDock_ ? msDock_->parentWidget() : nullptr);
+				QDockWidget *ev = frameOf(eventsDock_ ? eventsDock_->parentWidget() : nullptr);
+				if (!ms || ms->isVisible())
+					return;
+				auto *mainWin = static_cast<QMainWindow *>(obs_frontend_get_main_window());
+				if (mainWin && ev && ev->isVisible() && !ev->isFloating() &&
+				    mainWin->dockWidgetArea(ev) != Qt::NoDockWidgetArea) {
+					ms->setFloating(false);
+					mainWin->tabifyDockWidget(ev, ms);
+				}
+				ms->show();
+				if (ev)
+					ev->raise(); // keep Events in front; Multistream sits as the next tab
+			});
+		}
 		// First start after an update: what changed (Close button; ⚙ → What's new reopens it).
 		// A moment after loading, so it opens over a fully drawn OBS window.
 		QTimer::singleShot(1500, this, [this] { changelog::showIfUpdated(this); });
@@ -2447,6 +2490,13 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		streamStartMs_ = QDateTime::currentMSecsSinceEpoch();
 		renderAirChip();
 		streamingChanged(true);
+		if (msDock_)
+			msDock_->mainStreamStarted(); // destinations set to go live with OBS
+		break;
+	case OBS_FRONTEND_EVENT_STREAMING_STOPPING:
+		// Before the main encoders stop: shared-encoder destinations go first.
+		if (msDock_)
+			msDock_->mainStreamStopping();
 		break;
 	case OBS_FRONTEND_EVENT_STREAMING_STOPPED:
 		streamStartMs_ = 0;
@@ -2462,6 +2512,8 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		renderAirChip();
 		break;
 	case OBS_FRONTEND_EVENT_EXIT:
+		if (msDock_)
+			msDock_->shutdown(); // stop every multistream output while OBS can still clean up
 		// Downloaded + verified update: install it now that OBS is closing
 		// (the installer waits for OBS to finish exiting first).
 		if (upd_ == Upd::Ready && !installerLaunched_ && (settings().autoInstallUpdates || updateRequired_) &&

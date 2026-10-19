@@ -91,6 +91,7 @@ static const BoolField kBools[] = {
 	{"ncOther", &Settings::ncOther},
 	{"eventsOwnDock", &Settings::eventsOwnDock},
 	{"eventsDockIntroduced", &Settings::eventsDockIntroduced},
+	{"msDockIntroduced", &Settings::msDockIntroduced},
 	{"evGiftBombs", &Settings::evGiftBombs},
 	{"evPoints", &Settings::evPoints},
 	{"evStreaks", &Settings::evStreaks},
