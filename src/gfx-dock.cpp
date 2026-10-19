@@ -391,6 +391,9 @@ void GfxDock::buildUi()
 	reactionsPanel_ = new GfxReactionsPanel(&reactions_, tabs_);
 	healthPanel_ = new GfxHealthPanel(tabs_);
 	eventsPanel_ = new GfxEventsPanel(tabs_);
+	eventsPanel_->onReconnect = [this] {
+		reconnectTwitch();
+	};
 	chatPanel_ = new GfxChatPanel(tabs_);
 	chatPanel_->setSendHandler(
 		[this](const QStringList &platforms, const QString &text) { sendChat(platforms, text); });
@@ -972,6 +975,34 @@ bool GfxDock::eventsVisibleNow() const
 	if (eventsDock_ && eventsDock_->panel())
 		return eventsDock_->showingEvents();
 	return isVisible() && tabs_->currentWidget() == eventsPanel_;
+}
+
+void GfxDock::reconnectTwitch()
+{
+	if (state_ != State::Connected) {
+		showMessage(QStringLiteral("Connect GoalForgeX first."), true);
+		return;
+	}
+	showMessage(QStringLiteral("Opening Twitch…"));
+	runAsync(
+		this, [] { return apiPost(QStringLiteral("/api/obs/twitch/reconnect")); },
+		[this](const ApiResult &r) {
+			const QString url = r.ok() ? r.http.json().value(QStringLiteral("url")).toString() : QString();
+			if (url.startsWith(QLatin1String("https://id.twitch.tv/"))) {
+				QDesktopServices::openUrl(QUrl(url));
+				showMessage(QStringLiteral(
+					"Approve it on Twitch in your browser — shoutouts and channel points "
+					"show up here a few seconds later."));
+			} else if (r.http.status == 404) {
+				// Older site: reconnect from the account page instead.
+				QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/account")));
+				showMessage(QStringLiteral("Reconnect Twitch on your GoalForgeX account page."));
+			} else {
+				showMessage(r.ok() ? QStringLiteral("Couldn't open Twitch — try again in a moment.")
+						   : describe(r),
+					    true);
+			}
+		});
 }
 
 void GfxDock::revealEventsDock(bool force)

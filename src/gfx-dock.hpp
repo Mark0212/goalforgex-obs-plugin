@@ -68,6 +68,8 @@ private:
 	void revealEventsDock(bool force);
 	// The streamer can see the Events list right now (own dock or the tab).
 	bool eventsVisibleNow() const;
+	// Events dock Reconnect bar: one-time Twitch approve link for this account (2.7.2 server).
+	void reconnectTwitch();
 	// Settings → Appearance (and anything else that re-styles the dock): style
 	// sheet, brand mark and every panel's own colours / layout.
 	void applyAppearance();

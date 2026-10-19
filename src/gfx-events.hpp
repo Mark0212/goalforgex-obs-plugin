@@ -19,6 +19,8 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QTextBlockFormat>
 #include <QWidget>
 
+#include <functional>
+
 class QFrame;
 class QLabel;
 class QPoint;
@@ -45,6 +47,8 @@ public:
 	void setShoutoutStatus(const QString &status);
 	// Settings changed (which kinds are listed, look, colours).
 	void applySettings();
+	// The Reconnect bar's button: the dock fetches a one-time Twitch approve link for this account.
+	std::function<void()> onReconnect;
 
 private:
 	// What one card says: pill, platform, headline (HTML) and the extra lines.

@@ -43,6 +43,11 @@ struct Release {
 	int count;
 };
 
+const Note k273[] = {
+	{"🔐", "Reconnect without signing out",
+	 "The Reconnect button in the Events dock now only refreshes your Twitch permissions. It no longer signs your "
+	 "browser in or out of the GoalForgeX dashboard, and it checks you approved the same Twitch channel."},
+};
 const Note k272[] = {
 	{"📣", "Twitch shoutouts",
 	 "Shoutouts now show in MultiChat and the Events dock, sent and received, including Twitch's own /shoutout and "
@@ -69,6 +74,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"2.7.3", "October 2026", k273, static_cast<int>(std::size(k273))},
 	{"2.7.2", "October 2026", k272, static_cast<int>(std::size(k272))},
 	{"2.7.0", "October 2026", k270, static_cast<int>(std::size(k270))},
 };

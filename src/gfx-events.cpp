@@ -191,10 +191,15 @@ void GfxEventsPanel::buildUi()
 	nl->addWidget(noticeBtn);
 	notice_->hide();
 	root->addWidget(notice_);
-	// Straight to Twitch's approve screen: signing in with Twitch saves a fresh
-	// login with the newer permissions (shoutouts, channel points).
-	connect(noticeBtn, &QPushButton::clicked, this,
-		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/auth/twitch/login"))); });
+	// The dock asks the server for a one-time Twitch approve link for this
+	// account: it only refreshes the saved Twitch permissions and never signs
+	// the browser in or out of the dashboard.
+	connect(noticeBtn, &QPushButton::clicked, this, [this] {
+		if (onReconnect)
+			onReconnect();
+		else
+			QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/account")));
+	});
 
 	// ── The feed: same frame and cards as MultiChat ──
 	view_ = new EventsView(this);
