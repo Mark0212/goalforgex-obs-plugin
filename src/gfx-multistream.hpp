@@ -10,6 +10,7 @@ the Free Software Foundation; either version 2 of the License, or
 #pragma once
 
 #include <QHash>
+#include <cstdint>
 #include <QJsonObject>
 #include <QList>
 #include <QPointer>
@@ -72,6 +73,8 @@ private:
 	void save();
 	void renderList();
 	void renderStatus();
+	// The "Main stream" row: what's set in OBS → Settings → Stream, live stats, Start/Stop.
+	void renderMain();
 	void editDestination(const QString &id); // empty = new
 	void startDest(const QString &id, bool quiet);
 	void stopDest(const QString &id);
@@ -90,6 +93,7 @@ private:
 	QList<Destination> dests_;
 	QHash<QString, Runner *> runners_;
 	QTimer tick_;
+	QTimer mainRefresh_; // re-reads OBS → Settings → Stream while visible
 	bool mainLive_ = false;
 
 	struct Row {
@@ -99,6 +103,21 @@ private:
 		QPushButton *toggle = nullptr;
 	};
 	QHash<QString, Row> rows_;
+
+	// Main stream row
+	QLabel *mainIcon_ = nullptr;
+	QLabel *mainName_ = nullptr;
+	QLabel *mainState_ = nullptr;
+	QLabel *mainStats_ = nullptr;
+	QLabel *mainKey_ = nullptr;
+	QPushButton *mainBtn_ = nullptr;
+	QString mainPlatform_;
+	qint64 mainStartMs_ = 0;
+	uint64_t mainLastBytes_ = 0;
+	qint64 mainLastMs_ = 0;
+	int mainKbps_ = 0;
+	QString mainKeyChecked_; // the main key last compared with the connected Twitch account
+	QString mainKeyCheck_;   // "" | match | mismatch
 
 	QLabel *mark_ = nullptr;
 	QLabel *summary_ = nullptr;

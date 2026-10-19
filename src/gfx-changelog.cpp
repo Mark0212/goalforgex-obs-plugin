@@ -43,6 +43,15 @@ struct Release {
 	int count;
 };
 
+const Note k281[] = {
+	{"🎯", "Your OBS stream in Multistream",
+	 "The Multistream dock now shows the stream set in OBS → Settings → Stream at the top: which platform, the "
+	 "masked key, live time, bitrate and dropped frames, with its own Start / Stop. With Pro it also checks a "
+	 "Twitch key matches your connected channel."},
+	{"🛑", "No double streams",
+	 "Adding a destination for the platform OBS already streams to now warns you, and a destination using the "
+	 "same key as your OBS stream won't start (it would knock your main stream off)."},
+};
 const Note k280[] = {
 	{"📡", "Multistream",
 	 "Go live on Twitch, Kick, TikTok, YouTube or any RTMP server at the same time from the new GoalForgeX "
@@ -89,6 +98,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"2.8.1", "October 2026", k281, static_cast<int>(std::size(k281))},
 	{"2.8.0", "October 2026", k280, static_cast<int>(std::size(k280))},
 	{"2.7.3", "October 2026", k273, static_cast<int>(std::size(k273))},
 	{"2.7.2", "October 2026", k272, static_cast<int>(std::size(k272))},

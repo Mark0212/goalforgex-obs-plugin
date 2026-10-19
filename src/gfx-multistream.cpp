@@ -167,6 +167,50 @@ QString stopReason(int code)
 	}
 }
 
+// What's set in OBS → Settings → Stream (OBS's own, "main" stream).
+struct MainStreamInfo {
+	bool configured = false;
+	QString platform; // twitch | kick | youtube | tiktok | custom
+	QString service;  // OBS's service name ("Twitch", "YouTube - RTMPS"…) or "Custom server"
+	QString server;
+	QString key;
+};
+MainStreamInfo readMainStream()
+{
+	MainStreamInfo m;
+	obs_service_t *svc = obs_frontend_get_streaming_service(); // borrowed, no reference added
+	if (!svc)
+		return m;
+	obs_data_t *s = obs_service_get_settings(svc);
+	m.service = QString::fromUtf8(obs_data_get_string(s, "service"));
+	m.server = QString::fromUtf8(obs_data_get_string(s, "server"));
+	m.key = QString::fromUtf8(obs_data_get_string(s, "key"));
+	obs_data_release(s);
+	const QString hay = (m.service + QLatin1Char(' ') + m.server).toLower();
+	if (hay.contains(QLatin1String("twitch")))
+		m.platform = QStringLiteral("twitch");
+	else if (hay.contains(QLatin1String("kick")) || hay.contains(QLatin1String("live-video.net")))
+		m.platform = QStringLiteral("kick");
+	else if (hay.contains(QLatin1String("youtube")))
+		m.platform = QStringLiteral("youtube");
+	else if (hay.contains(QLatin1String("tiktok")))
+		m.platform = QStringLiteral("tiktok");
+	else
+		m.platform = QStringLiteral("custom");
+	if (m.service.isEmpty())
+		m.service = QStringLiteral("Custom server");
+	m.configured = !m.key.isEmpty();
+	return m;
+}
+
+// live_123456789abc → live_••••9abc
+QString maskKey(const QString &key)
+{
+	if (key.size() <= 8)
+		return QStringLiteral("••••••");
+	return key.left(5) + QStringLiteral("••••") + key.right(4);
+}
+
 QLabel *platformIconLabel(const QString &platform, QWidget *parent)
 {
 	auto *l = new QLabel(parent);
@@ -256,9 +300,21 @@ GfxMultistreamDock::GfxMultistreamDock(QWidget *parent) : QWidget(parent)
 	applyAppearance();
 	tick_.setInterval(1000);
 	connect(&tick_, &QTimer::timeout, this, [this] { tick(); });
+	// OBS → Settings → Stream can change at any time (and isn't loaded yet when this dock is
+	// created), so the Main stream row re-reads it every few seconds while visible.
+	mainRefresh_.setInterval(3000);
+	connect(&mainRefresh_, &QTimer::timeout, this, [this] {
+		if (isVisible() && !tick_.isActive())
+			renderMain();
+	});
+	mainRefresh_.start();
 	msgClear_.setSingleShot(true);
 	connect(&msgClear_, &QTimer::timeout, this, [this] { msg_->hide(); });
 	mainLive_ = obs_frontend_streaming_active();
+	if (mainLive_) {
+		mainStartMs_ = QDateTime::currentMSecsSinceEpoch(); // already live when the dock loaded
+		tick_.start();
+	}
 	renderList();
 }
 
@@ -339,6 +395,47 @@ void GfxMultistreamDock::buildUi()
 	ic->addWidget(infoNote_);
 	root->addWidget(infoCard_);
 	connect(pushBtn_, &QPushButton::clicked, this, [this] { pushStreamInfo(); });
+
+	// ── Main stream: whatever is set in OBS → Settings → Stream ──
+	auto *mh = new QLabel(QStringLiteral("<b>Main stream</b>"), inner);
+	mh->setTextFormat(Qt::RichText);
+	root->addWidget(mh);
+	auto *mainBox = new QFrame(inner);
+	mainBox->setObjectName(QStringLiteral("gfxStatCard"));
+	auto *ml = new QHBoxLayout(mainBox);
+	ml->setContentsMargins(8, 6, 6, 6);
+	ml->setSpacing(8);
+	mainIcon_ = new QLabel(mainBox);
+	mainIcon_->setFixedSize(20, 20);
+	auto *mtexts = new QVBoxLayout();
+	mtexts->setSpacing(1);
+	mainName_ = new QLabel(mainBox);
+	mainName_->setTextFormat(Qt::RichText);
+	mainState_ = new QLabel(mainBox);
+	mainState_->setTextFormat(Qt::RichText);
+	mainStats_ = new QLabel(mainBox);
+	mainStats_->setObjectName(QStringLiteral("gfxStatSub"));
+	mainKey_ = new QLabel(mainBox);
+	mainKey_->setObjectName(QStringLiteral("gfxStatSub"));
+	mainKey_->setTextFormat(Qt::RichText);
+	mainKey_->setWordWrap(true);
+	mtexts->addWidget(mainName_);
+	mtexts->addWidget(mainState_);
+	mtexts->addWidget(mainStats_);
+	mtexts->addWidget(mainKey_);
+	ml->addWidget(mainIcon_, 0, Qt::AlignTop);
+	ml->addLayout(mtexts, 1);
+	mainBtn_ = new QPushButton(mainBox);
+	mainBtn_->setCursor(Qt::PointingHandCursor);
+	ml->addWidget(mainBtn_, 0, Qt::AlignTop);
+	root->addWidget(mainBox);
+	// Starts / stops OBS's own stream, exactly like OBS's Start Streaming button.
+	connect(mainBtn_, &QPushButton::clicked, this, [] {
+		if (obs_frontend_streaming_active())
+			obs_frontend_streaming_stop();
+		else
+			obs_frontend_streaming_start();
+	});
 
 	// ── Destinations ──
 	auto *dh = new QHBoxLayout();
@@ -536,6 +633,7 @@ void GfxMultistreamDock::renderList()
 
 void GfxMultistreamDock::renderStatus()
 {
+	renderMain();
 	const qint64 now = QDateTime::currentMSecsSinceEpoch();
 	int live = 0, totalKbps = 0;
 	for (const Destination &d : dests_) {
@@ -636,9 +734,96 @@ void GfxMultistreamDock::tick()
 		r->lastBytes = bytes;
 		r->lastBytesMs = now;
 	}
+	// OBS's own stream: same bitrate calculation from its output.
+	if (obs_output_t *mainOut = obs_frontend_get_streaming_output()) {
+		const uint64_t bytes = obs_output_active(mainOut) ? obs_output_get_total_bytes(mainOut) : 0;
+		if (mainLastMs_ > 0 && now > mainLastMs_ && bytes >= mainLastBytes_)
+			mainKbps_ = static_cast<int>((bytes - mainLastBytes_) * 8 /
+						     static_cast<uint64_t>(now - mainLastMs_));
+		mainLastBytes_ = bytes;
+		mainLastMs_ = now;
+		obs_output_release(mainOut);
+	}
 	renderStatus();
-	if (runners_.isEmpty())
+	if (runners_.isEmpty() && !mainLive_)
 		tick_.stop();
+}
+
+void GfxMultistreamDock::renderMain()
+{
+	const MainStreamInfo m = readMainStream();
+	const bool live = obs_frontend_streaming_active();
+	if (m.platform != mainPlatform_) {
+		mainPlatform_ = m.platform;
+		const QImage img = notice::platformIcon(m.platform, 18, devicePixelRatioF());
+		if (!img.isNull())
+			mainIcon_->setPixmap(QPixmap::fromImage(img));
+		else
+			mainIcon_->setText(QStringLiteral("📡"));
+	}
+	const QString label = m.platform == QLatin1String("custom") ? m.service
+								    : QString::fromLatin1(preset(m.platform)->name);
+	mainName_->setText(m.configured ? QStringLiteral("<b>%1</b> <span style='color:#8b93a3'>· OBS stream</span>")
+						  .arg(label.toHtmlEscaped())
+					: QStringLiteral("<b>OBS stream</b>"));
+	if (live) {
+		const qint64 secs = mainStartMs_ > 0 ? (QDateTime::currentMSecsSinceEpoch() - mainStartMs_) / 1000 : 0;
+		mainState_->setText(QStringLiteral("<span style='color:#ff3b4f;font-weight:700'>● LIVE</span> "
+						   "<span style='color:#9aa1b0'>%1</span>")
+					    .arg(mainStartMs_ > 0 ? fmtClock(secs) : QString()));
+		QString stats = QStringLiteral("%1 kbps").arg(mainKbps_);
+		if (obs_output_t *mainOut = obs_frontend_get_streaming_output()) {
+			const int dropped = obs_output_get_frames_dropped(mainOut);
+			const int total = obs_output_get_total_frames(mainOut);
+			if (total > 0)
+				stats += QStringLiteral(" · %1 dropped (%2%)")
+						 .arg(dropped)
+						 .arg(QString::number(100.0 * dropped / total, 'f',
+								      dropped * 1000 < total ? 1 : 0));
+			obs_output_release(mainOut);
+		}
+		mainStats_->setText(stats);
+	} else {
+		mainState_->setText(QStringLiteral("<span style='color:#6b7280'>● Off</span>"));
+		mainStats_->setText(m.configured
+					    ? QStringLiteral("Set in OBS → Settings → Stream")
+					    : QStringLiteral("No stream key yet: add one in OBS → Settings → Stream."));
+	}
+	// Key: masked, plus (Pro, Twitch) whether it's the key for the connected Twitch channel.
+	if (!m.configured) {
+		mainKey_->hide();
+	} else {
+		if (m.platform == QLatin1String("twitch") && m.key != mainKeyChecked_ && Auth::instance().connected()) {
+			mainKeyChecked_ = m.key;
+			mainKeyCheck_.clear();
+			const QString checking = m.key;
+			fetchKeys([this, checking](const QJsonObject &keys, const QString &error) {
+				if (checking != mainKeyChecked_ || !error.isEmpty())
+					return; // changed meanwhile, or not available (not Pro / older site)
+				const QString acct = keys.value(QStringLiteral("twitch"))
+							     .toObject()
+							     .value(QStringLiteral("key"))
+							     .toString();
+				if (!acct.isEmpty())
+					mainKeyCheck_ = acct == checking ? QStringLiteral("match")
+									 : QStringLiteral("mismatch");
+				renderStatus();
+			});
+		}
+		QString k = QStringLiteral("Key %1").arg(maskKey(m.key).toHtmlEscaped());
+		if (m.platform == QLatin1String("twitch") && mainKeyCheck_ == QLatin1String("match"))
+			k += QStringLiteral(" · <span style='color:#34d399'>✓ your connected Twitch channel</span>");
+		else if (m.platform == QLatin1String("twitch") && mainKeyCheck_ == QLatin1String("mismatch"))
+			k += QStringLiteral(" · <span style='color:#ffb020'>⚠ not the key for your connected Twitch "
+					    "channel</span>");
+		mainKey_->setText(k);
+		mainKey_->show();
+	}
+	mainBtn_->setText(live ? QStringLiteral("Stop") : QStringLiteral("Start"));
+	mainBtn_->setEnabled(m.configured || live);
+	const char *role = live ? "danger" : "soft";
+	if (mainBtn_->property("gfxRole").toString() != QLatin1String(role))
+		theme::setRole(mainBtn_, role);
 }
 
 // ── Start / stop ────────────────────────────────────────────────
@@ -672,6 +857,15 @@ void GfxMultistreamDock::startDest(const QString &id, bool quiet)
 	}
 	if (d->server.trimmed().isEmpty() || d->key.trimmed().isEmpty()) {
 		setMsg(QStringLiteral("%1 needs a server address and a stream key — ⋯ → Edit.").arg(d->name), true);
+		return;
+	}
+	// Same key as OBS's own stream: it's already going there, and a second connection would kick the first.
+	const MainStreamInfo mainInfo = readMainStream();
+	if (mainInfo.configured && d->key.trimmed() == mainInfo.key.trimmed()) {
+		setMsg(QStringLiteral(
+			       "“%1” uses the same stream key as your main OBS stream, which already goes there.")
+			       .arg(d->name),
+		       true);
 		return;
 	}
 	obs_encoder_t *video = nullptr;
@@ -849,6 +1043,11 @@ void GfxMultistreamDock::stopAll()
 void GfxMultistreamDock::mainStreamStarted()
 {
 	mainLive_ = true;
+	mainStartMs_ = QDateTime::currentMSecsSinceEpoch();
+	mainLastBytes_ = 0;
+	mainLastMs_ = 0;
+	mainKbps_ = 0;
+	tick_.start();
 	for (const Destination &d : dests_)
 		if (d.withMain)
 			startDest(d.id, true);
@@ -868,6 +1067,7 @@ void GfxMultistreamDock::mainStreamStopping()
 void GfxMultistreamDock::shutdown()
 {
 	tick_.stop();
+	mainRefresh_.stop();
 	const QList<QString> ids = runners_.keys();
 	for (const QString &id : ids)
 		releaseRunner(id, true);
@@ -938,8 +1138,12 @@ void GfxMultistreamDock::editDestination(const QString &id)
 	form->addRow(QStringLiteral("Bitrate"), bitrate);
 	root->addLayout(form);
 	bool fromAccount = d.keyFromAccount;
+	// The platform OBS itself already streams to (Settings → Stream), to warn about doubling it.
+	const MainStreamInfo mainInfo = readMainStream();
+	const QString mainPlat = mainInfo.configured ? mainInfo.platform : QString();
 
-	const auto refresh = [platform, name, server, fill, hint, bitrate, encoder, form](bool platformChanged) {
+	const auto refresh = [platform, name, server, fill, hint, bitrate, encoder, form,
+			      mainPlat](bool platformChanged) {
 		const PlatformPreset *p = preset(platform->currentData().toString());
 		const QString k = QString::fromLatin1(p->key);
 		if (platformChanged) {
@@ -958,6 +1162,12 @@ void GfxMultistreamDock::editDestination(const QString &id)
 		fill->setVisible(k == QLatin1String("twitch") || k == QLatin1String("kick"));
 		fill->setEnabled(Auth::instance().connected());
 		hint->setText(QString::fromUtf8(p->hint));
+		if (!mainPlat.isEmpty() && k == mainPlat && k != QLatin1String("custom"))
+			hint->setText(
+				QStringLiteral(
+					"⚠ %1 is already your main OBS stream (OBS → Settings → Stream). Adding it "
+					"here too sends it a second stream, so only do this for a second %1 channel.")
+					.arg(QString::fromLatin1(p->name)));
 		const bool own = encoder->currentData().toBool();
 		bitrate->setEnabled(own);
 		if (QWidget *lbl = form->labelForField(bitrate))
