@@ -2182,9 +2182,19 @@ int GfxChatPanel::applyPoll(const QJsonObject &o)
 	updateTargets();
 	const bool namesChanged = rebuildHighlightRe();
 
+	// reset = the server started a new feed (first connect, or it restarted
+	// without its history). What's already on screen stays (2.7.2) — only
+	// messages we don't have yet are added, so a server update never wipes chat.
 	const bool reset = o.value(QStringLiteral("reset")).toBool();
+	const auto lineKey = [](const ChatMessage &m) {
+		const QString id = m.notice.isEmpty() ? m.id : QStringLiteral("n:") + m.noticeId;
+		return id.isEmpty() ? QString() : m.channel + QLatin1Char('|') + id;
+	};
+	QSet<QString> have;
 	if (reset)
-		msgs_.clear();
+		for (const ChatMessage &m : msgs_)
+			if (const QString k = lineKey(m); !k.isEmpty())
+				have.insert(k);
 	int added = 0;
 	QList<qint64> fresh;
 	QSet<qint64> edited;
@@ -2283,6 +2293,11 @@ int GfxChatPanel::applyPoll(const QJsonObject &o)
 			}
 			if (replaced)
 				continue;
+		}
+		if (reset) {
+			const QString k = lineKey(m);
+			if (!k.isEmpty() && have.contains(k))
+				continue; // already showing it
 		}
 		m.seq = nextSeq_++;
 		msgs_.push_back(m);

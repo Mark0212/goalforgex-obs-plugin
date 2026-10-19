@@ -41,6 +41,8 @@ public:
 	void clearEvents();
 	// eventsStatus.channelPoints from the state poll (see LiveState).
 	void setChannelPointsStatus(const QString &status);
+	// eventsStatus.shoutouts: needs_reconnect → a Reconnect bar (Twitch /shoutout needs a newer login).
+	void setShoutoutStatus(const QString &status);
 	// Settings changed (which kinds are listed, look, colours).
 	void applySettings();
 
@@ -70,6 +72,7 @@ private:
 	void appendCard(const gfx::FeedEvent &e);
 	void showPlaceholder();
 	void renderTally();
+	void renderNotice();
 	void showMenu(const QPoint &pos);
 	const gfx::FeedEvent *eventBySeq(qint64 seq) const;
 	bool autoScrolling() const;
@@ -81,6 +84,8 @@ private:
 	QSet<qint64> toggled_;         // gift bombs whose recipient list was opened / closed by hand
 	QString filter_ = QStringLiteral("all");
 	QString cpStatus_;
+	QString soStatus_;
+	qint64 nextSeq_ = 1;        // panel-local ids — a server that restarts its feed can reuse seq numbers
 	bool seenGiftBomb_ = false; // server sends gift-bomb cards → hide the duplicate "gift subs" alert card
 	bool placeholder_ = true;
 	bool follow_ = true;

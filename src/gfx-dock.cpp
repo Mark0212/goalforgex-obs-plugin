@@ -10,6 +10,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-dock.hpp"
 #include "gfx-api.hpp"
 #include "gfx-auth.hpp"
+#include "gfx-changelog.hpp"
 #include "gfx-chat.hpp"
 #include "gfx-events-dock.hpp"
 #include "gfx-events.hpp"
@@ -183,6 +184,8 @@ void GfxDock::buildUi()
 	connect(menu->addAction(QStringLiteral("Settings…")), &QAction::triggered, this, [this] { openSettings(); });
 	connect(menu->addAction(QStringLiteral("Show the Events dock")), &QAction::triggered, this,
 		[this] { revealEventsDock(true); });
+	connect(menu->addAction(QStringLiteral("What's new")), &QAction::triggered, this,
+		[this] { changelog::show(this); });
 	connect(menu->addAction(QStringLiteral("Manage connected devices…")), &QAction::triggered, this,
 		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/obs"))); });
 	connect(menu->addAction(QStringLiteral("Open GoalForgeX dashboard")), &QAction::triggered, this,
@@ -748,9 +751,10 @@ void GfxDock::openSettings(const QString &startPage)
 	QString soNote = QStringLiteral(
 		"Notices show only in this dock — nothing is posted to your chat or shown on stream. Click a name for "
 		"that viewer's card. The look and colour can also be switched from the chat's ⋯ menu.");
-	if (lastState_.shoutouts == QLatin1String("needs_scope"))
-		soNote += QStringLiteral(" Twitch's own /shoutout needs an extra Twitch permission your login doesn't "
-					 "have yet, so only ForgeBot's !so shows for now.");
+	if (lastState_.shoutouts == QLatin1String("needs_reconnect") ||
+	    lastState_.shoutouts == QLatin1String("needs_scope"))
+		soNote += QStringLiteral(" Twitch's own /shoutout needs one more Twitch permission: click Reconnect "
+					 "in the Events dock and approve it. Until then only ForgeBot's !so shows.");
 	note(mc, soNote);
 	mc->addStretch(1);
 
@@ -764,6 +768,7 @@ void GfxDock::openSettings(const QString &startPage)
 	       {QStringLiteral("🎯  Channel point redemptions"), &s.evPoints},
 	       {QStringLiteral("🔥  Watch streaks"), &s.evStreaks},
 	       {QStringLiteral("🔔  Sub / resub / bits / raid / follow alerts"), &s.evAlerts},
+	       {QStringLiteral("📣  Shoutouts — sent (ForgeBot !so, Twitch /shoutout) and received"), &s.evShoutouts},
 	       {QStringLiteral("🎵  TikTok gifts, follows and subs"), &s.evTikTok},
 	       {QStringLiteral("▶️  YouTube Super Chats, Super Stickers and memberships"), &s.evYouTube},
 	       {QStringLiteral("⏱  Timer and spin-wheel activity"), &s.evTimers}});
@@ -1243,6 +1248,11 @@ void GfxDock::disconnectAccount()
 			list_->clear();
 			lastState_ = LiveState();
 			livePanel_->clearEvents();
+			eventsPanel_->clearEvents(); // a different account may connect next
+			feedId_.clear();
+			since_ = 0;
+			eventsUnread_ = 0;
+			updateEventsTabTitle();
 			chatPanel_->clearChat();
 			chatFeed_.clear();
 			chatSeq_ = 0;
@@ -1293,16 +1303,16 @@ void GfxDock::pollState()
 			if (!r.ok())
 				return; // transient — the next poll will catch up
 			const LiveState st = LiveState::fromJson(r.http.json());
-			const bool firstOrReset = st.feed != feedId_;
-			if (firstOrReset) {
+			// A new feed id = first load, or a server that came back without its
+			// history (2.7.2 servers keep it across updates). Either way what's on
+			// screen stays — the new feed's events are simply added after it.
+			const bool firstLoad = feedId_.isEmpty();
+			const bool newFeed = st.feed != feedId_;
+			if (newFeed)
 				feedId_ = st.feed;
-				livePanel_->clearEvents();
-				eventsPanel_->clearEvents();
-				eventsUnread_ = 0;
-			}
 			QList<FeedEvent> fresh;
 			for (const FeedEvent &e : st.events)
-				if (firstOrReset || e.seq > since_)
+				if (newFeed || e.seq > since_)
 					fresh.push_back(e);
 			since_ = st.seq;
 			const LiveState prev = lastState_;
@@ -1323,15 +1333,16 @@ void GfxDock::pollState()
 			livePanel_->setState(st);
 			livePanel_->addEvents(firstSeen);
 			eventsPanel_->setChannelPointsStatus(st.channelPoints);
+			eventsPanel_->setShoutoutStatus(st.shoutouts);
 			const int shownNew = eventsPanel_->addEvents(fresh);
 			// History from before OBS connected isn't "unread".
-			if (!firstOrReset && shownNew > 0 && !eventsVisibleNow()) {
+			if (!firstLoad && shownNew > 0 && !eventsVisibleNow()) {
 				eventsUnread_ += shownNew;
 				updateEventsTabTitle();
 			}
 			renderAirChip();
 			// History from before OBS connected is shown, never reacted to.
-			if (!firstOrReset)
+			if (!firstLoad)
 				reactions_.onEvents(firstSeen);
 			reactions_.onStateChange(prev, st);
 			updateHealthContext();
@@ -1662,9 +1673,13 @@ void GfxDock::pollChat()
 				return;
 			}
 			if (!r.ok()) {
-				scheduleChat(onTab ? 4000 : 10000); // transient — try again shortly
+				// Transient (usually a server update) — back in 1.5 s, then 3, 6, 10 s.
+				const int delay = qMin(10000, 1500 << qMin(chatFailures_, 3));
+				++chatFailures_;
+				scheduleChat(delay);
 				return;
 			}
+			chatFailures_ = 0;
 			chatPanel_->setLocked(QString());
 			const QJsonObject o = r.http.json();
 			chatFeed_ = o.value(QStringLiteral("feed")).toString();
@@ -2363,6 +2378,9 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 			saveSettings();
 			QTimer::singleShot(0, this, [this] { revealEventsDock(false); });
 		}
+		// First start after an update: what changed (Close button; ⚙ → What's new reopens it).
+		// A moment after loading, so it opens over a fully drawn OBS window.
+		QTimer::singleShot(1500, this, [this] { changelog::showIfUpdated(this); });
 		updateTimer_.start();
 		// Already live when OBS finished loading (rare) — start the clocks now.
 		if (obs_frontend_streaming_active() && !streamStartMs_)

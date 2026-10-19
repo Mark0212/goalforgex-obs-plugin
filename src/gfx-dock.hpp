@@ -211,6 +211,8 @@ private:
 	bool loaded_ = false;
 	bool catalogueInFlight_ = false;
 	bool stateInFlight_ = false;
-	bool stateAgain_ = false; // asked for while a state poll was in flight → poll again right after
+	bool stateAgain_ = false;
+	int chatFailures_ =
+		0; // failed MultiChat polls in a row (retry back-off) // asked for while a state poll was in flight → poll again right after
 	QSet<QString> seenBombs_; // gift bomb ids already given to the Live feed / reactions
 };

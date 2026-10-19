@@ -25,6 +25,12 @@ the Free Software Foundation; either version 2 of the License, or
 namespace gfx {
 
 static Settings g_settings;
+static bool g_fileExisted = false;
+
+bool settingsFileExisted()
+{
+	return g_fileExisted;
+}
 
 Settings &settings()
 {
@@ -91,6 +97,7 @@ static const BoolField kBools[] = {
 	{"evTikTok", &Settings::evTikTok},
 	{"evYouTube", &Settings::evYouTube},
 	{"evTimers", &Settings::evTimers},
+	{"evShoutouts", &Settings::evShoutouts},
 	{"evAutoExpand", &Settings::evAutoExpand},
 	{"compact", &Settings::compact},
 	{"cardStats", &Settings::cardStats},
@@ -111,6 +118,7 @@ void loadSettings()
 {
 	g_settings = Settings();
 	QFile f(settingsPath());
+	g_fileExisted = f.exists();
 	if (!f.exists() || !f.open(QIODevice::ReadOnly))
 		return;
 	const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
@@ -153,6 +161,7 @@ void loadSettings()
 	const QString ac = o.value(QStringLiteral("accent")).toString();
 	if (ac.size() == 7 && ac.startsWith(QLatin1Char('#')) && QColor(ac).isValid())
 		g_settings.accent = ac.toLower();
+	g_settings.lastSeenVersion = o.value(QStringLiteral("lastSeenVersion")).toString().left(20);
 	const int ts = o.value(QStringLiteral("textScale")).toInt(100);
 	g_settings.textScale = qBound(80, ts, 140);
 	const QJsonArray rs = o.value(QStringLiteral("reactions")).toArray();
@@ -190,6 +199,7 @@ void saveSettings()
 	o.insert(QStringLiteral("theme"), g_settings.theme);
 	o.insert(QStringLiteral("accent"), g_settings.accent);
 	o.insert(QStringLiteral("textScale"), g_settings.textScale);
+	o.insert(QStringLiteral("lastSeenVersion"), g_settings.lastSeenVersion);
 	QJsonArray rs;
 	for (const Reaction &r : g_settings.reactions) {
 		QJsonObject ro;

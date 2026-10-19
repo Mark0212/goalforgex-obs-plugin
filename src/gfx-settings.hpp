@@ -109,6 +109,7 @@ struct Settings {
 	bool evTikTok = true;
 	bool evYouTube = true;
 	bool evTimers = false;    // subathon / action timer / wheel lines
+	bool evShoutouts = true;  // shoutouts sent (ForgeBot !so, Twitch /shoutout) and received
 	bool evAutoExpand = true; // gift bombs open with their recipient list showing
 	// Appearance (gfx-theme): palette preset, accent colour, text size, density
 	QString theme = QStringLiteral("graphite"); // graphite | midnight | oled | slate | warm
@@ -122,12 +123,16 @@ struct Settings {
 	bool checkUpdates = true;
 	// Download updates in the background and install them when OBS closes.
 	bool autoInstallUpdates = true;
+	// The plugin version whose "What's new" popup was last shown (empty = never).
+	QString lastSeenVersion;
 
 	QList<Reaction> reactions;
 };
 
 Settings &settings();
 void loadSettings();
+// True when settings.json already existed at load — this OBS had the plugin before (an update, not a fresh install).
+bool settingsFileExisted();
 void saveSettings();
 
 // id → label, in display order.

@@ -191,8 +191,10 @@ void GfxEventsPanel::buildUi()
 	nl->addWidget(noticeBtn);
 	notice_->hide();
 	root->addWidget(notice_);
+	// Straight to Twitch's approve screen: signing in with Twitch saves a fresh
+	// login with the newer permissions (shoutouts, channel points).
 	connect(noticeBtn, &QPushButton::clicked, this,
-		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/account"))); });
+		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/auth/twitch/login"))); });
 
 	// ── The feed: same frame and cards as MultiChat ──
 	view_ = new EventsView(this);
@@ -271,6 +273,8 @@ QString GfxEventsPanel::group(const FeedEvent &e) const
 		return QStringLiteral("streaks");
 	if (k == QLatin1String("xive"))
 		return QStringLiteral("support");
+	if (k == QLatin1String("shoutout"))
+		return QStringLiteral("community");
 	if (k == QLatin1String("alert")) {
 		const QString &t = e.alertType;
 		if (t == QLatin1String("subscriber") || t == QLatin1String("resub") || t == QLatin1String("gifted"))
@@ -311,6 +315,8 @@ bool GfxEventsPanel::shown(const FeedEvent &e) const
 		on = s.evTikTok;
 	else if (k == QLatin1String("youtube"))
 		on = s.evYouTube;
+	else if (k == QLatin1String("shoutout"))
+		on = s.evShoutouts;
 	else if (k == QLatin1String("alert") || k == QLatin1String("xive"))
 		// The gift-bomb card (with its recipients) replaces the plain "gift subs" alert card.
 		on = s.evAlerts && !(seenGiftBomb_ && s.evGiftBombs && e.alertType == QLatin1String("gifted"));
@@ -457,6 +463,28 @@ GfxEventsPanel::Card GfxEventsPanel::describe(const FeedEvent &e) const
 			c.pillColor = QStringLiteral("#ffb020");
 			c.head = QString(e.text).remove(QStringLiteral("🔔 ")).toHtmlEscaped();
 		}
+	} else if (k == QLatin1String("shoutout")) {
+		// Word for word what MultiChat's shoutout card says.
+		const bool incoming = e.sub == QLatin1String("in");
+		c.type = incoming ? QStringLiteral("shoutout_in") : QStringLiteral("shoutout");
+		if (c.platform.isEmpty())
+			c.platform = QStringLiteral("twitch");
+		const qint64 viewers = e.amount.toLongLong();
+		if (incoming) {
+			c.head = N + QStringLiteral(" gave you a shoutout");
+			if (viewers > 0)
+				c.head += QStringLiteral(" in front of ") +
+					  B(QStringLiteral("%1 %2").arg(fmtCount(viewers),
+									viewers == 1 ? QStringLiteral("viewer")
+										     : QStringLiteral("viewers")));
+			c.head += QLatin1Char('!');
+		} else {
+			c.head = N + QStringLiteral(" gave a shoutout to ") +
+				 B(e.title.isEmpty() ? QStringLiteral("someone") : e.title);
+			if (e.message == QLatin1String("ForgeBot"))
+				c.head += S(QStringLiteral("via ForgeBot"));
+		}
+		c.message.clear();
 	} else if (k == QLatin1String("xive")) {
 		c.type = QStringLiteral("system");
 		c.pillIcon = QStringLiteral("🐝");
@@ -691,10 +719,12 @@ int GfxEventsPanel::addEvents(const QList<FeedEvent> &events)
 			seenGiftBomb_ = true;
 			needRebuild = true; // earlier "gift subs" alert cards now hide
 		}
-		events_.push_back(e);
-		if (shown(e)) {
+		FeedEvent ev = e;
+		ev.seq = nextSeq_++; // panel-local: a restarted server feed can reuse seq numbers
+		events_.push_back(ev);
+		if (shown(ev)) {
 			++visible;
-			fresh.push_back(e.seq);
+			fresh.push_back(ev.seq);
 		}
 	}
 	while (events_.size() > kKeep) {
@@ -848,13 +878,36 @@ void GfxEventsPanel::setChannelPointsStatus(const QString &status)
 	if (status == cpStatus_)
 		return;
 	cpStatus_ = status;
-	if (status == QLatin1String("needs_reconnect")) {
-		noticeLbl_->setText(QStringLiteral(
-			"Channel point redemptions need a fresh Twitch login — reconnect Twitch on your GoalForgeX account page, then they'll show here."));
-		notice_->show();
-	} else {
+	renderNotice();
+}
+
+void GfxEventsPanel::setShoutoutStatus(const QString &status)
+{
+	if (status == soStatus_)
+		return;
+	soStatus_ = status;
+	renderNotice();
+}
+
+// One Reconnect bar for whatever needs a fresher Twitch login.
+void GfxEventsPanel::renderNotice()
+{
+	const bool cp = cpStatus_ == QLatin1String("needs_reconnect");
+	const bool so = soStatus_ == QLatin1String("needs_reconnect");
+	QString what;
+	if (cp && so)
+		what = QStringLiteral("Channel point redemptions and Twitch /shoutout");
+	else if (cp)
+		what = QStringLiteral("Channel point redemptions");
+	else if (so)
+		what = QStringLiteral("Twitch /shoutout");
+	if (what.isEmpty()) {
 		notice_->hide();
+		return;
 	}
+	noticeLbl_->setText(what + QStringLiteral(" need one more Twitch permission. Click Reconnect and approve it "
+						  "on Twitch, then they'll show here and in MultiChat."));
+	notice_->show();
 }
 
 void GfxEventsPanel::applySettings()

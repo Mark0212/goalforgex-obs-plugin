@@ -56,6 +56,8 @@ target_sources(
     src/gfx-api.hpp
     src/gfx-auth.cpp
     src/gfx-auth.hpp
+    src/gfx-changelog.cpp
+    src/gfx-changelog.hpp
     src/gfx-chat.cpp
     src/gfx-chat.hpp
     src/gfx-events-dock.cpp
