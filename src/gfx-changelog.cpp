@@ -63,6 +63,11 @@ const Note k280[] = {
 	{"✏️", "One title, every platform",
 	 "Change your stream title and category on Twitch and Kick at once from the Multistream dock (Pro)."},
 };
+const Note k282[] = {
+	{"🎵", "TikTok LIVE access, explained",
+	 "Picking TikTok in the Multistream dock now shows how to get TikTok's OK to stream from a PC, with an "
+	 "Apply button and a shortcut to TikTok LIVE Producer, where your server and stream key are."},
+};
 const Note k273[] = {
 	{"🛡", "GoalForgeX staff badge",
 	 "When a member of the GoalForgeX team chats in your Twitch, Kick or TikTok chat, MultiChat marks them with a "
@@ -98,6 +103,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"2.8.2", "October 2026", k282, static_cast<int>(std::size(k282))},
 	{"2.8.1", "October 2026", k281, static_cast<int>(std::size(k281))},
 	{"2.8.0", "October 2026", k280, static_cast<int>(std::size(k280))},
 	{"2.7.3", "October 2026", k273, static_cast<int>(std::size(k273))},

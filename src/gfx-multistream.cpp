@@ -78,8 +78,7 @@ const PlatformPreset kPlatforms[] = {
 	 "Kick → Creator Dashboard → Settings → Stream URL & Key. Copy both."},
 	{"youtube", "YouTube", "rtmp://a.rtmp.youtube.com/live2", "YouTube Studio → Go live → Stream → Stream key."},
 	{"tiktok", "TikTok", "",
-	 "TikTok LIVE Producer (live.tiktok.com) → Server URL and Stream key. TikTok only gives these to some accounts, "
-	 "and its keys change every stream."},
+	 "TikTok LIVE Producer → Server URL and Stream key (new every stream)."},
 	{"custom", "Custom RTMP", "", "Any RTMP / RTMPS server: paste its server URL and stream key."},
 };
 const PlatformPreset *preset(const QString &k)
@@ -221,6 +220,58 @@ QLabel *platformIconLabel(const QString &platform, QWidget *parent)
 	else
 		l->setText(QStringLiteral("📡"));
 	return l;
+}
+
+// TikTok only hands out a server + stream key to accounts it has approved for
+// LIVE from a PC. The guide lives on goalforgex.com so its steps can change
+// without a plugin update; Producer is TikTok's own page that shows the key.
+QString tiktokGuideUrl()
+{
+	return baseUrl() + QStringLiteral("/obs#tiktok-live");
+}
+const char *const kTiktokProducerUrl = "https://livecenter.tiktok.com/producer";
+
+// The "how do I get TikTok access?" card shown for TikTok destinations.
+QFrame *tiktokAccessCard(QWidget *parent)
+{
+	auto *card = new QFrame(parent);
+	card->setObjectName(QStringLiteral("gfxStatCard"));
+	auto *v = new QVBoxLayout(card);
+	v->setContentsMargins(12, 10, 12, 10);
+	v->setSpacing(6);
+	auto *head = new QHBoxLayout();
+	head->setSpacing(8);
+	head->addWidget(platformIconLabel(QStringLiteral("tiktok"), card));
+	auto *title = new QLabel(QStringLiteral("<b>Streaming to TikTok needs TikTok's OK</b>"), card);
+	head->addWidget(title, 1);
+	v->addLayout(head);
+	auto *body = new QLabel(
+		QStringLiteral(
+			"TikTok only gives a server and stream key to accounts it has approved for LIVE from a PC. "
+			"If you haven't been approved yet, apply first: TikTok makes the decision, not GoalForgeX. "
+			"Once approved, open LIVE Producer, set a title, click <i>Save &amp; Go LIVE</i> (you're not "
+			"live yet) and copy the Server URL and Stream key here. TikTok's key changes every stream."),
+		card);
+	body->setObjectName(QStringLiteral("gfxMuted"));
+	body->setWordWrap(true);
+	body->setTextFormat(Qt::RichText);
+	v->addWidget(body);
+	auto *btns = new QHBoxLayout();
+	btns->setSpacing(6);
+	auto *apply = new QPushButton(QStringLiteral("Apply / how to get access"), card);
+	theme::setRole(apply, "primary");
+	apply->setCursor(Qt::PointingHandCursor);
+	auto *producer = new QPushButton(QStringLiteral("Open TikTok LIVE Producer"), card);
+	theme::setRole(producer, "soft");
+	producer->setCursor(Qt::PointingHandCursor);
+	btns->addWidget(apply);
+	btns->addWidget(producer);
+	btns->addStretch(1);
+	v->addLayout(btns);
+	QObject::connect(apply, &QPushButton::clicked, card, [] { QDesktopServices::openUrl(QUrl(tiktokGuideUrl())); });
+	QObject::connect(producer, &QPushButton::clicked, card,
+			 [] { QDesktopServices::openUrl(QUrl(QString::fromLatin1(kTiktokProducerUrl))); });
+	return card;
 }
 
 } // namespace
@@ -461,6 +512,14 @@ void GfxMultistreamDock::buildUi()
 	empty_->setAlignment(Qt::AlignCenter);
 	empty_->setMargin(10);
 	root->addWidget(empty_);
+
+	auto *ttHelp = new QPushButton(QStringLiteral("Want TikTok? How to get TikTok LIVE access"), inner);
+	theme::setRole(ttHelp, "ghost");
+	ttHelp->setCursor(Qt::PointingHandCursor);
+	ttHelp->setToolTip(QStringLiteral("TikTok has to approve your account for LIVE from a PC before it gives you a "
+					  "stream key. This opens the steps on goalforgex.com."));
+	root->addWidget(ttHelp);
+	connect(ttHelp, &QPushButton::clicked, this, [] { QDesktopServices::openUrl(QUrl(tiktokGuideUrl())); });
 
 	allBtn_ = new QPushButton(inner);
 	theme::setRole(allBtn_, "primary");
@@ -1133,6 +1192,8 @@ void GfxMultistreamDock::editDestination(const QString &id)
 	form->addRow(QStringLiteral("Stream key"), keyRow);
 	form->addRow(QString(), fill);
 	form->addRow(QString(), hint);
+	QFrame *ttCard = tiktokAccessCard(&dlg);
+	form->addRow(QString(), ttCard);
 	form->addRow(QString(), withMain);
 	form->addRow(QStringLiteral("Encoding"), encoder);
 	form->addRow(QStringLiteral("Bitrate"), bitrate);
@@ -1142,7 +1203,7 @@ void GfxMultistreamDock::editDestination(const QString &id)
 	const MainStreamInfo mainInfo = readMainStream();
 	const QString mainPlat = mainInfo.configured ? mainInfo.platform : QString();
 
-	const auto refresh = [platform, name, server, fill, hint, bitrate, encoder, form,
+	const auto refresh = [platform, name, server, fill, hint, bitrate, encoder, form, ttCard,
 			      mainPlat](bool platformChanged) {
 		const PlatformPreset *p = preset(platform->currentData().toString());
 		const QString k = QString::fromLatin1(p->key);
@@ -1160,6 +1221,11 @@ void GfxMultistreamDock::editDestination(const QString &id)
 				name->setText(QString::fromLatin1(p->name));
 		}
 		fill->setVisible(k == QLatin1String("twitch") || k == QLatin1String("kick"));
+		ttCard->setVisible(k == QLatin1String("tiktok"));
+		if (k == QLatin1String("tiktok"))
+			server->setPlaceholderText(QStringLiteral("Server URL from TikTok LIVE Producer"));
+		else
+			server->setPlaceholderText(QStringLiteral("rtmp:// or rtmps:// server address"));
 		fill->setEnabled(Auth::instance().connected());
 		hint->setText(QString::fromUtf8(p->hint));
 		if (!mainPlat.isEmpty() && k == mainPlat && k != QLatin1String("custom"))
