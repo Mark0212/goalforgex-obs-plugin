@@ -20,7 +20,24 @@ struct TimerState {
 	bool active = false;
 	bool paused = false;
 	bool locked = false;
-	int remaining = 0; // seconds, as of LiveState::receivedMs
+	bool ended = false; // Intro timer only: ran out and is holding 00:00
+	int remaining = 0;  // seconds, as of LiveState::receivedMs
+};
+
+// Intro timer options the dock can change live (POST /api/actiontimer/live).
+// known == false on servers that don't send them yet — the dock then hides
+// its Options panel.
+struct IntroOptions {
+	bool known = false;
+	QString title;
+	QString subtitle;
+	int length = 300; // seconds — what Start counts down from
+	bool rotateEnabled = false;
+	QStringList rotateMessages;
+	bool endFlash = true;
+	QString endFlashColor;
+	QString endFlashSpeed; // slow | normal | fast
+	bool autoStartOnLive = false;
 };
 
 struct CounterState {
@@ -67,7 +84,8 @@ struct LiveState {
 	bool twitchOk = true;
 
 	TimerState timer;
-	TimerState actionTimer;
+	TimerState actionTimer; // the intro timer ("actiontimer" server-side)
+	IntroOptions intro;
 	int goalCurrent = 0;
 	int goalTarget = 0;
 	int followerCurrent = 0;

@@ -20,6 +20,7 @@ static TimerState timerFrom(const QJsonObject &o)
 	t.active = o.value(QStringLiteral("active")).toBool();
 	t.paused = o.value(QStringLiteral("paused")).toBool();
 	t.locked = o.value(QStringLiteral("locked")).toBool();
+	t.ended = o.value(QStringLiteral("ended")).toBool();
 	t.remaining = qMax(0, o.value(QStringLiteral("remaining")).toInt());
 	return t;
 }
@@ -53,7 +54,26 @@ LiveState LiveState::fromJson(const QJsonObject &o)
 	s.twitchOk = live.value(QStringLiteral("twitchOk")).toBool(true);
 
 	s.timer = timerFrom(o.value(QStringLiteral("timer")).toObject());
-	s.actionTimer = timerFrom(o.value(QStringLiteral("actionTimer")).toObject());
+	const QJsonObject at = o.value(QStringLiteral("actionTimer")).toObject();
+	s.actionTimer = timerFrom(at);
+	const QJsonObject io = at.value(QStringLiteral("intro")).toObject();
+	if (!io.isEmpty()) {
+		s.intro.known = true;
+		s.intro.title = io.value(QStringLiteral("title")).toString();
+		s.intro.subtitle = io.value(QStringLiteral("subtitle")).toString();
+		s.intro.length = qMax(1, io.value(QStringLiteral("length")).toInt(300));
+		s.intro.rotateEnabled = io.value(QStringLiteral("rotateEnabled")).toBool();
+		const QJsonArray msgs = io.value(QStringLiteral("rotateMessages")).toArray();
+		for (qsizetype i = 0; i < msgs.size(); ++i) {
+			const QString m = msgs.at(i).toString();
+			if (!m.isEmpty())
+				s.intro.rotateMessages << m;
+		}
+		s.intro.endFlash = io.value(QStringLiteral("endFlash")).toBool(true);
+		s.intro.endFlashColor = io.value(QStringLiteral("endFlashColor")).toString();
+		s.intro.endFlashSpeed = io.value(QStringLiteral("endFlashSpeed")).toString();
+		s.intro.autoStartOnLive = io.value(QStringLiteral("autoStartOnLive")).toBool();
+	}
 
 	const QJsonObject goal = o.value(QStringLiteral("goal")).toObject();
 	s.goalCurrent = goal.value(QStringLiteral("current")).toInt();

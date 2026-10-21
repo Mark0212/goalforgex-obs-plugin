@@ -63,6 +63,17 @@ const Note k280[] = {
 	{"✏️", "One title, every platform",
 	 "Change your stream title and category on Twitch and Kick at once from the Multistream dock (Pro)."},
 };
+const Note k290[] = {
+	{"⏳", "The Intro timer",
+	 "The Action timer is now the Intro timer — a Starting Soon countdown for your pre-stream scene. At 0:00 it "
+	 "holds the zeros and flashes in the colour you pick."},
+	{"⚙", "Change it live from OBS",
+	 "Open ⚙ Options in the Intro timer card to change the title, subtitle, length, rotating messages, flash colour "
+	 "and speed, and auto-start when you go live. Every change shows on your OBS source straight away (Pro)."},
+	{"⏰", "Start for… / Count down until…",
+	 "The ⋯ menu starts a 2, 5, 10 or 15 minute countdown, any length you like, or a countdown to a time on your "
+	 "own clock — plus a −1m button next to +1m / +5m."},
+};
 const Note k282[] = {
 	{"🎵", "TikTok LIVE access, explained",
 	 "Picking TikTok in the Multistream dock now shows how to get TikTok's OK to stream from a PC, with an "
@@ -103,6 +114,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"2.9.0", "October 2026", k290, static_cast<int>(std::size(k290))},
 	{"2.8.2", "October 2026", k282, static_cast<int>(std::size(k282))},
 	{"2.8.1", "October 2026", k281, static_cast<int>(std::size(k281))},
 	{"2.8.0", "October 2026", k280, static_cast<int>(std::size(k280))},

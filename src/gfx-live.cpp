@@ -13,12 +13,18 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-settings.hpp"
 
 #include <QAction>
+#include <QCheckBox>
+#include <QColor>
+#include <QColorDialog>
+#include <QComboBox>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QFont>
+#include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
@@ -29,6 +35,9 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSignalBlocker>
+#include <QSpinBox>
+#include <QTime>
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -180,9 +189,9 @@ void GfxLivePanel::buildUi()
 	connect(tMinus1, &QPushButton::clicked, this, [this] { act(QStringLiteral("timer.add"), -60); });
 	root->addWidget(timerCard_);
 
-	// ── Action timer ───────────────────────────────────────────────
+	// ── Intro timer ("Starting Soon" countdown; "actiontimer" server-side) ──
 	QVBoxLayout *ab = nullptr;
-	atCard_ = makeCard(QStringLiteral("⚡ Action timer"), &ab);
+	atCard_ = makeCard(QStringLiteral("⏳ Intro timer"), &ab);
 	auto *aRow = new QHBoxLayout();
 	QFont mid = big;
 	mid.setPointSize(big.pointSize() - 4);
@@ -201,24 +210,172 @@ void GfxLivePanel::buildUi()
 	ac->setSpacing(4);
 	atToggle_ = smallBtn(atCtl_, QStringLiteral("▶ Start"));
 	gfx::theme::setRole(atToggle_, "primary");
-	auto *aPlus1 = smallBtn(atCtl_, QStringLiteral("+1m"));
-	auto *aPlus5 = smallBtn(atCtl_, QStringLiteral("+5m"));
-	auto *aReset = smallBtn(atCtl_, QStringLiteral("Reset"));
-	ac->addWidget(atToggle_, 1);
-	ac->addWidget(aPlus1);
-	ac->addWidget(aPlus5);
-	ac->addWidget(aReset);
-	ab->addWidget(atCtl_);
-	atLock_ = lockLine(atCard_, QStringLiteral("The action timer needs Pro"));
-	ab->addWidget(atLock_);
-	connect(atToggle_, &QPushButton::clicked, this, [this] { act(QStringLiteral("at.toggle")); });
-	connect(aPlus1, &QPushButton::clicked, this, [this] { act(QStringLiteral("at.add"), 60); });
-	connect(aPlus5, &QPushButton::clicked, this, [this] { act(QStringLiteral("at.add"), 300); });
-	connect(aReset, &QPushButton::clicked, this, [this] {
-		if (QMessageBox::question(this, QStringLiteral("Reset action timer"),
-					  QStringLiteral("Reset the action timer?")) == QMessageBox::Yes)
+	auto *aMinus1 = smallBtn(atCtl_, QStringLiteral("−1m"), QStringLiteral("Remove 1 minute"));
+	auto *aPlus1 = smallBtn(atCtl_, QStringLiteral("+1m"), QStringLiteral("Add 1 minute"));
+	auto *aPlus5 = smallBtn(atCtl_, QStringLiteral("+5m"), QStringLiteral("Add 5 minutes"));
+	auto *aMore = new QToolButton(atCtl_);
+	aMore->setText(QStringLiteral("⋯"));
+	aMore->setPopupMode(QToolButton::InstantPopup);
+	auto *aMenu = new QMenu(aMore);
+	for (const int mins : {2, 5, 10, 15}) {
+		connect(aMenu->addAction(QStringLiteral("Start for %1 minutes").arg(mins)), &QAction::triggered, this,
+			[this, mins] { startIntroFor(mins * 60); });
+	}
+	connect(aMenu->addAction(QStringLiteral("Start for…")), &QAction::triggered, this, [this] {
+		bool ok = false;
+		const int mins = QInputDialog::getInt(this, QStringLiteral("Start intro timer"),
+						      QStringLiteral("Count down for how many minutes?"),
+						      qMax(1, state_.intro.length / 60), 1, 1440, 1, &ok);
+		if (ok)
+			startIntroFor(mins * 60);
+	});
+	connect(aMenu->addAction(QStringLiteral("Count down until…")), &QAction::triggered, this, [this] {
+		// The streamer's own clock, so "7:00 PM" means their 7:00 PM.
+		const QDateTime now = QDateTime::currentDateTime();
+		const QTime soon = now.time().addSecs(15 * 60);
+		bool ok = false;
+		const QString v = QInputDialog::getText(
+			this, QStringLiteral("Count down until"),
+			QStringLiteral("Stream starts at (24-hour HH:MM, your local time):"), QLineEdit::Normal,
+			QStringLiteral("%1:%2")
+				.arg(soon.hour(), 2, 10, QLatin1Char('0'))
+				.arg(soon.minute(), 2, 10, QLatin1Char('0')),
+			&ok);
+		if (!ok)
+			return;
+		QTime t = QTime::fromString(v.trimmed(), QStringLiteral("H:mm"));
+		if (!t.isValid())
+			t = QTime::fromString(v.trimmed(), QStringLiteral("HH:mm"));
+		if (!t.isValid()) {
+			QMessageBox::warning(this, QStringLiteral("Count down until"),
+					     QStringLiteral("Use a 24-hour time like 19:30."));
+			return;
+		}
+		QDateTime target(now.date(), t);
+		if (target <= now)
+			target = target.addDays(1);
+		startIntroFor(static_cast<int>(qMin<qint64>(86400, now.secsTo(target))));
+	});
+	aMenu->addSeparator();
+	connect(aMenu->addAction(QStringLiteral("Reset…")), &QAction::triggered, this, [this] {
+		if (QMessageBox::question(this, QStringLiteral("Reset intro timer"),
+					  QStringLiteral("Reset the intro timer back to its full length?")) ==
+		    QMessageBox::Yes)
 			act(QStringLiteral("at.reset"));
 	});
+	aMore->setMenu(aMenu);
+	ac->addWidget(atToggle_, 1);
+	ac->addWidget(aMinus1);
+	ac->addWidget(aPlus1);
+	ac->addWidget(aPlus5);
+	ac->addWidget(aMore);
+	ab->addWidget(atCtl_);
+	connect(atToggle_, &QPushButton::clicked, this, [this] { act(QStringLiteral("at.toggle")); });
+	connect(aMinus1, &QPushButton::clicked, this, [this] { act(QStringLiteral("at.add"), -60); });
+	connect(aPlus1, &QPushButton::clicked, this, [this] { act(QStringLiteral("at.add"), 60); });
+	connect(aPlus5, &QPushButton::clicked, this, [this] { act(QStringLiteral("at.add"), 300); });
+
+	// Live options — every change goes straight to the OBS source.
+	atOptBtn_ = new QToolButton(atCard_);
+	atOptBtn_->setText(QStringLiteral("⚙ Options"));
+	atOptBtn_->setCheckable(true);
+	atOptBtn_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+	atOptBtn_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+	atOptBtn_->hide();
+	ab->addWidget(atOptBtn_);
+	atOpts_ = new QWidget(atCard_);
+	auto *of = new QFormLayout(atOpts_);
+	of->setContentsMargins(0, 2, 0, 0);
+	of->setSpacing(4);
+	atTitle_ = new QLineEdit(atOpts_);
+	atTitle_->setMaxLength(80);
+	atTitle_->setPlaceholderText(QStringLiteral("Starting Soon"));
+	of->addRow(QStringLiteral("Title"), atTitle_);
+	atSubtitle_ = new QLineEdit(atOpts_);
+	atSubtitle_->setMaxLength(140);
+	atSubtitle_->setPlaceholderText(QStringLiteral("Grab a drink — the stream starts shortly!"));
+	of->addRow(QStringLiteral("Subtitle"), atSubtitle_);
+	atLength_ = new QSpinBox(atOpts_);
+	atLength_->setRange(1, 1440);
+	atLength_->setSuffix(QStringLiteral(" min"));
+	atLength_->setToolTip(QStringLiteral("What ▶ Start counts down from"));
+	of->addRow(QStringLiteral("Length"), atLength_);
+	auto *rotRow = new QHBoxLayout();
+	atRotate_ = new QCheckBox(QStringLiteral("Rotate messages"), atOpts_);
+	atRotateEdit_ = smallBtn(atOpts_, QStringLiteral("Add messages…"),
+				 QStringLiteral("Lines that take turns under the title, one per line"));
+	rotRow->addWidget(atRotate_, 1);
+	rotRow->addWidget(atRotateEdit_);
+	of->addRow(rotRow);
+	auto *flashRow = new QHBoxLayout();
+	atFlash_ = new QCheckBox(QStringLiteral("Flash at 0:00"), atOpts_);
+	atFlashColor_ = smallBtn(atOpts_, QString(), QStringLiteral("Flash colour"));
+	atFlashColor_->setFixedWidth(28);
+	atFlashSpeed_ = new QComboBox(atOpts_);
+	atFlashSpeed_->addItem(QStringLiteral("Slow"), QStringLiteral("slow"));
+	atFlashSpeed_->addItem(QStringLiteral("Normal"), QStringLiteral("normal"));
+	atFlashSpeed_->addItem(QStringLiteral("Fast"), QStringLiteral("fast"));
+	flashRow->addWidget(atFlash_, 1);
+	flashRow->addWidget(atFlashColor_);
+	flashRow->addWidget(atFlashSpeed_);
+	of->addRow(flashRow);
+	atAutoStart_ = new QCheckBox(QStringLiteral("Auto-start when I go live"), atOpts_);
+	of->addRow(atAutoStart_);
+	atOpts_->hide();
+	ab->addWidget(atOpts_);
+	connect(atOptBtn_, &QToolButton::toggled, atOpts_, &QWidget::setVisible);
+	connect(atTitle_, &QLineEdit::editingFinished, this, [this] {
+		if (atTitle_->text().trimmed() != state_.intro.title)
+			sendIntro({{QStringLiteral("title"), atTitle_->text().trimmed()}});
+	});
+	connect(atSubtitle_, &QLineEdit::editingFinished, this, [this] {
+		if (atSubtitle_->text().trimmed() != state_.intro.subtitle)
+			sendIntro({{QStringLiteral("subtitle"), atSubtitle_->text().trimmed()}});
+	});
+	atLengthSend_.setSingleShot(true);
+	atLengthSend_.setInterval(700);
+	connect(atLength_, &QSpinBox::valueChanged, this, [this](int) { atLengthSend_.start(); });
+	connect(&atLengthSend_, &QTimer::timeout, this, [this] {
+		const int secs = atLength_->value() * 60;
+		if (secs != state_.intro.length)
+			sendIntro({{QStringLiteral("baseTime"), secs}});
+	});
+	// clicked (not toggled) — only fires for the streamer's own clicks, never
+	// for setState() syncing the boxes to the server.
+	connect(atRotate_, &QCheckBox::clicked, this,
+		[this](bool on) { sendIntro({{QStringLiteral("rotateEnabled"), on}}); });
+	connect(atRotateEdit_, &QPushButton::clicked, this, [this] {
+		bool ok = false;
+		const QString text = QInputDialog::getMultiLineText(
+			this, QStringLiteral("Rotating messages"),
+			QStringLiteral("One message per line (up to 20). They take turns under the title."),
+			atMessages_.join(QLatin1Char('\n')), &ok);
+		if (!ok)
+			return;
+		QJsonArray msgs;
+		for (const QString &line : text.split(QLatin1Char('\n'))) {
+			const QString m = line.trimmed().left(140);
+			if (!m.isEmpty() && msgs.size() < 20)
+				msgs.append(m);
+		}
+		sendIntro(
+			{{QStringLiteral("rotateMessages"), msgs}, {QStringLiteral("rotateEnabled"), !msgs.isEmpty()}});
+	});
+	connect(atFlash_, &QCheckBox::clicked, this,
+		[this](bool on) { sendIntro({{QStringLiteral("endFlash"), on}}); });
+	connect(atFlashColor_, &QPushButton::clicked, this, [this] {
+		const QColor c = QColorDialog::getColor(QColor(atFlashColorVal_), this, QStringLiteral("Flash colour"));
+		if (c.isValid())
+			sendIntro({{QStringLiteral("endFlashColor"), c.name(QColor::HexRgb)}});
+	});
+	connect(atFlashSpeed_, &QComboBox::activated, this, [this](int i) {
+		sendIntro({{QStringLiteral("endFlashSpeed"), atFlashSpeed_->itemData(i).toString()}});
+	});
+	connect(atAutoStart_, &QCheckBox::clicked, this,
+		[this](bool on) { sendIntro({{QStringLiteral("autoStartOnLive"), on}}); });
+
+	atLock_ = lockLine(atCard_, QStringLiteral("The intro timer needs Pro"));
+	ab->addWidget(atLock_);
 	root->addWidget(atCard_);
 
 	// ── Goal ───────────────────────────────────────────────────────
@@ -325,6 +482,32 @@ void GfxLivePanel::act(const QString &id, const QJsonValue &arg)
 		action_(id, arg);
 }
 
+void GfxLivePanel::sendIntro(const QJsonObject &changes)
+{
+	if (!changes.isEmpty())
+		act(QStringLiteral("at.live"), changes);
+}
+
+// Starts a fresh intro countdown of `seconds` (asks first if one is running).
+void GfxLivePanel::startIntroFor(int seconds)
+{
+	if (state_.actionTimer.active &&
+	    QMessageBox::question(
+		    this, QStringLiteral("Restart intro timer"),
+		    QStringLiteral("The intro timer is already running. Restart it from %1?").arg(fmtClock(seconds))) !=
+		    QMessageBox::Yes)
+		return;
+	act(QStringLiteral("at.startfor"), seconds);
+}
+
+void GfxLivePanel::paintFlashSwatch()
+{
+	const QColor c(atFlashColorVal_);
+	atFlashColor_->setStyleSheet(
+		QStringLiteral("QPushButton{background:%1;border:1px solid rgba(255,255,255,0.35);border-radius:4px;}")
+			.arg(c.isValid() ? c.name(QColor::HexRgb) : QStringLiteral("#ff3b5c")));
+}
+
 void GfxLivePanel::setBusy(bool busy)
 {
 	setCursor(busy ? Qt::BusyCursor : Qt::ArrowCursor);
@@ -372,10 +555,39 @@ void GfxLivePanel::setState(const LiveState &s)
 				   ? QStringLiteral("▶ Start")
 				   : (s.actionTimer.paused ? QStringLiteral("▶ Resume") : QStringLiteral("⏸ Pause")));
 	atStatus_->setText(!s.actionTimer.active
-				   ? QStringLiteral("STOPPED")
+				   ? (s.actionTimer.ended ? QStringLiteral("AT ZERO") : QStringLiteral("READY"))
 				   : (s.actionTimer.paused ? QStringLiteral("PAUSED") : QStringLiteral("RUNNING")));
 	gfx::theme::setState(atStatus_,
 			     !s.actionTimer.active ? "stopped" : (s.actionTimer.paused ? "paused" : "running"));
+
+	// Intro options — synced to the server, but never over a field the
+	// streamer is typing in (or a length change still waiting to send).
+	const IntroOptions &io = s.intro;
+	const bool optsOn = io.known && !s.actionTimer.locked;
+	atOptBtn_->setVisible(optsOn);
+	atOpts_->setVisible(optsOn && atOptBtn_->isChecked());
+	if (io.known) {
+		if (!atTitle_->hasFocus() && atTitle_->text() != io.title)
+			atTitle_->setText(io.title);
+		if (!atSubtitle_->hasFocus() && atSubtitle_->text() != io.subtitle)
+			atSubtitle_->setText(io.subtitle);
+		if (!atLength_->hasFocus() && !atLengthSend_.isActive()) {
+			const QSignalBlocker block(atLength_);
+			atLength_->setValue(qMax(1, (io.length + 30) / 60));
+		}
+		atRotate_->setChecked(io.rotateEnabled);
+		atMessages_ = io.rotateMessages;
+		atRotateEdit_->setText(atMessages_.isEmpty() ? QStringLiteral("Add messages…")
+							     : QStringLiteral("Edit (%1)…").arg(atMessages_.size()));
+		atFlash_->setChecked(io.endFlash);
+		atFlashColorVal_ = io.endFlashColor.isEmpty() ? QStringLiteral("#ff3b5c") : io.endFlashColor;
+		paintFlashSwatch();
+		const int speed = atFlashSpeed_->findData(io.endFlashSpeed.isEmpty() ? QStringLiteral("normal")
+										     : io.endFlashSpeed);
+		if (speed >= 0)
+			atFlashSpeed_->setCurrentIndex(speed);
+		atAutoStart_->setChecked(io.autoStartOnLive);
+	}
 
 	// Goal
 	goalLbl_->setText(QStringLiteral("Subs  <b style='color:%1'>%2</b> / %3")

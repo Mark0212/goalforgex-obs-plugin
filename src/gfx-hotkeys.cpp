@@ -35,7 +35,7 @@ static HotkeyDef g_hotkeys[] = {
 	 OBS_INVALID_HOTKEY_ID},
 	{"goalforgex.timer_sub_1m", "GoalForgeX: Subathon timer −1 minute", "timer.add", -60, -1,
 	 OBS_INVALID_HOTKEY_ID},
-	{"goalforgex.at_toggle", "GoalForgeX: Start / pause action timer", "at.toggle", 0, -1, OBS_INVALID_HOTKEY_ID},
+	{"goalforgex.at_toggle", "GoalForgeX: Start / pause intro timer", "at.toggle", 0, -1, OBS_INVALID_HOTKEY_ID},
 	{"goalforgex.goal_plus", "GoalForgeX: Sub goal +1", "goal.adjust", 1, -1, OBS_INVALID_HOTKEY_ID},
 	{"goalforgex.goal_minus", "GoalForgeX: Sub goal −1", "goal.adjust", -1, -1, OBS_INVALID_HOTKEY_ID},
 	{"goalforgex.wheel_spin", "GoalForgeX: Spin the wheel", "wheel.spin", 0, -1, OBS_INVALID_HOTKEY_ID},

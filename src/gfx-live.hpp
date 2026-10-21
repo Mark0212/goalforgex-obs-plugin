@@ -11,6 +11,7 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include "gfx-state.hpp"
 
+#include <QJsonObject>
 #include <QJsonValue>
 #include <QStringList>
 #include <QTimer>
@@ -18,11 +19,15 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include <functional>
 
+class QCheckBox;
+class QComboBox;
 class QGroupBox;
 class QLabel;
+class QLineEdit;
 class QListWidget;
 class QProgressBar;
 class QPushButton;
+class QSpinBox;
 class QToolButton;
 class QVBoxLayout;
 
@@ -48,6 +53,9 @@ private:
 	void act(const QString &id, const QJsonValue &arg = QJsonValue());
 	QGroupBox *makeCard(const QString &title, QVBoxLayout **body);
 	QPushButton *lockLine(QWidget *parent, const QString &text);
+	void sendIntro(const QJsonObject &changes);
+	void startIntroFor(int seconds);
+	void paintFlashSwatch();
 
 	ActionFn action_;
 	gfx::LiveState state_;
@@ -70,6 +78,21 @@ private:
 	QWidget *atCtl_ = nullptr;
 	QPushButton *atToggle_ = nullptr;
 	QPushButton *atLock_ = nullptr;
+	// Intro timer live options (the ⚙ Options toggle in the card)
+	QToolButton *atOptBtn_ = nullptr;
+	QWidget *atOpts_ = nullptr;
+	QLineEdit *atTitle_ = nullptr;
+	QLineEdit *atSubtitle_ = nullptr;
+	QSpinBox *atLength_ = nullptr;
+	QTimer atLengthSend_; // debounces the length spin box
+	QCheckBox *atRotate_ = nullptr;
+	QPushButton *atRotateEdit_ = nullptr;
+	QCheckBox *atFlash_ = nullptr;
+	QPushButton *atFlashColor_ = nullptr;
+	QComboBox *atFlashSpeed_ = nullptr;
+	QCheckBox *atAutoStart_ = nullptr;
+	QStringList atMessages_;
+	QString atFlashColorVal_;
 
 	QGroupBox *goalCard_ = nullptr;
 	QLabel *goalLbl_ = nullptr;

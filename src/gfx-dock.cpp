@@ -659,7 +659,7 @@ void GfxDock::openSettings(const QString &startPage)
 	group(gen, QStringLiteral("Live tab"),
 	      {{QStringLiteral("Stream stats line"), &s.cardStats},
 	       {QStringLiteral("Subathon timer"), &s.cardTimer},
-	       {QStringLiteral("Action timer"), &s.cardActionTimer},
+	       {QStringLiteral("Intro timer"), &s.cardActionTimer},
 	       {QStringLiteral("Goal"), &s.cardGoal},
 	       {QStringLiteral("Spin wheel"), &s.cardWheel},
 	       {QStringLiteral("Counters"), &s.cardCounters},
@@ -1415,7 +1415,7 @@ void GfxDock::performAction(const QString &id, const QJsonValue &arg)
 		return (action ? QStringLiteral("/api/actiontimer/") : QStringLiteral("/api/subathon/")) + verb;
 	};
 	const bool isAt = id.startsWith(QLatin1String("at."));
-	const QString what = isAt ? QStringLiteral("Action timer") : QStringLiteral("Timer");
+	const QString what = isAt ? QStringLiteral("Intro timer") : QStringLiteral("Timer");
 
 	if (id == QLatin1String("timer.toggle") || id == QLatin1String("at.toggle")) {
 		if (!s.valid) {
@@ -1433,6 +1433,23 @@ void GfxDock::performAction(const QString &id, const QJsonValue &arg)
 		ok = QStringLiteral("%1 %2.").arg(what, !t.active ? QStringLiteral("started")
 								  : (t.paused ? QStringLiteral("resumed")
 									      : QStringLiteral("paused")));
+	} else if (id == QLatin1String("at.startfor")) {
+		// Fresh intro countdown of N seconds ("Start for…" / "Count down until…").
+		if (s.valid && s.actionTimer.locked) {
+			showMessage(QStringLiteral("Intro timer needs GoalForgeX Pro."), true);
+			return;
+		}
+		const int secs = qBound(1, arg.toInt(), 86400);
+		path = QStringLiteral("/api/actiontimer/start");
+		body.insert(QStringLiteral("seconds"), secs);
+		ok = QStringLiteral("Intro timer started — %1.").arg(fmtSecs(secs));
+	} else if (id == QLatin1String("at.live")) {
+		// Live intro options from the ⚙ Options panel (title, length, flash, …).
+		body = arg.toObject();
+		if (body.isEmpty())
+			return;
+		path = QStringLiteral("/api/actiontimer/live");
+		ok = QStringLiteral("Intro timer updated — live on your OBS source.");
 	} else if (id == QLatin1String("timer.add") || id == QLatin1String("at.add")) {
 		const int secs = arg.toInt();
 		path = timerPath(isAt, QStringLiteral("add-time"));

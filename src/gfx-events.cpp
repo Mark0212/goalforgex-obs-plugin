@@ -498,7 +498,7 @@ GfxEventsPanel::Card GfxEventsPanel::describe(const FeedEvent &e) const
 		c.head = QString(e.text).remove(QStringLiteral("🐝 Xive: ")).toHtmlEscaped();
 		c.message.clear();
 	} else {
-		// Subathon / action timer / wheel — GoalForgeX's own activity.
+		// Subathon / intro timer / wheel — GoalForgeX's own activity.
 		c.type = QStringLiteral("system");
 		QString text = e.text;
 		if (k == QLatin1String("wheel")) {
@@ -506,9 +506,10 @@ GfxEventsPanel::Card GfxEventsPanel::describe(const FeedEvent &e) const
 			c.pillLabel = QStringLiteral("WHEEL");
 			text.remove(QStringLiteral("🎡 "));
 		} else if (k == QLatin1String("actiontimer")) {
-			c.pillIcon = QStringLiteral("⚡");
-			c.pillLabel = QStringLiteral("ACTION TIMER");
-			text.remove(QStringLiteral("⚡ Action timer "));
+			c.pillIcon = QStringLiteral("⏳");
+			c.pillLabel = QStringLiteral("INTRO TIMER");
+			text.remove(QStringLiteral("⏳ Intro timer "));
+			text.remove(QStringLiteral("⚡ Action timer ")); // feed lines from an older server
 		} else {
 			c.pillIcon = QStringLiteral("⏱");
 			c.pillLabel = QStringLiteral("TIMER");
