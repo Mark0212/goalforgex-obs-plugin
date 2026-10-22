@@ -1555,6 +1555,23 @@ void GfxDock::performAction(const QString &id, const QJsonValue &arg)
 		});
 }
 
+// Tells goalforgex.com the moment OBS itself starts/stops streaming, so the
+// dashboard and this dock flip to LIVE / Offline right away instead of waiting
+// on Twitch — whose API lags a minute or two and whose events can arrive out of
+// order on a very short stream (start + stop inside a minute). Older servers
+// just answer 404, which is harmless.
+void GfxDock::reportStreaming(bool live, qint64 sinceMs)
+{
+	if (state_ != State::Connected)
+		return;
+	QJsonObject body;
+	body.insert(QStringLiteral("live"), live);
+	body.insert(QStringLiteral("since"), static_cast<double>(sinceMs));
+	runAsync(
+		this, [body] { return apiPost(QStringLiteral("/api/obs/streaming"), body); },
+		[this](const ApiResult &) { pollState(); });
+}
+
 // Start/pause the subathon timer with the stream (⚙ Settings → Automation).
 void GfxDock::streamingChanged(bool started)
 {
@@ -2506,6 +2523,7 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 	case OBS_FRONTEND_EVENT_STREAMING_STARTED:
 		streamStartMs_ = QDateTime::currentMSecsSinceEpoch();
 		renderAirChip();
+		reportStreaming(true, streamStartMs_);
 		streamingChanged(true);
 		if (msDock_)
 			msDock_->mainStreamStarted(); // destinations set to go live with OBS
@@ -2515,11 +2533,13 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		if (msDock_)
 			msDock_->mainStreamStopping();
 		break;
-	case OBS_FRONTEND_EVENT_STREAMING_STOPPED:
+	case OBS_FRONTEND_EVENT_STREAMING_STOPPED: {
+		const qint64 startedMs = streamStartMs_; // the server checks the stream it ends is this one
 		streamStartMs_ = 0;
 		renderAirChip();
+		reportStreaming(false, startedMs);
 		streamingChanged(false);
-		break;
+	} break;
 	case OBS_FRONTEND_EVENT_RECORDING_STARTED:
 		recordStartMs_ = QDateTime::currentMSecsSinceEpoch();
 		renderAirChip();

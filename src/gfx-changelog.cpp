@@ -63,6 +63,11 @@ const Note k280[] = {
 	{"✏️", "One title, every platform",
 	 "Change your stream title and category on Twitch and Kick at once from the Multistream dock (Pro)."},
 };
+const Note k291[] = {
+	{"📡", "Offline straight away",
+	 "When you stop streaming in OBS, GoalForgeX now marks you offline the same moment — even on a very short "
+	 "stream (start and stop inside a minute), which used to stay LIVE for a few minutes."},
+};
 const Note k290[] = {
 	{"⏳", "The Intro timer",
 	 "The Action timer is now the Intro timer — a Starting Soon countdown for your pre-stream scene. At 0:00 it "
@@ -114,6 +119,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"2.9.1", "October 2026", k291, static_cast<int>(std::size(k291))},
 	{"2.9.0", "October 2026", k290, static_cast<int>(std::size(k290))},
 	{"2.8.2", "October 2026", k282, static_cast<int>(std::size(k282))},
 	{"2.8.1", "October 2026", k281, static_cast<int>(std::size(k281))},

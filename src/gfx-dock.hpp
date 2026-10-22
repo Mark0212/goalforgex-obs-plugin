@@ -105,6 +105,7 @@ private:
 	void enterUpdateRequired(const QString &message);
 	bool handleUpdateRequired(int httpStatus, const QString &message);
 	void streamingChanged(bool started);
+	void reportStreaming(bool live, qint64 sinceMs);
 	void updateHealthContext();
 
 	// Widgets tab
