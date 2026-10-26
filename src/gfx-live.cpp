@@ -32,6 +32,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QPair>
 #include <QProgressBar>
 #include <QPushButton>
@@ -52,6 +53,23 @@ static QString fmtClock(qint64 secs)
 	return QStringLiteral("%1:%2:%3").arg(h).arg(m, 2, 10, QLatin1Char('0')).arg(s, 2, 10, QLatin1Char('0'));
 }
 
+namespace {
+// The title row of a Live tab card — the whole row is the fold / unfold button.
+class CardHead : public QWidget {
+public:
+	using QWidget::QWidget;
+	std::function<void()> onClick;
+
+protected:
+	void mouseReleaseEvent(QMouseEvent *e) override
+	{
+		if (e->button() == Qt::LeftButton && rect().contains(e->pos()) && onClick)
+			onClick();
+		QWidget::mouseReleaseEvent(e);
+	}
+};
+} // namespace
+
 static QPushButton *smallBtn(QWidget *parent, const QString &text, const QString &tip = QString())
 {
 	auto *b = new QPushButton(text, parent);
@@ -68,14 +86,71 @@ GfxLivePanel::GfxLivePanel(QWidget *parent) : QWidget(parent)
 	tick_.start();
 }
 
-QGroupBox *GfxLivePanel::makeCard(const QString &title, QVBoxLayout **body)
+QGroupBox *GfxLivePanel::makeCard(const QString &icon, const QString &title, const QString &key, QVBoxLayout **body)
 {
-	auto *box = new QGroupBox(title, this);
-	auto *l = new QVBoxLayout(box);
-	l->setContentsMargins(8, 6, 8, 8);
+	auto *box = new QGroupBox(this);
+	box->setObjectName(QStringLiteral("gfxLiveCard"));
+	auto *outer = new QVBoxLayout(box);
+	outer->setContentsMargins(0, 0, 0, 0);
+	outer->setSpacing(0);
+
+	auto *head = new CardHead(box);
+	head->setObjectName(QStringLiteral("gfxCardHead"));
+	head->setAttribute(Qt::WA_StyledBackground, true);
+	head->setAttribute(Qt::WA_Hover, true);
+	head->setCursor(Qt::PointingHandCursor);
+	head->setToolTip(QStringLiteral("Click to fold / unfold"));
+	auto *hl = new QHBoxLayout(head);
+	hl->setContentsMargins(10, 7, 8, 7);
+	hl->setSpacing(6);
+	auto *ic = new QLabel(icon, head);
+	auto *lbl = new QLabel(title.toUpper(), head);
+	lbl->setObjectName(QStringLiteral("gfxCardTitle"));
+	QFont tf = lbl->font();
+	tf.setBold(true);
+	tf.setLetterSpacing(QFont::PercentageSpacing, 108);
+	lbl->setFont(tf);
+	auto *chev = new QLabel(head);
+	chev->setObjectName(QStringLiteral("gfxCardChevron"));
+	hl->addWidget(ic);
+	hl->addWidget(lbl);
+	hl->addStretch(1);
+	hl->addWidget(chev);
+	outer->addWidget(head);
+
+	auto *content = new QWidget(box);
+	auto *l = new QVBoxLayout(content);
+	l->setContentsMargins(10, 0, 10, 10);
 	l->setSpacing(6);
+	outer->addWidget(content);
 	*body = l;
+	cardHeads_.insert(box, hl);
+
+	const auto show = [box, content, chev](bool folded) {
+		content->setVisible(!folded);
+		chev->setText(folded ? QStringLiteral("▸") : QStringLiteral("▾"));
+		gfx::theme::setState(box, folded ? "folded" : "");
+	};
+	show(settings().liveCollapsed.contains(key));
+	cardFolds_.append({key, show});
+	head->onClick = [show, key] {
+		QStringList &folded = settings().liveCollapsed;
+		const bool fold = !folded.contains(key);
+		if (fold)
+			folded << key;
+		else
+			folded.removeAll(key);
+		saveSettings();
+		show(fold);
+	};
 	return box;
+}
+
+void GfxLivePanel::addToCardHead(QGroupBox *card, QWidget *w)
+{
+	QHBoxLayout *hl = cardHeads_.value(card);
+	if (hl && w)
+		hl->insertWidget(hl->count() - 1, w);
 }
 
 QPushButton *GfxLivePanel::lockLine(QWidget *parent, const QString &text)
@@ -110,7 +185,8 @@ void GfxLivePanel::buildUi()
 	root->addWidget(stats_);
 
 	empty_ = new QLabel(
-		QStringLiteral("Everything on this tab is switched off — turn cards back on in ⚙ Settings."), content);
+		QStringLiteral("Everything on this tab is switched off — turn cards back on in ⚙ → Settings → Layout."),
+		content);
 	empty_->setWordWrap(true);
 	empty_->setObjectName(QStringLiteral("gfxMuted"));
 	empty_->hide();
@@ -124,16 +200,16 @@ void GfxLivePanel::buildUi()
 
 	// ── Subathon timer ─────────────────────────────────────────────
 	QVBoxLayout *tb = nullptr;
-	timerCard_ = makeCard(QStringLiteral("⏱ Subathon timer"), &tb);
+	timerCard_ = makeCard(QStringLiteral("⏱"), QStringLiteral("Subathon timer"), QStringLiteral("timer"), &tb);
 	auto *tRow = new QHBoxLayout();
 	timerTime_ = new QLabel(QStringLiteral("0:00:00"), timerCard_);
 	timerTime_->setFont(big);
 	timerTime_->setObjectName(QStringLiteral("gfxBigTime"));
 	timerStatus_ = new QLabel(timerCard_);
 	timerStatus_->setObjectName(QStringLiteral("gfxStatusChip"));
+	addToCardHead(timerCard_, timerStatus_); // RUNNING / PAUSED reads even while the card is folded
 	tRow->addWidget(timerTime_);
 	tRow->addStretch(1);
-	tRow->addWidget(timerStatus_);
 	tb->addLayout(tRow);
 	timerCtl_ = new QWidget(timerCard_);
 	auto *tc = new QHBoxLayout(timerCtl_);
@@ -188,11 +264,10 @@ void GfxLivePanel::buildUi()
 	connect(tPlus1, &QPushButton::clicked, this, [this] { act(QStringLiteral("timer.add"), 60); });
 	connect(tPlus5, &QPushButton::clicked, this, [this] { act(QStringLiteral("timer.add"), 300); });
 	connect(tMinus1, &QPushButton::clicked, this, [this] { act(QStringLiteral("timer.add"), -60); });
-	root->addWidget(timerCard_);
 
 	// ── Intro timer ("Starting Soon" countdown; "actiontimer" server-side) ──
 	QVBoxLayout *ab = nullptr;
-	atCard_ = makeCard(QStringLiteral("⏳ Intro timer"), &ab);
+	atCard_ = makeCard(QStringLiteral("⏳"), QStringLiteral("Intro timer"), QStringLiteral("intro"), &ab);
 	auto *aRow = new QHBoxLayout();
 	QFont mid = big;
 	mid.setPointSize(big.pointSize() - 4);
@@ -201,9 +276,9 @@ void GfxLivePanel::buildUi()
 	atTime_->setObjectName(QStringLiteral("gfxMidTime"));
 	atStatus_ = new QLabel(atCard_);
 	atStatus_->setObjectName(QStringLiteral("gfxStatusChip"));
+	addToCardHead(atCard_, atStatus_);
 	aRow->addWidget(atTime_);
 	aRow->addStretch(1);
-	aRow->addWidget(atStatus_);
 	ab->addLayout(aRow);
 	atCtl_ = new QWidget(atCard_);
 	auto *ac = new QHBoxLayout(atCtl_);
@@ -377,11 +452,10 @@ void GfxLivePanel::buildUi()
 
 	atLock_ = lockLine(atCard_, QStringLiteral("The intro timer needs Pro"));
 	ab->addWidget(atLock_);
-	root->addWidget(atCard_);
 
 	// ── Goal ───────────────────────────────────────────────────────
 	QVBoxLayout *gb = nullptr;
-	goalCard_ = makeCard(QStringLiteral("🎯 Goal"), &gb);
+	goalCard_ = makeCard(QStringLiteral("🎯"), QStringLiteral("Goal"), QStringLiteral("goal"), &gb);
 	auto *gRow = new QHBoxLayout();
 	goalLbl_ = new QLabel(goalCard_);
 	auto *gMinus = smallBtn(goalCard_, QStringLiteral("−1"), QStringLiteral("Take one off the sub goal"));
@@ -399,14 +473,13 @@ void GfxLivePanel::buildUi()
 	gb->addWidget(followerLbl_);
 	connect(gMinus, &QPushButton::clicked, this, [this] { act(QStringLiteral("goal.adjust"), -1); });
 	connect(gPlus, &QPushButton::clicked, this, [this] { act(QStringLiteral("goal.adjust"), 1); });
-	root->addWidget(goalCard_);
 
 	// ── Presets ────────────────────────────────────────────────────
 	// Switch the Sub Goal / Follower Goal look (or every alert, 2.11+) to one
 	// of the presets saved on goalforgex.com. ✓ = the one on screen right now
 	// (server-computed).
 	QVBoxLayout *pb = nullptr;
-	presetsCard_ = makeCard(QStringLiteral("🎨 Presets"), &pb);
+	presetsCard_ = makeCard(QStringLiteral("🎨"), QStringLiteral("Presets"), QStringLiteral("presets"), &pb);
 	const auto presetRow = [this, pb](const QString &label, QWidget **row, QComboBox **box, QPushButton **apply,
 					  int kind) {
 		*row = new QWidget(presetsCard_);
@@ -472,11 +545,10 @@ void GfxLivePanel::buildUi()
 	pb->addWidget(presetsEmpty_);
 	presetsLock_ = lockLine(presetsCard_, QStringLiteral("Presets need Pro"));
 	pb->addWidget(presetsLock_);
-	root->addWidget(presetsCard_);
 
 	// ── Spin wheel ─────────────────────────────────────────────────
 	QVBoxLayout *wb = nullptr;
-	wheelCard_ = makeCard(QStringLiteral("🎡 Spin wheel"), &wb);
+	wheelCard_ = makeCard(QStringLiteral("🎡"), QStringLiteral("Spin wheel"), QStringLiteral("wheel"), &wb);
 	auto *wRow = new QHBoxLayout();
 	wheelBtn_ = smallBtn(wheelCard_, QStringLiteral("🎡 Spin"));
 	gfx::theme::setRole(wheelBtn_, "primary");
@@ -488,15 +560,14 @@ void GfxLivePanel::buildUi()
 	wheelLock_ = lockLine(wheelCard_, QStringLiteral("The spin wheel needs Pro"));
 	wb->addWidget(wheelLock_);
 	connect(wheelBtn_, &QPushButton::clicked, this, [this] { act(QStringLiteral("wheel.spin")); });
-	root->addWidget(wheelCard_);
 
 	// ── Counters ───────────────────────────────────────────────────
-	countersCard_ = makeCard(QStringLiteral("🔢 Counters"), &countersBox_);
-	root->addWidget(countersCard_);
+	countersCard_ =
+		makeCard(QStringLiteral("🔢"), QStringLiteral("Counters"), QStringLiteral("counters"), &countersBox_);
 
 	// ── Alerts ─────────────────────────────────────────────────────
 	QVBoxLayout *alb = nullptr;
-	alertsCard_ = makeCard(QStringLiteral("🔔 Alerts"), &alb);
+	alertsCard_ = makeCard(QStringLiteral("🔔"), QStringLiteral("Alerts"), QStringLiteral("alerts"), &alb);
 	alertsCtl_ = new QWidget(alertsCard_);
 	auto *alr = new QHBoxLayout(alertsCtl_);
 	alr->setContentsMargins(0, 0, 0, 0);
@@ -520,10 +591,9 @@ void GfxLivePanel::buildUi()
 			[this, type] { act(QStringLiteral("alert.test"), type); });
 	}
 	testBtn->setMenu(testMenu);
-	replayBtn_ =
-		smallBtn(alertsCtl_, QStringLiteral("↺ Replay last"), QStringLiteral("Show the last real alert again"));
+	replayBtn_ = smallBtn(alertsCtl_, QStringLiteral("↺ Replay"), QStringLiteral("Show the last real alert again"));
 	auto *clearBtn =
-		smallBtn(alertsCtl_, QStringLiteral("Clear chat box"), QStringLiteral("Clear the on-screen chat box"));
+		smallBtn(alertsCtl_, QStringLiteral("Clear chat"), QStringLiteral("Clear the on-screen chat box"));
 	alr->addWidget(testBtn, 1);
 	alr->addWidget(replayBtn_);
 	alr->addWidget(clearBtn);
@@ -532,11 +602,10 @@ void GfxLivePanel::buildUi()
 	alb->addWidget(alertsLock_);
 	connect(replayBtn_, &QPushButton::clicked, this, [this] { act(QStringLiteral("alert.replay")); });
 	connect(clearBtn, &QPushButton::clicked, this, [this] { act(QStringLiteral("chat.clear")); });
-	root->addWidget(alertsCard_);
 
 	// ── Activity ───────────────────────────────────────────────────
 	QVBoxLayout *acb = nullptr;
-	activityCard_ = makeCard(QStringLiteral("📋 Activity"), &acb);
+	activityCard_ = makeCard(QStringLiteral("📋"), QStringLiteral("Activity"), QStringLiteral("activity"), &acb);
 	activity_ = new QListWidget(activityCard_);
 	activity_->setObjectName(QStringLiteral("gfxActivity"));
 	activity_->setMinimumHeight(90);
@@ -544,8 +613,11 @@ void GfxLivePanel::buildUi()
 	activity_->setSelectionMode(QAbstractItemView::NoSelection);
 	activity_->setWordWrap(true);
 	acb->addWidget(activity_);
-	root->addWidget(activityCard_);
 
+	// Most-used first; anything rarely touched can be folded away.
+	for (QGroupBox *card :
+	     {alertsCard_, goalCard_, timerCard_, atCard_, presetsCard_, wheelCard_, countersCard_, activityCard_})
+		root->addWidget(card);
 	root->addStretch(1);
 	applySettings();
 }
@@ -601,6 +673,8 @@ void GfxLivePanel::applySettings()
 	presetsCard_->setVisible(s.cardPresets && st.valid && st.presetsKnown);
 	alertsCard_->setVisible(s.cardAlerts);
 	activityCard_->setVisible(s.cardActivity);
+	for (const auto &f : cardFolds_) // Settings → Layout → "Unfold every Live card"
+		f.second(s.liveCollapsed.contains(f.first));
 	const bool any = s.cardStats || s.cardTimer || s.cardActionTimer || s.cardGoal || s.cardWheel ||
 			 s.cardCounters || s.cardPresets || s.cardAlerts || s.cardActivity;
 	empty_->setVisible(!any);

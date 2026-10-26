@@ -64,6 +64,10 @@ const Note k280[] = {
 	 "Change your stream title and category on Twitch and Kick at once from the Multistream dock (Pro)."},
 };
 const Note k2110[] = {
+	{"🧹", "A cleaner, tidier dock",
+	 "Fresh look across the dock: card titles inside each card, rounded tabs and calmer colours. Click any Live "
+	 "card's title to fold it away (it stays folded), and the cards you use most now come first. The ⚙ menu is "
+	 "grouped, and Settings has a new Layout page for which tabs and cards show."},
 	{"🎮", "Your games, one click away",
 	 "The Multistream dock now keeps a list of your games. Start typing a category and pick it from the suggestions; "
 	 "every game you switch to lands in Your games, and Switch puts it on Twitch and Kick at once. Pin your regulars "

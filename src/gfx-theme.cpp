@@ -255,8 +255,8 @@ QString baseStyleSheet()
 
 	// ── Base ─────────────────────────────────────────────────────────
 	qss += QString::fromUtf8(R"QSS(
-QWidget#GfxDock { background: #121419; color: #e8eaf0; }
-QDialog { background: #121419; color: #e8eaf0; }
+QWidget#GfxDock { background: #101217; color: #e8eaf0; }
+QDialog { background: #101217; color: #e8eaf0; }
 QLabel { background: transparent; color: #e8eaf0; }
 QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: 0; }
 QFrame[frameShape="4"], QFrame[frameShape="5"] { color: #262a33; }
@@ -264,16 +264,15 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] { color: #262a33; }
 QLabel#gfxMuted, QLabel[gfxRole="muted"] { color: #9aa1b0; }
 QLabel#gfxFieldLabel { color: #9aa1b0; font-weight: 600; }
 QLabel#gfxSectionTitle { color: #ffffff; font-weight: 700; font-size: 11pt; }
+/* Small uppercase heading above a group (Multistream dock, Live cards). */
+QLabel#gfxSectionHead { color: #8a91a0; font-weight: 700; font-size: 8pt; }
 
 QToolTip { background: #1f232c; color: #e8eaf0; border: 1px solid #3a4150; padding: 4px 6px; }
 )QSS");
 
 	// ── Header ───────────────────────────────────────────────────────
 	qss += QString::fromUtf8(R"QSS(
-QFrame#gfxHeader {
-	background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1a1d24, stop:1 #15171c);
-	border: 0; border-bottom: 1px solid #262a33;
-}
+QFrame#gfxHeader { background: #14171d; border: 0; border-bottom: 1px solid #20242c; }
 QLabel#gfxBrandName { color: #ffffff; font-weight: 800; font-size: 11pt; }
 QLabel#gfxBrandSub { color: #9aa1b0; font-size: 8pt; }
 
@@ -316,9 +315,9 @@ QPushButton#gfxBigBtn { padding: 9px 16px; font-size: 10pt; }
 	// ── Buttons ──────────────────────────────────────────────────────
 	qss += QString::fromUtf8(R"QSS(
 QPushButton, QToolButton {
-	background: #1f232c; color: #e8eaf0; border: 1px solid #2f3541; border-radius: 6px; padding: 5px 10px;
+	background: #1d2129; color: #e8eaf0; border: 1px solid #2b313b; border-radius: 7px; padding: 5px 10px;
 }
-QPushButton:hover, QToolButton:hover { background: #272c37; border-color: #3d4452; }
+QPushButton:hover, QToolButton:hover { background: #252a34; border-color: #3a414e; }
 QPushButton:pressed, QToolButton:pressed { background: #1a1d24; }
 QPushButton:disabled, QToolButton:disabled { color: #5b6270; background: #171a20; border-color: #23272f; }
 QPushButton:focus, QToolButton:focus { border-color: #8a6a1c; }
@@ -354,11 +353,11 @@ QPushButton[gfxRole="link"]:hover { color: #ffcd66; }
 QTabWidget::pane { border: 0; top: -1px; }
 QTabBar { qproperty-drawBase: 0; }
 QTabBar::tab {
-	background: transparent; color: #8b93a3; border: 0; border-bottom: 2px solid transparent;
-	padding: 7px 9px; margin-right: 1px; font-weight: 600;
+	background: transparent; color: #7f8796; border: 1px solid transparent; border-radius: 7px;
+	padding: 5px 10px; margin: 0 2px 6px 0; font-weight: 600;
 }
-QTabBar::tab:hover:!selected { color: #d3d7df; border-bottom-color: #3a4150; }
-QTabBar::tab:selected { color: #ffffff; border-bottom: 2px solid #ffb020; }
+QTabBar::tab:hover:!selected { color: #d3d7df; background: #181b22; }
+QTabBar::tab:selected { color: #ffffff; background: #1f232c; border: 1px solid #2d333e; border-bottom: 2px solid #ffb020; }
 
 /* Tabs that don't fit scroll: a slim see-through panel with chevrons instead of
    the boxed buttons (the generic QToolButton rule above would otherwise apply). */
@@ -376,19 +375,27 @@ QTabBar QToolButton::right-arrow:disabled { image: url(:/goalforgex/chevron-righ
 QTabBar QToolButton::left-arrow:disabled { image: url(:/goalforgex/chevron-left-off.png); }
 
 QGroupBox {
-	background: #181b22; border: 1px solid #262a33; border-radius: 10px;
-	margin-top: 16px; padding: 10px 8px 8px 8px; font-weight: 700; color: #c9ced8;
+	background: #161920; border: 1px solid #22262f; border-radius: 11px;
+	margin-top: 0; padding: 28px 10px 9px 10px; font-weight: 700; color: #c9ced8;
 }
 QGroupBox::title {
-	subcontrol-origin: margin; subcontrol-position: top left; left: 10px; top: 1px; padding: 0 4px;
-	color: #9aa1b0;
+	subcontrol-origin: padding; subcontrol-position: top left; left: 11px; top: 8px; padding: 0;
+	color: #aab0bd;
 }
+/* Live tab cards draw their own title row (fold / unfold) — no built-in title. */
+QGroupBox#gfxLiveCard { padding: 0; border-radius: 12px; }
+QGroupBox#gfxLiveCard[gfxState="folded"] { background: #13161b; }
+QWidget#gfxCardHead { background: transparent; border-radius: 11px; }
+QWidget#gfxCardHead:hover { background: #1b1f27; }
+QLabel#gfxCardTitle { color: #aab0bd; font-size: 8pt; }
+QGroupBox#gfxLiveCard[gfxState="folded"] QLabel#gfxCardTitle { color: #7f8796; }
+QLabel#gfxCardChevron { color: #5d6472; font-size: 8pt; }
 )QSS");
 
 	// ── Inputs / lists ───────────────────────────────────────────────
 	qss += QString::fromUtf8(R"QSS(
 QComboBox, QSpinBox, QLineEdit {
-	background: #1a1d24; color: #e8eaf0; border: 1px solid #2f3541; border-radius: 6px;
+	background: #0f1115; color: #e8eaf0; border: 1px solid #272c35; border-radius: 7px;
 	padding: 4px 8px; min-height: 18px; selection-background-color: #6b4d14;
 }
 QComboBox:hover, QSpinBox:hover, QLineEdit:hover { border-color: #3d4452; }
@@ -447,7 +454,7 @@ QFrame#gfxHealthRow[gfxState="ok"] { border-left-color: #34d399; }
 QFrame#gfxHealthRow[gfxState="warn"] { border-left-color: #ffb020; background: #1c1912; }
 
 QLabel#gfxStats {
-	background: #181b22; border: 1px solid #262a33; border-radius: 8px; padding: 6px 10px; color: #c9ced8;
+	background: #161920; border: 1px solid #22262f; border-radius: 10px; padding: 7px 11px; color: #c9ced8;
 }
 QLabel#gfxBigTime { color: #ffffff; }
 QLabel#gfxMidTime { color: #e8eaf0; }
@@ -464,6 +471,8 @@ QMenu { background: #181b22; color: #e8eaf0; border: 1px solid #2f3541; border-r
 QMenu::item { padding: 6px 22px 6px 12px; border-radius: 5px; background: transparent; }
 QMenu::item:selected { background: #2a2212; color: #ffffff; }
 QMenu::item:disabled { color: #5b6270; }
+/* addSection() headings */
+QMenu::section { color: #7f8796; font-size: 8pt; font-weight: 700; padding: 6px 12px 2px 12px; background: transparent; }
 QMenu::separator { height: 1px; background: #2a2f3a; margin: 4px 6px; }
 
 QScrollBar:vertical { background: transparent; width: 9px; margin: 2px; }
@@ -493,7 +502,7 @@ QPushButton#gfxIconBtn {
 QPushButton#gfxIconBtn:hover { color: #e8eaf0; background: #1d2129; }
 QPushButton#gfxIconBtn:checked { color: #ffffff; background: #3a2a0c; border-color: #ffb020; }
 
-QFrame#gfxStatCard { background: #15181e; border: 1px solid #262a33; border-radius: 8px; }
+QFrame#gfxStatCard { background: #161920; border: 1px solid #22262f; border-radius: 10px; }
 QFrame#gfxStatCard:hover { border-color: #3a4150; }
 QFrame#gfxStatCard[gfxState="twitch"] { background: #1a1528; border-color: #4b2f8f; }
 QFrame#gfxStatCard[gfxState="kick"] { background: #12200c; border-color: #2c6b12; }

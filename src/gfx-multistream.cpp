@@ -69,6 +69,17 @@ using namespace gfx;
 
 namespace {
 
+// Small uppercase heading over a group of controls (matches the Live tab cards).
+QLabel *sectionHead(const QString &text, QWidget *parent)
+{
+	auto *l = new QLabel(text.toUpper(), parent);
+	l->setObjectName(QStringLiteral("gfxSectionHead"));
+	QFont f = l->font();
+	f.setLetterSpacing(QFont::PercentageSpacing, 108);
+	l->setFont(f);
+	return l;
+}
+
 // ── Platforms ───────────────────────────────────────────────────
 struct PlatformPreset {
 	const char *key;
@@ -419,8 +430,7 @@ void GfxMultistreamDock::buildUi()
 	auto *ic = new QVBoxLayout(infoCard_);
 	ic->setContentsMargins(10, 8, 10, 10);
 	ic->setSpacing(6);
-	auto *icHead = new QLabel(QStringLiteral("<b>Title &amp; category everywhere</b>"), infoCard_);
-	icHead->setTextFormat(Qt::RichText);
+	auto *icHead = sectionHead(QStringLiteral("Title & category everywhere"), infoCard_);
 	ic->addWidget(icHead);
 	title_ = new QLineEdit(infoCard_);
 	title_->setPlaceholderText(QStringLiteral("Stream title"));
@@ -464,8 +474,7 @@ void GfxMultistreamDock::buildUi()
 	connect(category_, &QLineEdit::textEdited, this, [this] { searchTimer_.start(); });
 
 	// ── Your games: one click = that game on every ticked platform ──
-	gamesHead_ = new QLabel(QStringLiteral("<b>Your games</b>"), infoCard_);
-	gamesHead_->setTextFormat(Qt::RichText);
+	gamesHead_ = sectionHead(QStringLiteral("Your games"), infoCard_);
 	ic->addWidget(gamesHead_);
 	gamesBox_ = new QVBoxLayout();
 	gamesBox_->setSpacing(4);
@@ -508,8 +517,7 @@ void GfxMultistreamDock::buildUi()
 	renderGames();
 
 	// ── Main stream: whatever is set in OBS → Settings → Stream ──
-	auto *mh = new QLabel(QStringLiteral("<b>Main stream</b>"), inner);
-	mh->setTextFormat(Qt::RichText);
+	auto *mh = sectionHead(QStringLiteral("Main stream"), inner);
 	root->addWidget(mh);
 	auto *mainBox = new QFrame(inner);
 	mainBox->setObjectName(QStringLiteral("gfxStatCard"));
@@ -550,7 +558,7 @@ void GfxMultistreamDock::buildUi()
 
 	// ── Destinations ──
 	auto *dh = new QHBoxLayout();
-	auto *dhl = new QLabel(QStringLiteral("<b>Destinations</b>"), inner);
+	auto *dhl = sectionHead(QStringLiteral("Destinations"), inner);
 	dhl->setTextFormat(Qt::RichText);
 	auto *addBtn = new QPushButton(QStringLiteral("+ Add"), inner);
 	theme::setRole(addBtn, "soft");

@@ -11,8 +11,10 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include "gfx-state.hpp"
 
+#include <QHash>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QPair>
 #include <QStringList>
 #include <QTimer>
 #include <QWidget>
@@ -22,6 +24,7 @@ the Free Software Foundation; either version 2 of the License, or
 class QCheckBox;
 class QComboBox;
 class QGroupBox;
+class QHBoxLayout;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -57,7 +60,13 @@ private:
 	const QList<gfx::PresetState> &presetList(int kind) const;
 	void applyPreset(int kind);
 	void act(const QString &id, const QJsonValue &arg = QJsonValue());
-	QGroupBox *makeCard(const QString &title, QVBoxLayout **body);
+	// A Live tab card: an uppercase title row (click = fold / unfold, kept in
+	// Settings::liveCollapsed under `key`) above the body layout it returns.
+	QGroupBox *makeCard(const QString &icon, const QString &title, const QString &key, QVBoxLayout **body);
+	// Puts a small widget (status chip…) on the card's title row, before the chevron.
+	void addToCardHead(QGroupBox *card, QWidget *w);
+	QHash<QGroupBox *, QHBoxLayout *> cardHeads_;
+	QList<QPair<QString, std::function<void(bool)>>> cardFolds_; // key → fold / unfold
 	QPushButton *lockLine(QWidget *parent, const QString &text);
 	void sendIntro(const QJsonObject &changes);
 	void startIntroFor(int seconds);

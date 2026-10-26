@@ -151,6 +151,12 @@ void loadSettings()
 		if (!w.isEmpty() && !g_settings.chatHighlightWords.contains(w, Qt::CaseInsensitive))
 			g_settings.chatHighlightWords << w;
 	}
+	const QJsonArray lc = o.value(QStringLiteral("liveCollapsed")).toArray();
+	for (qsizetype i = 0; i < lc.size() && g_settings.liveCollapsed.size() < 32; ++i) {
+		const QString k = lc.at(i).toString().left(40);
+		if (!k.isEmpty() && !g_settings.liveCollapsed.contains(k))
+			g_settings.liveCollapsed << k;
+	}
 	const QJsonArray cw = o.value(QStringLiteral("chatWatch")).toArray();
 	for (qsizetype i = 0; i < cw.size() && g_settings.chatWatch.size() < 6; ++i) {
 		const QString w = cw.at(i).toString().trimmed().left(220);
@@ -203,6 +209,7 @@ void saveSettings()
 	o.insert(QStringLiteral("noticeTint"), g_settings.noticeTint);
 	o.insert(QStringLiteral("chatHighlightWords"), QJsonArray::fromStringList(g_settings.chatHighlightWords));
 	o.insert(QStringLiteral("chatWatch"), QJsonArray::fromStringList(g_settings.chatWatch));
+	o.insert(QStringLiteral("liveCollapsed"), QJsonArray::fromStringList(g_settings.liveCollapsed));
 	o.insert(QStringLiteral("theme"), g_settings.theme);
 	o.insert(QStringLiteral("accent"), g_settings.accent);
 	o.insert(QStringLiteral("textScale"), g_settings.textScale);

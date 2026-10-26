@@ -69,6 +69,8 @@ struct Settings {
 	QStringList chatHighlightWords;
 	// Other people's channels shown in the feed, read-only ("twitch:name", "kick:name", …)
 	QStringList chatWatch;
+	// Live tab cards the streamer folded away (click a card's title)
+	QStringList liveCollapsed;
 	// Which connected platforms MultiChat reads (Twitch + Kick are always on).
 	// YouTube polls Google's API and TikTok opens a live connection — only
 	// while these are on and the account has them connected on the website.

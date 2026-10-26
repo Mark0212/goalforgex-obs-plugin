@@ -186,10 +186,12 @@ void GfxDock::buildUi()
 	menuBtn_->setPopupMode(QToolButton::InstantPopup);
 	theme::setRole(menuBtn_, "ghost");
 	auto *menu = new QMenu(menuBtn_);
-	connect(menu->addAction(QStringLiteral("Settings…")), &QAction::triggered, this, [this] { openSettings(); });
-	connect(menu->addAction(QStringLiteral("Show the Events dock")), &QAction::triggered, this,
+	connect(menu->addAction(QStringLiteral("⚙   Settings…")), &QAction::triggered, this,
+		[this] { openSettings(); });
+	menu->addSection(QStringLiteral("Docks"));
+	connect(menu->addAction(QStringLiteral("📋   Events")), &QAction::triggered, this,
 		[this] { revealEventsDock(true); });
-	connect(menu->addAction(QStringLiteral("Show the Multistream dock")), &QAction::triggered, this, [this] {
+	connect(menu->addAction(QStringLiteral("📡   Multistream")), &QAction::triggered, this, [this] {
 		QDockWidget *frame = nullptr;
 		for (QWidget *w = msDock_ ? msDock_->parentWidget() : nullptr; w && !frame; w = w->parentWidget())
 			frame = qobject_cast<QDockWidget *>(w);
@@ -198,19 +200,21 @@ void GfxDock::buildUi()
 			frame->raise();
 		}
 	});
-	connect(menu->addAction(QStringLiteral("What's new")), &QAction::triggered, this,
-		[this] { changelog::show(this); });
-	connect(menu->addAction(QStringLiteral("Manage connected devices…")), &QAction::triggered, this,
-		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/obs"))); });
-	connect(menu->addAction(QStringLiteral("Open GoalForgeX dashboard")), &QAction::triggered, this,
+	menu->addSection(QStringLiteral("goalforgex.com"));
+	connect(menu->addAction(QStringLiteral("🌐   Open my dashboard")), &QAction::triggered, this,
 		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/dashboard"))); });
-	connect(menu->addAction(QStringLiteral("Check for updates")), &QAction::triggered, this, [this] {
+	connect(menu->addAction(QStringLiteral("🖥   Connected OBS devices…")), &QAction::triggered, this,
+		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/obs"))); });
+	menu->addSection(QStringLiteral("Plugin"));
+	connect(menu->addAction(QStringLiteral("✨   What's new")), &QAction::triggered, this,
+		[this] { changelog::show(this); });
+	connect(menu->addAction(QStringLiteral("⬆   Check for updates")), &QAction::triggered, this, [this] {
 		verCheck_ = VerCheck::Checking;
 		renderVersion();
 		checkForUpdate();
 	});
 	menu->addSeparator();
-	disconnectAct_ = menu->addAction(QStringLiteral("Disconnect this OBS"));
+	disconnectAct_ = menu->addAction(QStringLiteral("⏏   Disconnect this OBS"));
 	connect(disconnectAct_, &QAction::triggered, this, [this] { disconnectAccount(); });
 	menuBtn_->setMenu(menu);
 	head->addWidget(brandLbl_);
@@ -313,6 +317,7 @@ void GfxDock::buildUi()
 			"<tr><td style='color:%1'>▸</td><td>Widgets added to your scenes, already sized and placed</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>Live controls and OBS hotkeys for timers, goals and alerts</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>Twitch, Kick, YouTube and TikTok chat in one MultiChat feed</td></tr>"
+			"<tr><td style='color:%1'>▸</td><td>Go live on several platforms at once with the Multistream dock</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>Gift bombs with every recipient, channel points and watch streaks</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>Reactions that switch scenes when alerts fire</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>A health check that fixes setup problems in one click</td></tr>"
@@ -652,7 +657,9 @@ void GfxDock::openSettings(const QString &startPage)
 
 	// ── General ──
 	QVBoxLayout *gen = page(QStringLiteral("General"));
-	group(gen, QStringLiteral("Tabs"),
+	// ── Layout: which tabs and Live cards show ──
+	QVBoxLayout *lay = page(QStringLiteral("Layout"));
+	group(lay, QStringLiteral("Tabs"),
 	      {{QStringLiteral("Live"), &s.tabLive},
 	       {QStringLiteral("Events tab (only when Events aren't in their own dock — see the Events page)"),
 		&s.tabEvents},
@@ -660,7 +667,7 @@ void GfxDock::openSettings(const QString &startPage)
 	       {QStringLiteral("Widgets"), &s.tabWidgets},
 	       {QStringLiteral("Reactions"), &s.tabReactions},
 	       {QStringLiteral("Health"), &s.tabHealth}});
-	group(gen, QStringLiteral("Live tab"),
+	group(lay, QStringLiteral("Live tab cards"),
 	      {{QStringLiteral("Stream stats line"), &s.cardStats},
 	       {QStringLiteral("Subathon timer"), &s.cardTimer},
 	       {QStringLiteral("Intro timer"), &s.cardActionTimer},
@@ -670,6 +677,19 @@ void GfxDock::openSettings(const QString &startPage)
 	       {QStringLiteral("Presets (switch saved goal looks)"), &s.cardPresets},
 	       {QStringLiteral("Alerts (test / replay / clear chat)"), &s.cardAlerts},
 	       {QStringLiteral("Activity feed"), &s.cardActivity}});
+	note(lay,
+	     QStringLiteral("Tip: click a card's title on the Live tab to fold it away — it stays folded next time."));
+	if (!s.liveCollapsed.isEmpty()) {
+		auto *unfold = new QPushButton(QStringLiteral("Unfold every Live card"), lay->parentWidget());
+		theme::setRole(unfold, "ghost");
+		lay->addWidget(unfold, 0, Qt::AlignLeft);
+		connect(unfold, &QPushButton::clicked, unfold, [unfold] {
+			settings().liveCollapsed.clear();
+			unfold->setEnabled(false);
+			unfold->setText(QStringLiteral("All cards unfold when you press OK"));
+		});
+	}
+	lay->addStretch(1);
 	group(gen, QStringLiteral("Automation"),
 	      {{QStringLiteral("Start / resume the subathon timer when I start streaming"), &s.autoStartTimer},
 	       {QStringLiteral("Pause the subathon timer when I stop streaming"), &s.autoPauseTimer}});
