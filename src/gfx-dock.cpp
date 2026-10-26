@@ -122,7 +122,9 @@ GfxDock::GfxDock(QWidget *parent) : QWidget(parent), reactions_(this)
 	connect(&stateTimer_, &QTimer::timeout, this, [this] { pollState(); });
 	// Hourly: a release that lands mid-session is downloaded long before the
 	// streamer closes OBS (the check itself is one small cached request).
-	aimTimer_.setInterval(3000);
+	// 1 s: moving / resizing the goal in OBS re-aims the Coin Drop almost at once
+	// (only an actual move is sent — see reportCoinAim).
+	aimTimer_.setInterval(1000);
 	connect(&aimTimer_, &QTimer::timeout, this, [this] { reportCoinAim(); });
 	updateTimer_.setInterval(60 * 60 * 1000);
 	connect(&updateTimer_, &QTimer::timeout, this, [this] { checkForUpdate(); });

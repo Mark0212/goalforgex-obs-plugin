@@ -70,6 +70,11 @@ const Note k2112[] = {
 	 "and right-click still copies names or a thank-you message."},
 	{"💬", "Room to breathe in MultiChat",
 	 "Event cards in MultiChat no longer touch — there's a clear gap between each one."},
+	{"⚡", "Snappier buttons",
+	 "Test alerts and every other button in the dock now reuse the connection GoalForgeX already has open "
+	 "instead of starting a new one each click, so they react noticeably faster."},
+	{"🎯", "Coin Drop keeps up with your goal",
+	 "Move or resize your Sub Goal in OBS and the Alert Coin Drop re-aims within a second."},
 };
 const Note k2111[] = {
 	{"🎮", "Find any game in a couple of letters",
