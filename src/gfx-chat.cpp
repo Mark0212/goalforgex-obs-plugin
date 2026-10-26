@@ -48,6 +48,8 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPaintEvent>
+#include <QPainter>
+#include <QPainterPath>
 #include <QPair>
 #include <QPixmap>
 #include <QPushButton>
@@ -259,27 +261,24 @@ public:
 protected:
 	void paintEvent(QPaintEvent *e) override
 	{
-		QTextBrowser::paintEvent(e);
-		// Event notice cards: a full-height accent bar down the left edge
-		// (rich text can't draw a border on one block, so it's painted here).
-		QPainter p(viewport());
-		const QAbstractTextDocumentLayout *lay = document()->documentLayout();
-		const int dx = horizontalScrollBar()->value(), dy = verticalScrollBar()->value();
-		const int h = viewport()->height();
-		for (QTextBlock b = cursorForPosition(QPoint(0, 0)).block(); b.isValid(); b = b.next()) {
-			const QRectF r = lay->blockBoundingRect(b).translated(-dx, -dy);
-			if (r.top() > h)
-				break;
-			const QVariant bar = b.blockFormat().property(kBarProp);
-			if (bar.isValid())
-				p.fillRect(QRectF(r.left(), r.top(), 3, r.height()), bar.value<QColor>());
+		// Event cards / highlighted lines: rounded backgrounds + accent bar, under the text.
+		{
+			QPainter p(viewport());
+			notice::paintCards(this, p);
 		}
+		QTextBrowser::paintEvent(e);
 	}
 
 	QVariant loadResource(int type, const QUrl &name) override
 	{
 		if (type == QTextDocument::ImageResource && name.scheme() == QLatin1String("gfx")) {
 			const QStringList parts = name.path().split(QLatin1Char('/'));
+			// gfx:badge/<hex utf-8 text>/<rrggbb>/<px> — a small rounded badge (MOD, VIP, SUB…).
+			if (parts.value(0) == QLatin1String("badge"))
+				return QVariant::fromValue(
+					badge(QString::fromUtf8(QByteArray::fromHex(parts.value(1).toLatin1())),
+					      QColor(QLatin1Char('#') + parts.value(2)),
+					      qBound(8, parts.value(3).toInt(), 40)));
 			const int px = parts.size() > 1 ? qBound(8, parts.at(1).toInt(), 48) : 15;
 			// gfx:brand — the GoalForgeX mark on the STAFF badge.
 			if (parts.value(0) == QLatin1String("brand"))
@@ -302,6 +301,37 @@ protected:
 	}
 
 private:
+	// Rounded badge: the colour's text on a dim wash of it, like a pill.
+	QImage badge(const QString &text, const QColor &color, int px) const
+	{
+		const qreal dpr = devicePixelRatioF();
+		QFont f = font();
+		f.setBold(true);
+		f.setPixelSize(qMax(7, qRound(px * 0.6)));
+		f.setLetterSpacing(QFont::PercentageSpacing, 104);
+		const QFontMetricsF fm(f);
+		const qreal w = fm.horizontalAdvance(text) + px * 0.75;
+		QImage img(qMax(1, qRound(w * dpr)), qMax(1, qRound(px * dpr)), QImage::Format_ARGB32_Premultiplied);
+		img.setDevicePixelRatio(dpr);
+		img.fill(Qt::transparent);
+		QPainter p(&img);
+		p.setRenderHint(QPainter::Antialiasing, true);
+		p.setRenderHint(QPainter::TextAntialiasing, true);
+		const QColor c = color.isValid() ? color : QColor(QStringLiteral("#9aa1b0"));
+		const QRectF r(0, 0, w, px);
+		p.setPen(Qt::NoPen);
+		const QColor base(theme::mapColor(QStringLiteral("#101217")));
+		p.setBrush(QColor::fromRgbF(static_cast<float>(base.redF() * 0.74 + c.redF() * 0.26),
+					    static_cast<float>(base.greenF() * 0.74 + c.greenF() * 0.26),
+					    static_cast<float>(base.blueF() * 0.74 + c.blueF() * 0.26)));
+		p.drawRoundedRect(r, px * 0.3, px * 0.3);
+		p.setPen(c.lightness() < 110 ? c.lighter(150) : c);
+		p.setFont(f);
+		p.drawText(r, Qt::AlignCenter, text);
+		p.end();
+		return img;
+	}
+
 	QImage placeholder(int px) const
 	{
 		const qreal dpr = devicePixelRatioF();
@@ -396,17 +426,30 @@ QString fmtUptime(qint64 ms)
 		.arg(s % 60, 2, 10, QLatin1Char('0'));
 }
 
+// A rounded badge image (ChatView draws gfx:badge/…), sized to sit with text of `pt`.
+QString badgeHtml(const QString &text, const QString &color, qreal pt)
+{
+	QString hex = color;
+	hex.remove(QLatin1Char('#'));
+	return QStringLiteral("<img src='gfx:badge/%1/%2/%3' style='vertical-align:middle'>&nbsp;")
+		.arg(QString::fromLatin1(text.toUtf8().toHex()), hex)
+		.arg(qBound(10, qRound(pt * 2.05), 30));
+}
+
 QString tag(const char *text, const char *color, qreal pt)
 {
-	return QStringLiteral("<span style='color:%1;font-size:%3pt;font-weight:800;'>%2</span>&nbsp;")
-		.arg(QLatin1String(color), QLatin1String(text), QString::number(pt, 'f', 1));
+	return badgeHtml(QString::fromLatin1(text), QString::fromLatin1(color), pt);
 }
 
 // Each feed line is one text block; its background says what kind of line it is.
 QTextBlockFormat lineFormat(bool host, bool highlighted, bool firstTimer, bool shaded)
 {
 	QTextBlockFormat f;
-	f.setBottomMargin(settings().chatCompact ? 1 : 4);
+	const int gap = settings().chatCompact ? 1 : 3;
+	f.setTopMargin(gap);
+	f.setBottomMargin(gap);
+	f.setLeftMargin(6);
+	f.setRightMargin(6);
 	f.setLineHeight(112, QTextBlockFormat::ProportionalHeight);
 	QColor bg;
 	if (host)
@@ -418,7 +461,7 @@ QTextBlockFormat lineFormat(bool host, bool highlighted, bool firstTimer, bool s
 	else if (shaded)
 		bg = QColor(QStringLiteral("#161920"));
 	if (bg.isValid())
-		f.setBackground(bg);
+		f.setProperty(gfx::notice::kCardProp, bg);
 	return f;
 }
 
@@ -562,6 +605,39 @@ QColor mix(const QColor &a, const QColor &b, qreal t)
 QImage platformIcon(const QString &platform, int logicalPx, qreal dpr)
 {
 	return ::platformIcon(platform, logicalPx, dpr);
+}
+
+void paintCards(QTextEdit *view, QPainter &p)
+{
+	const QAbstractTextDocumentLayout *lay = view->document()->documentLayout();
+	const int dx = view->horizontalScrollBar()->value(), dy = view->verticalScrollBar()->value();
+	const int h = view->viewport()->height();
+	p.setRenderHint(QPainter::Antialiasing, true);
+	p.setPen(Qt::NoPen);
+	for (QTextBlock b = view->cursorForPosition(QPoint(0, 0)).block(); b.isValid(); b = b.next()) {
+		// blockBoundingRect = the text itself (inside the block's margins).
+		const QRectF text = lay->blockBoundingRect(b).translated(-dx, -dy);
+		if (text.top() > h)
+			break;
+		const QTextBlockFormat f = b.blockFormat();
+		const QVariant bg = f.property(kCardProp), bar = f.property(kBarProp);
+		if (!bg.isValid() && !bar.isValid())
+			continue;
+		const qreal padV = qBound(0.0, qMin(f.topMargin(), f.bottomMargin()) - 2.0, 6.0);
+		const QRectF r(text.left() - f.leftMargin(), text.top() - padV,
+			       text.width() + f.leftMargin() + f.rightMargin(), text.height() + 2 * padV);
+		const qreal radius = qMin<qreal>(bar.isValid() ? 8.0 : 6.0, r.height() / 2);
+		QPainterPath path;
+		path.addRoundedRect(r, radius, radius);
+		if (bg.isValid())
+			p.fillPath(path, bg.value<QColor>());
+		if (bar.isValid()) {
+			p.save();
+			p.setClipPath(path);
+			p.fillRect(QRectF(r.left(), r.top(), 3, r.height()), bar.value<QColor>());
+			p.restore();
+		}
+	}
 }
 
 } // namespace gfx::notice
@@ -2531,9 +2607,6 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 
 	QString h;
 	const bool cheer = isCheer(m);
-	const bool staffLine = !cheer && m.staff && s.chatStaffBadge;
-	if ((cheer && s.noticeStyle != QLatin1String("minimal")) || staffLine)
-		h += QStringLiteral("&nbsp;&nbsp;"); // room for the accent bar
 	// One-click moderation, for moderators who live in this tab (own chat only).
 	if (own && s.chatQuickMod && mod_ && canMod(m.platform) && !m.host && validLogin && validId && !m.deleted)
 		h += QStringLiteral("<a href='mod:delete:%1' style='color:#6b7280;text-decoration:none;'>🗑</a>"
@@ -2547,10 +2620,7 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 			     .arg(iconPx);
 	// Watched channel: whose chat this came from.
 	if (!own)
-		h += QStringLiteral(
-			     "<span style='color:#9aa1b0;background-color:#23262e;font-size:%2pt;font-weight:700;'>"
-			     "&nbsp;%1&nbsp;</span>&nbsp;")
-			     .arg(m.channelName.toHtmlEscaped(), QString::number(tagPt, 'f', 1));
+		h += badgeHtml(m.channelName, QStringLiteral("#9aa1b0"), tagPt);
 	if (s.chatTimestamps && m.ts > 0)
 		h += QStringLiteral("<span style='color:#5b6270;font-size:%2pt;'>%1</span> ")
 			     .arg(QDateTime::fromMSecsSinceEpoch(m.ts).toString(QStringLiteral("HH:mm")),
@@ -2559,14 +2629,9 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 	if (m.staff && s.chatStaffBadge) {
 		const int markPx = qBound(10, qRound(base * 1.3), 26);
 		h += QStringLiteral(
-			     "<span style='background-color:%1;color:#ffd27a;font-size:%2pt;font-weight:800;'>"
-			     "&nbsp;<img src='gfx:brand/%3' width='%3' height='%3' style='vertical-align:middle'>"
-			     "&nbsp;GOALFORGEX STAFF&nbsp;</span>&nbsp;")
-			     .arg(mixColor(QColor(theme::mapColor(QStringLiteral("#121419"))),
-					   QColor(QStringLiteral("#ff3b4f")), 0.35)
-					  .name(),
-				  QString::number(tagPt, 'f', 1))
-			     .arg(markPx);
+			     "<img src='gfx:brand/%1' width='%1' height='%1' style='vertical-align:middle'>&nbsp;")
+			     .arg(markPx) +
+		     badgeHtml(QStringLiteral("GOALFORGEX STAFF"), QStringLiteral("#ffb020"), tagPt);
 	}
 	if (s.chatBadges) {
 		if (m.host)
@@ -2596,11 +2661,7 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 	if (m.first && !m.deleted)
 		h += QStringLiteral("<span style='color:#34d399;font-weight:700'>✨ first message</span> ");
 	if (cheer) {
-		const QColor c(eventColor(m));
-		h += QStringLiteral("<span style='background-color:%1;color:%2;font-size:%3pt;font-weight:800;'>"
-				    "&nbsp;💎 CHEER %4&nbsp;</span>&nbsp;")
-			     .arg(mixColor(QColor(theme::mapColor(QStringLiteral("#121419"))), c, 0.28).name(),
-				  c.name(), QString::number(tagPt, 'f', 1), fmtCount(m.bits));
+		h += badgeHtml(QStringLiteral("💎 CHEER %1").arg(fmtCount(m.bits)), eventColor(m), tagPt);
 	} else if (m.bits > 0) {
 		h += QStringLiteral("<span style='color:#c084fc;font-weight:700'>💎 %1</span> ").arg(m.bits);
 	}
@@ -2635,7 +2696,6 @@ QString GfxChatPanel::noticeHtml(const ChatMessage &m) const
 	const qreal smallPt = qMax<qreal>(6.5, base * 0.88);
 	const int iconPx = qBound(12, qRound(base * 1.65), 32);
 	const QColor evColor(eventColor(m));
-	const QString bg = theme::mapColor(QStringLiteral("#121419"));
 	const QString strong = minimal ? QStringLiteral("#c9ced8") : QStringLiteral("#ffffff");
 	const QString soft = minimal ? QStringLiteral("#9aa1b0") : QStringLiteral("#d6d9e0");
 
@@ -2765,8 +2825,6 @@ QString GfxChatPanel::noticeHtml(const ChatMessage &m) const
 		head = QStringLiteral("<span style='color:%1'>%2</span>").arg(soft, head);
 
 	QString h;
-	if (!minimal)
-		h += QStringLiteral("&nbsp;&nbsp;"); // room for the accent bar
 	if (s.chatIcons)
 		h += QStringLiteral("<img src='gfx:%1/%2' width='%2' height='%2' style='vertical-align:middle'>&nbsp;")
 			     .arg(m.platform)
@@ -2774,24 +2832,24 @@ QString GfxChatPanel::noticeHtml(const ChatMessage &m) const
 	if (minimal) {
 		h += QString::fromUtf8(meta.icon) + QStringLiteral("&nbsp;");
 	} else {
-		h += QStringLiteral("<span style='background-color:%1;color:%2;font-size:%3pt;font-weight:800;'>"
-				    "&nbsp;%4&nbsp;%5&nbsp;</span>&nbsp;")
-			     .arg(mixColor(QColor(bg), evColor, 0.28).name(), evColor.name(),
-				  QString::number(tagPt, 'f', 1), QString::fromUtf8(meta.icon),
+		h += QStringLiteral("<span style='color:%1;font-size:%2pt;font-weight:800;'>%3&nbsp;%4</span>")
+			     .arg(evColor.name(), QString::number(tagPt, 'f', 1), QString::fromUtf8(meta.icon),
 				  QString::fromUtf8(meta.label));
+		if (s.chatTimestamps && m.ts > 0)
+			h += QStringLiteral(
+				     "<span style='color:#5b6270;font-size:%2pt;'>&nbsp;&nbsp;·&nbsp;&nbsp;%1</span>")
+				     .arg(QDateTime::fromMSecsSinceEpoch(m.ts).toString(QStringLiteral("HH:mm")),
+					  QString::number(smallPt, 'f', 1));
+		h += card ? QString() : QStringLiteral("&nbsp;&nbsp;");
 	}
-	if (s.chatTimestamps && m.ts > 0 && !minimal)
-		h += QStringLiteral("<span style='color:#5b6270;font-size:%2pt;'>%1</span> ")
-			     .arg(QDateTime::fromMSecsSinceEpoch(m.ts).toString(QStringLiteral("HH:mm")),
-				  QString::number(smallPt, 'f', 1));
-	const QString indent = QStringLiteral("<br>&nbsp;&nbsp;");
+	const QString indent = QStringLiteral("<br>");
 	h += card ? indent + head : head;
 
 	// What the viewer wrote (resub / Super Chat / announcement message…).
 	if (!m.text.trimmed().isEmpty()) {
 		const QString body = s.chatEmotes && !m.parts.isEmpty() ? partsHtml(m, base) : textHtml(m.text);
 		if (card)
-			h += indent + QStringLiteral("<span style='color:#e8eaf0;%1'>%2</span>")
+			h += indent + QStringLiteral("<span style='color:#c9ced8;%1'>%2</span>")
 					      .arg(t == QLatin1String("announcement")
 							   ? QStringLiteral("font-weight:600;")
 							   : QString(),
@@ -2830,25 +2888,28 @@ QTextBlockFormat GfxChatPanel::blockFormat(const ChatMessage &m, bool odd) const
 	// GoalForgeX staff: a warm brand-tinted line with the red → amber accent bar.
 	if (m.notice.isEmpty() && !isCheer(m) && m.staff && s.chatStaffBadge) {
 		QTextBlockFormat f = lineFormat(false, false, false, false);
-		f.setBackground(mixColor(QColor(theme::mapColor(QStringLiteral("#121419"))),
-					 QColor(QStringLiteral("#ff5a36")), 0.13));
+		f.setLeftMargin(11); // room for the accent bar
+		f.setProperty(gfx::notice::kCardProp, mixColor(QColor(theme::mapColor(QStringLiteral("#101217"))),
+							       QColor(QStringLiteral("#ff5a36")), 0.13));
 		f.setProperty(kBarProp, QColor(QStringLiteral("#ff6a3d")));
 		return f;
 	}
 	if (m.notice.isEmpty() && !isCheer(m))
 		return lineFormat(m.host, s.chatHighlightMentions && isHighlighted(m), m.first && !m.deleted,
 				  s.chatAltRows && odd);
+	if (s.noticeStyle == QLatin1String("minimal"))
+		return lineFormat(false, false, false, false);
 	QTextBlockFormat f;
-	f.setLineHeight(112, QTextBlockFormat::ProportionalHeight);
-	if (s.noticeStyle == QLatin1String("minimal")) {
-		f.setBottomMargin(s.chatCompact ? 1 : 4);
-		return f;
-	}
 	const bool card = s.noticeStyle == QLatin1String("card");
+	f.setLineHeight(card ? 118 : 112, QTextBlockFormat::ProportionalHeight);
 	const QColor tint(noticeTint(m));
-	f.setTopMargin(card ? 3 : 1);
-	f.setBottomMargin(s.chatCompact ? 3 : (card ? 7 : 4));
-	f.setBackground(mixColor(QColor(theme::mapColor(QStringLiteral("#121419"))), tint, card ? 0.15 : 0.10));
+	const int gap = s.chatCompact ? 5 : (card ? 8 : 6);
+	f.setTopMargin(gap);
+	f.setBottomMargin(gap);
+	f.setLeftMargin(14); // accent bar + padding
+	f.setRightMargin(10);
+	f.setProperty(gfx::notice::kCardProp,
+		      mixColor(QColor(theme::mapColor(QStringLiteral("#101217"))), tint, card ? 0.13 : 0.09));
 	f.setProperty(kBarProp, tint);
 	return f;
 }

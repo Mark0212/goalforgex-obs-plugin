@@ -23,8 +23,7 @@ the Free Software Foundation; either version 2 of the License, or
 
 class QCheckBox;
 class QComboBox;
-class QCompleter;
-class QStringListModel;
+class QListWidget;
 class QFrame;
 class QLabel;
 class QLineEdit;
@@ -100,6 +99,9 @@ private:
 	void takeGames(const QJsonObject &o); // { games, alertPresets } from the server
 	void renderGames();
 	void searchGames();
+	// Search results under the category box (box art + name); click = use that game.
+	void showResults(const QJsonArray &found, const QString &query, bool searched);
+	void pickGame(const QString &name);
 	void editGame(const QString &action, const QString &name);
 
 	QList<Destination> dests_;
@@ -156,8 +158,8 @@ private:
 	QCheckBox *gameAlerts_ = nullptr;
 	QJsonArray games_;
 	bool gamesAll_ = false;
-	QCompleter *completer_ = nullptr;
-	QStringListModel *suggest_ = nullptr;
+	QListWidget *results_ = nullptr;
+	QLabel *searchNote_ = nullptr;
 	QTimer searchTimer_;
 	QString lastSearch_;
 };

@@ -426,6 +426,9 @@ QListWidget::item { padding: 6px 8px; border-radius: 6px; border: 1px solid tran
 QListWidget::item:hover:!selected { background: #1d2129; }
 QListWidget::item:selected { background: #2a2212; color: #ffffff; border: 1px solid #6b4d14; }
 QListWidget#gfxActivity::item { padding: 4px 6px; color: #c9ced8; }
+QListWidget#gfxGameResults { background: #0f1115; border-color: #2b313b; padding: 3px; }
+QListWidget#gfxGameResults::item { padding: 3px 6px; }
+QListWidget#gfxGameResults::item:hover { background: #20242d; }
 
 QTreeWidget#gfxEvents {
 	background: #0f1115; color: #e8eaf0; border: 1px solid #262a33; border-radius: 10px; padding: 4px; outline: 0;

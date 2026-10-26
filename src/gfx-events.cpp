@@ -91,19 +91,12 @@ public:
 protected:
 	void paintEvent(QPaintEvent *e) override
 	{
-		QTextBrowser::paintEvent(e);
-		QPainter p(viewport());
-		const QAbstractTextDocumentLayout *lay = document()->documentLayout();
-		const int dx = horizontalScrollBar()->value(), dy = verticalScrollBar()->value();
-		const int h = viewport()->height();
-		for (QTextBlock b = cursorForPosition(QPoint(0, 0)).block(); b.isValid(); b = b.next()) {
-			const QRectF r = lay->blockBoundingRect(b).translated(-dx, -dy);
-			if (r.top() > h)
-				break;
-			const QVariant bar = b.blockFormat().property(kBarProp);
-			if (bar.isValid())
-				p.fillRect(QRectF(r.left(), r.top(), 3, r.height()), bar.value<QColor>());
+		// Rounded cards + accent bar under the text (shared with MultiChat).
+		{
+			QPainter p(viewport());
+			notice::paintCards(this, p);
 		}
+		QTextBrowser::paintEvent(e);
 	}
 	QVariant loadResource(int type, const QUrl &name) override
 	{
@@ -581,34 +574,30 @@ QString GfxEventsPanel::cardHtml(const FeedEvent &e) const
 	const qreal tagPt = qMax<qreal>(6.0, base * 0.78);
 	const qreal smallPt = qMax<qreal>(6.5, base * 0.88);
 	const int iconPx = qBound(12, qRound(base * 1.65), 32);
-	const QString bg = theme::mapColor(QStringLiteral("#121419"));
 	const QString soft = minimal ? QStringLiteral("#9aa1b0") : QStringLiteral("#d6d9e0");
 
 	QString h;
-	if (!minimal)
-		h += QStringLiteral("&nbsp;&nbsp;"); // room for the accent bar
 	if (s.chatIcons && !c.platform.isEmpty())
 		h += QStringLiteral("<img src='gfx:%1/%2' width='%2' height='%2' style='vertical-align:middle'>&nbsp;")
 			     .arg(c.platform)
 			     .arg(iconPx);
-	if (minimal)
+	if (minimal) {
 		h += icon + QStringLiteral("&nbsp;");
-	else
-		h += QStringLiteral("<span style='background-color:%1;color:%2;font-size:%3pt;font-weight:800;'>"
-				    "&nbsp;%4&nbsp;%5&nbsp;</span>&nbsp;")
-			     .arg(notice::mix(QColor(bg), evColor, 0.28).name(), evColor.name(),
-				  QString::number(tagPt, 'f', 1), icon, label);
-	if (!minimal)
-		h += QStringLiteral("<span style='color:#5b6270;font-size:%2pt;'>%1</span> ")
-			     .arg(fmtTime(e.at), QString::number(smallPt, 'f', 1));
+	} else {
+		h += QStringLiteral("<span style='color:%1;font-size:%2pt;font-weight:800;'>%3&nbsp;%4</span>"
+				    "<span style='color:#5b6270;font-size:%5pt;'>&nbsp;&nbsp;·&nbsp;&nbsp;%6</span>")
+			     .arg(evColor.name(), QString::number(tagPt, 'f', 1), icon, label,
+				  QString::number(smallPt, 'f', 1), fmtTime(e.at));
+		h += card ? QString() : QStringLiteral("&nbsp;&nbsp;");
+	}
 	const QString head = minimal ? QStringLiteral("<span style='color:%1'>%2</span>").arg(soft, c.head) : c.head;
-	const QString indent = QStringLiteral("<br>&nbsp;&nbsp;");
+	const QString indent = QStringLiteral("<br>");
 	h += card ? indent + head : head;
 	if (!c.message.trimmed().isEmpty()) {
 		QString msg = c.message;
 		msg.replace(QLatin1Char('\n'), QLatin1Char(' '));
 		if (card)
-			h += indent + QStringLiteral("<span style='color:#e8eaf0'>%1</span>").arg(msg.toHtmlEscaped());
+			h += indent + QStringLiteral("<span style='color:#c9ced8'>%1</span>").arg(msg.toHtmlEscaped());
 		else
 			h += QStringLiteral(" <span style='color:%1'>— %2</span>")
 				     .arg(minimal ? soft : QStringLiteral("#e8eaf0"), msg.toHtmlEscaped());
@@ -650,16 +639,24 @@ QTextBlockFormat GfxEventsPanel::cardFormat(const FeedEvent &e) const
 	QTextBlockFormat f;
 	f.setLineHeight(112, QTextBlockFormat::ProportionalHeight);
 	if (s.noticeStyle == QLatin1String("minimal")) {
-		f.setBottomMargin(s.chatCompact ? 1 : 4);
+		f.setTopMargin(s.chatCompact ? 1 : 3);
+		f.setBottomMargin(s.chatCompact ? 1 : 3);
+		f.setLeftMargin(6);
 		return f;
 	}
 	const Card c = describe(e);
 	const QString evColor = c.pillColor.isEmpty() ? notice::look(c.type).color : c.pillColor;
 	const QColor tint(c.platform.isEmpty() ? evColor : notice::tint(c.platform, evColor));
 	const bool card = s.noticeStyle == QLatin1String("card");
-	f.setTopMargin(card ? 3 : 1);
-	f.setBottomMargin(s.chatCompact ? 3 : (card ? 7 : 4));
-	f.setBackground(notice::mix(QColor(theme::mapColor(QStringLiteral("#121419"))), tint, card ? 0.15 : 0.10));
+	if (card)
+		f.setLineHeight(118, QTextBlockFormat::ProportionalHeight);
+	const int gap = s.chatCompact ? 5 : (card ? 8 : 6);
+	f.setTopMargin(gap);
+	f.setBottomMargin(gap);
+	f.setLeftMargin(14); // accent bar + padding
+	f.setRightMargin(10);
+	f.setProperty(notice::kCardProp,
+		      notice::mix(QColor(theme::mapColor(QStringLiteral("#101217"))), tint, card ? 0.13 : 0.09));
 	f.setProperty(kBarProp, tint);
 	return f;
 }
