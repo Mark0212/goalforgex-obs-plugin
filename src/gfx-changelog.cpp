@@ -139,7 +139,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
-	{"2.10.0", "October 2026", k2100, static_cast<int>(std::size(k2100))},
+	{"2.10.1", "October 2026", k2100, static_cast<int>(std::size(k2100))},
 	{"2.9.1", "October 2026", k291, static_cast<int>(std::size(k291))},
 	{"2.9.0", "October 2026", k290, static_cast<int>(std::size(k290))},
 	{"2.8.2", "October 2026", k282, static_cast<int>(std::size(k282))},
