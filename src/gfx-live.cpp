@@ -402,12 +402,13 @@ void GfxLivePanel::buildUi()
 	root->addWidget(goalCard_);
 
 	// ── Presets ────────────────────────────────────────────────────
-	// Switch the Sub Goal / Follower Goal look to one of the presets saved on
-	// goalforgex.com. ✓ = the one on screen right now (server-computed).
+	// Switch the Sub Goal / Follower Goal look (or every alert, 2.11+) to one
+	// of the presets saved on goalforgex.com. ✓ = the one on screen right now
+	// (server-computed).
 	QVBoxLayout *pb = nullptr;
 	presetsCard_ = makeCard(QStringLiteral("🎨 Presets"), &pb);
 	const auto presetRow = [this, pb](const QString &label, QWidget **row, QComboBox **box, QPushButton **apply,
-					  bool follower) {
+					  int kind) {
 		*row = new QWidget(presetsCard_);
 		auto *h = new QHBoxLayout(*row);
 		h->setContentsMargins(0, 0, 0, 0);
@@ -420,9 +421,23 @@ void GfxLivePanel::buildUi()
 		(*box)->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 		*apply = smallBtn(
 			*row, QStringLiteral("Apply"),
-			follower ? QStringLiteral("Switch the Follower Goal to this preset — live on your OBS source")
-				 : QStringLiteral("Switch the Sub Goal to this preset — live on your OBS source"));
+			kind == 2   ? QStringLiteral("Switch every alert to this preset — the Alerts source "
+						       "changes right away")
+			: kind == 1 ? QStringLiteral("Switch the Follower Goal to this preset — live on your "
+						     "OBS source")
+				    : QStringLiteral("Switch the Sub Goal to this preset — live on your OBS source"));
 		gfx::theme::setRole(*apply, "primary");
+		h->addWidget(lbl);
+		h->addWidget(*box, 1);
+		h->addWidget(*apply);
+		pb->addWidget(*row);
+		QComboBox *b = *box;
+		QPushButton *a = *apply;
+		connect(b, &QComboBox::currentIndexChanged, this,
+			[this, b, a, kind](int) { refreshPresetApply(b, a, presetList(kind)); });
+		connect(a, &QPushButton::clicked, this, [this, kind] { applyPreset(kind); });
+		if (kind == 2)
+			return; // alerts play on the one Alerts source — nothing to pin per scene
 		// 📌 = a source that ALWAYS shows this preset's look, in the current
 		// scene — so each scene can have its own look at the same time.
 		auto *pin = smallBtn(
@@ -430,17 +445,7 @@ void GfxLivePanel::buildUi()
 			QStringLiteral("Add a source pinned to this preset to the current scene — that scene keeps "
 				       "this look while other scenes show theirs"));
 		pin->setFixedWidth(30);
-		h->addWidget(lbl);
-		h->addWidget(*box, 1);
-		h->addWidget(*apply);
 		h->addWidget(pin);
-		pb->addWidget(*row);
-		QComboBox *b = *box;
-		QPushButton *a = *apply;
-		connect(b, &QComboBox::currentIndexChanged, this, [this, b, a, follower](int) {
-			refreshPresetApply(b, a, follower ? state_.followerPresets : state_.goalPresets);
-		});
-		connect(a, &QPushButton::clicked, this, [this, follower] { applyPreset(follower); });
 		connect(pin, &QPushButton::clicked, this, [this, b] {
 			const QString id = b->currentData().toString();
 			if (id.isEmpty())
@@ -450,8 +455,10 @@ void GfxLivePanel::buildUi()
 			act(QStringLiteral("preset.pin"), o);
 		});
 	};
-	presetRow(QStringLiteral("Sub Goal"), &goalPresetRow_, &goalPresetBox_, &goalPresetApply_, false);
-	presetRow(QStringLiteral("Follower"), &folPresetRow_, &folPresetBox_, &folPresetApply_, true);
+	presetRow(QStringLiteral("Sub Goal"), &goalPresetRow_, &goalPresetBox_, &goalPresetApply_, 0);
+	presetRow(QStringLiteral("Follower"), &folPresetRow_, &folPresetBox_, &folPresetApply_, 1);
+	presetRow(QStringLiteral("Alerts"), &alertPresetRow_, &alertPresetBox_, &alertPresetApply_, 2);
+	alertPresetRow_->hide();
 	presetsEmpty_ = new QLabel(presetsCard_);
 	presetsEmpty_->setObjectName(QStringLiteral("gfxMuted"));
 	presetsEmpty_->setWordWrap(true);
@@ -693,15 +700,22 @@ void GfxLivePanel::syncPresets()
 {
 	const LiveState &s = state_;
 	const bool locked = s.presetsLocked;
-	const bool none = s.goalPresets.isEmpty() && s.followerPresets.isEmpty();
+	const bool none = s.goalPresets.isEmpty() && s.followerPresets.isEmpty() && s.alertPresets.isEmpty();
 	presetsLock_->setVisible(locked);
 	presetsEmpty_->setVisible(!locked && none);
 	goalPresetRow_->setVisible(!locked && !s.goalPresets.isEmpty());
 	folPresetRow_->setVisible(!locked && !s.followerPresets.isEmpty());
+	alertPresetRow_->setVisible(!locked && s.alertPresetsKnown && !s.alertPresets.isEmpty());
 	if (locked)
 		return;
 	syncPresetBox(goalPresetBox_, goalPresetApply_, s.goalPresets, goalPresetSig_);
 	syncPresetBox(folPresetBox_, folPresetApply_, s.followerPresets, folPresetSig_);
+	syncPresetBox(alertPresetBox_, alertPresetApply_, s.alertPresets, alertPresetSig_);
+}
+
+const QList<PresetState> &GfxLivePanel::presetList(int kind) const
+{
+	return kind == 2 ? state_.alertPresets : kind == 1 ? state_.followerPresets : state_.goalPresets;
 }
 
 // Rebuilds a preset combo only when the list itself changed (names, order or
@@ -720,7 +734,8 @@ void GfxLivePanel::syncPresetBox(QComboBox *box, QPushButton *apply, const QList
 		int pick = -1, activeIdx = -1;
 		for (int i = 0; i < list.size(); ++i) {
 			const PresetState &p = list.at(i);
-			box->addItem(p.active ? QStringLiteral("%1  ✓").arg(p.name) : p.name, p.id);
+			const QString label = p.game.isEmpty() ? p.name : QStringLiteral("%1 · %2").arg(p.name, p.game);
+			box->addItem(p.active ? QStringLiteral("%1  ✓").arg(label) : label, p.id);
 			if (p.active) {
 				activeIdx = i;
 				box->setItemData(i, QStringLiteral("On screen now"), Qt::ToolTipRole);
@@ -745,10 +760,10 @@ void GfxLivePanel::refreshPresetApply(QComboBox *box, QPushButton *apply, const 
 	apply->setText(onScreen ? QStringLiteral("On screen") : QStringLiteral("Apply"));
 }
 
-void GfxLivePanel::applyPreset(bool follower)
+void GfxLivePanel::applyPreset(int kind)
 {
-	QComboBox *box = follower ? folPresetBox_ : goalPresetBox_;
-	const QList<PresetState> &list = follower ? state_.followerPresets : state_.goalPresets;
+	QComboBox *box = kind == 2 ? alertPresetBox_ : kind == 1 ? folPresetBox_ : goalPresetBox_;
+	const QList<PresetState> &list = presetList(kind);
 	const QString id = box->currentData().toString();
 	QString name;
 	bool anyOnScreen = false;
@@ -761,17 +776,21 @@ void GfxLivePanel::applyPreset(bool follower)
 		return;
 	// Switching is instant mid-stream — only stop to ask when it would throw
 	// away a look that isn't saved as any preset (tweaked since the last load).
-	const QString what = follower ? QStringLiteral("Follower Goal") : QStringLiteral("Sub Goal");
-	if (!anyOnScreen &&
-	    QMessageBox::question(this, QStringLiteral("Switch preset"),
-				  QStringLiteral("Your current %1 look isn't saved as a preset. Switching to “%2” "
-						 "replaces it.\n\nSwitch anyway?")
-					  .arg(what, name)) != QMessageBox::Yes)
+	const QString what = kind == 2   ? QStringLiteral("alerts aren't")
+			     : kind == 1 ? QStringLiteral("Follower Goal look isn't")
+					 : QStringLiteral("Sub Goal look isn't");
+	if (!anyOnScreen && QMessageBox::question(this, QStringLiteral("Switch preset"),
+						  QStringLiteral("Your current %1 saved as a preset. Switching to “%2” "
+								 "replaces what's on screen.\n\nSwitch anyway?")
+							  .arg(what, name)) != QMessageBox::Yes)
 		return;
 	QJsonObject a;
 	a.insert(QStringLiteral("id"), id);
 	a.insert(QStringLiteral("name"), name);
-	act(follower ? QStringLiteral("preset.follower") : QStringLiteral("preset.goal"), a);
+	act(kind == 2   ? QStringLiteral("preset.alerts")
+	    : kind == 1 ? QStringLiteral("preset.follower")
+			: QStringLiteral("preset.goal"),
+	    a);
 }
 
 void GfxLivePanel::rebuildCounters()

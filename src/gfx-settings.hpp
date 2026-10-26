@@ -105,6 +105,9 @@ struct Settings {
 	bool eventsOwnDock = true;
 	bool eventsDockIntroduced = false; // shown once automatically after updating to 2.7
 	bool msDockIntroduced = false;     // Multistream dock shown once after updating to 2.8
+	// Multistream → game list: switching a game also switches to the alert
+	// preset labelled with it (only shown to accounts with alert presets)
+	bool msGameAlertPreset = true;
 	// Events tab: which kinds are listed
 	bool evGiftBombs = true;
 	bool evPoints = true;

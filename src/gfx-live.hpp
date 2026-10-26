@@ -53,7 +53,9 @@ private:
 	void syncPresets();
 	void syncPresetBox(QComboBox *box, QPushButton *apply, const QList<gfx::PresetState> &list, QString &sig);
 	void refreshPresetApply(QComboBox *box, QPushButton *apply, const QList<gfx::PresetState> &list);
-	void applyPreset(bool follower);
+	// kind: 0 = Sub Goal, 1 = Follower Goal, 2 = Alerts
+	const QList<gfx::PresetState> &presetList(int kind) const;
+	void applyPreset(int kind);
 	void act(const QString &id, const QJsonValue &arg = QJsonValue());
 	QGroupBox *makeCard(const QString &title, QVBoxLayout **body);
 	QPushButton *lockLine(QWidget *parent, const QString &text);
@@ -119,10 +121,14 @@ private:
 	QWidget *folPresetRow_ = nullptr;
 	QComboBox *folPresetBox_ = nullptr;
 	QPushButton *folPresetApply_ = nullptr;
+	QWidget *alertPresetRow_ = nullptr;
+	QComboBox *alertPresetBox_ = nullptr;
+	QPushButton *alertPresetApply_ = nullptr;
 	QLabel *presetsEmpty_ = nullptr;
 	QPushButton *presetsLock_ = nullptr;
 	QString goalPresetSig_; // ids|names|active the combo was last built from
 	QString folPresetSig_;
+	QString alertPresetSig_;
 
 	QGroupBox *alertsCard_ = nullptr;
 	QWidget *alertsCtl_ = nullptr;

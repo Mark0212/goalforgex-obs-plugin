@@ -46,11 +46,13 @@ struct CounterState {
 	int value = 0;
 };
 
-// A saved Sub Goal / Follower Goal preset (server 2.10+). active = its saved
-// look is what's on screen right now (the server compares it to the config).
+// A saved Sub Goal / Follower Goal preset (server 2.10+), or an alert preset
+// (2.11+, game = the game it's labelled with). active = its saved look is
+// what's on screen right now (the server works that out).
 struct PresetState {
 	QString id;
 	QString name;
+	QString game;
 	bool active = false;
 };
 
@@ -114,6 +116,10 @@ struct LiveState {
 	bool presetsLocked = true;
 	QList<PresetState> goalPresets;
 	QList<PresetState> followerPresets;
+	// Alert presets: only sent for accounts that can use them (staff for now);
+	// alertPresetsKnown == false keeps the Alerts row hidden.
+	bool alertPresetsKnown = false;
+	QList<PresetState> alertPresets;
 	bool alertsLocked = true;
 	bool hasLastAlert = false;
 

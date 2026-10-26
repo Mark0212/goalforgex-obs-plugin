@@ -667,7 +667,7 @@ void GfxDock::openSettings(const QString &startPage)
 	       {QStringLiteral("Goal"), &s.cardGoal},
 	       {QStringLiteral("Spin wheel"), &s.cardWheel},
 	       {QStringLiteral("Counters"), &s.cardCounters},
-	       {QStringLiteral("Presets (switch Sub Goal / Follower Goal looks)"), &s.cardPresets},
+	       {QStringLiteral("Presets (switch saved goal looks)"), &s.cardPresets},
 	       {QStringLiteral("Alerts (test / replay / clear chat)"), &s.cardAlerts},
 	       {QStringLiteral("Activity feed"), &s.cardActivity}});
 	group(gen, QStringLiteral("Automation"),
@@ -1523,6 +1523,16 @@ void GfxDock::performAction(const QString &id, const QJsonValue &arg)
 		ok = QStringLiteral("🎨 %1 switched to “%2” — live on your OBS source.")
 			     .arg(follower ? QStringLiteral("Follower Goal") : QStringLiteral("Sub Goal"),
 				  a.value(QStringLiteral("name")).toString());
+	} else if (id == QLatin1String("preset.alerts")) {
+		// Live tab → Presets → Alerts: the whole Alert Manager switches; an
+		// open /alerts editor reloads onto it instead of saving over it.
+		const QJsonObject a = arg.toObject();
+		const QString pid = a.value(QStringLiteral("id")).toString();
+		if (pid.isEmpty())
+			return;
+		path = QStringLiteral("/api/alert-presets/%1/apply")
+			       .arg(QString::fromUtf8(QUrl::toPercentEncoding(pid)));
+		ok = QStringLiteral("🔔 Alerts switched to “%1”.").arg(a.value(QStringLiteral("name")).toString());
 	} else if (id == QLatin1String("alert.test")) {
 		path = QStringLiteral("/api/obs/alerts/test");
 		body.insert(QStringLiteral("type"), arg.toString());
