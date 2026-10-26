@@ -226,17 +226,20 @@ void GfxEventsPanel::buildUi()
 		rebuild();
 	});
 	QScrollBar *vsb = view_->verticalScrollBar();
-	connect(vsb, &QScrollBar::rangeChanged, this, [this](int, int max) {
-		if (!follow_)
-			return;
+	// Newest events are at the TOP. follow_ = pinned to the top; scrolled down
+	// reading older ones, the view holds its distance from the bottom, so cards
+	// landing above never move what the streamer is reading.
+	connect(vsb, &QScrollBar::rangeChanged, this, [this](int min, int max) {
 		++programmatic_;
-		view_->verticalScrollBar()->setValue(max);
+		view_->verticalScrollBar()->setValue(follow_ ? min : qMax(min, max - fromBottom_));
 		--programmatic_;
 	});
 	connect(vsb, &QScrollBar::valueChanged, this, [this](int v) {
 		if (programmatic_)
 			return;
-		follow_ = v >= view_->verticalScrollBar()->maximum() - 4;
+		QScrollBar *sb = view_->verticalScrollBar();
+		fromBottom_ = sb->maximum() - v;
+		follow_ = v <= sb->minimum() + 4;
 		if (follow_)
 			pendingNew_ = 0;
 		updateJump();
@@ -248,11 +251,12 @@ void GfxEventsPanel::buildUi()
 	jump_->setCursor(Qt::PointingHandCursor);
 	jump_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
 	jump_->hide();
-	root->addWidget(jump_);
+	// Above the feed — new events land at the top, so that's where "↑ N new" points.
+	root->insertWidget(root->indexOf(view_), jump_);
 	connect(jump_, &QPushButton::clicked, this, [this] {
 		follow_ = true;
 		pendingNew_ = 0;
-		scrollToBottom();
+		scrollToNewest();
 		updateJump();
 	});
 }
@@ -280,6 +284,8 @@ QString GfxEventsPanel::group(const FeedEvent &e) const
 		return QStringLiteral("support");
 	if (k == QLatin1String("shoutout"))
 		return QStringLiteral("community");
+	if (k == QLatin1String("hypetrain"))
+		return QStringLiteral("support");
 	if (k == QLatin1String("alert")) {
 		const QString &t = e.alertType;
 		if (t == QLatin1String("subscriber") || t == QLatin1String("resub") || t == QLatin1String("gifted"))
@@ -322,6 +328,8 @@ bool GfxEventsPanel::shown(const FeedEvent &e) const
 		on = s.evYouTube;
 	else if (k == QLatin1String("shoutout"))
 		on = s.evShoutouts;
+	else if (k == QLatin1String("hypetrain"))
+		on = s.evHypeTrain;
 	else if (k == QLatin1String("alert") || k == QLatin1String("xive"))
 		// The gift-bomb card (with its recipients) replaces the plain "gift subs" alert card.
 		on = s.evAlerts && !(seenGiftBomb_ && s.evGiftBombs && e.alertType == QLatin1String("gifted"));
@@ -365,6 +373,37 @@ GfxEventsPanel::Card GfxEventsPanel::describe(const FeedEvent &e) const
 		c.names = e.recipients;
 		c.missing = qMax(0, total - static_cast<int>(e.recipients.size()));
 		c.message.clear();
+	} else if (k == QLatin1String("hypetrain")) {
+		// One card per train, updated live: level, points to the next level,
+		// when it runs out; at the end the final level and total. Top
+		// contributors / record / cooldown come in as the message line.
+		c.type = QStringLiteral("hypetrain");
+		c.platform = QStringLiteral("twitch");
+		if (e.trainType == QLatin1String("golden_kappa")) {
+			c.pillLabel = QStringLiteral("GOLDEN KAPPA TRAIN");
+			c.pillColor = QStringLiteral("#f5c542");
+		} else if (e.trainType == QLatin1String("treasure")) {
+			c.pillLabel = QStringLiteral("TREASURE TRAIN");
+			c.pillColor = QStringLiteral("#22d3ee");
+		}
+		const int level = qMax(1, e.amount.toInt());
+		const QString name = e.title.isEmpty() ? QStringLiteral("Hype Train") : e.title;
+		const QString lvl = QStringLiteral("Level %1").arg(level);
+		if (e.sub == QLatin1String("end")) {
+			c.head = B(name) + QStringLiteral(" ended at ") + B(lvl) +
+				 S(QStringLiteral("%1 points").arg(fmtCount(e.total)));
+		} else {
+			c.head = B(name) +
+				 (e.sub == QLatin1String("begin") ? QStringLiteral(" started! ")
+								  : QStringLiteral(" · ")) +
+				 B(lvl);
+			if (e.goal > 0)
+				c.head += S(QStringLiteral("%1 / %2 to Level %3")
+						    .arg(fmtCount(e.progress), fmtCount(e.goal))
+						    .arg(level + 1));
+			if (e.expiresAt > 0)
+				c.head += S(QStringLiteral("runs until %1").arg(fmtTime(e.expiresAt)));
+		}
 	} else if (k == QLatin1String("points")) {
 		c.type = QStringLiteral("points");
 		c.platform = c.platform.isEmpty() && e.platform != QLatin1String("xive") ? QStringLiteral("twitch")
@@ -648,6 +687,33 @@ void GfxEventsPanel::appendCard(const FeedEvent &e)
 	--programmatic_;
 }
 
+// A new event goes in at the TOP (newest first). Splits in front of the current
+// first card: that card moves to block 2 keeping its own format, block 1 is the
+// new one — so shownSeq_[n] still matches block n for the right-click menu.
+void GfxEventsPanel::prependCard(const FeedEvent &e)
+{
+	++programmatic_;
+	QTextDocument *doc = view_->document();
+	if (placeholder_) {
+		doc->clear();
+		shownSeq_.clear();
+		placeholder_ = false;
+	}
+	const QTextBlockFormat fmt = cardFormat(e);
+	QTextCursor c(doc);
+	c.movePosition(QTextCursor::Start);
+	if (!shownSeq_.isEmpty()) {
+		c.insertBlock(doc->firstBlock().blockFormat(), QTextCharFormat());
+		c.movePosition(QTextCursor::Start);
+	}
+	c.setBlockFormat(fmt);
+	c.setCharFormat(QTextCharFormat());
+	c.insertHtml(cardHtml(e));
+	c.setBlockFormat(fmt);
+	shownSeq_.prepend(e.seq);
+	--programmatic_;
+}
+
 void GfxEventsPanel::showPlaceholder()
 {
 	++programmatic_;
@@ -673,7 +739,6 @@ void GfxEventsPanel::showPlaceholder()
 void GfxEventsPanel::rebuild()
 {
 	QScrollBar *sb = view_->verticalScrollBar();
-	const int keep = sb->value();
 	++programmatic_;
 	{
 		QTextCursor batch(view_->document());
@@ -681,21 +746,18 @@ void GfxEventsPanel::rebuild()
 		view_->document()->clear();
 		shownSeq_.clear();
 		placeholder_ = false;
-		for (const FeedEvent &e : events_)
-			if (shown(e))
-				appendCard(e);
+		// Newest first: walk the (oldest → newest) list backwards.
+		for (qsizetype i = events_.size() - 1; i >= 0; --i)
+			if (shown(events_.at(i)))
+				appendCard(events_.at(i));
 		if (shownSeq_.isEmpty())
 			showPlaceholder();
 		batch.endEditBlock();
 	}
 	--programmatic_;
-	if (follow_)
-		scrollToBottom();
-	else {
-		++programmatic_;
-		sb->setValue(qMin(keep, sb->maximum()));
-		--programmatic_;
-	}
+	++programmatic_;
+	sb->setValue(follow_ ? sb->minimum() : qMax(sb->minimum(), sb->maximum() - fromBottom_));
+	--programmatic_;
 	renderTally();
 	updateJump();
 }
@@ -748,13 +810,13 @@ int GfxEventsPanel::addEvents(const QList<FeedEvent> &events)
 		batch.beginEditBlock();
 		for (const qint64 seq : fresh)
 			if (const FeedEvent *e = eventBySeq(seq))
-				appendCard(*e);
+				prependCard(*e);
 		batch.endEditBlock();
 	}
 	if (!follow_)
 		pendingNew_ += visible;
 	else
-		scrollToBottom();
+		scrollToNewest();
 	if (shownSeq_.isEmpty())
 		showPlaceholder();
 	renderTally();
@@ -775,17 +837,17 @@ bool GfxEventsPanel::autoScrolling() const
 	return follow_;
 }
 
-void GfxEventsPanel::scrollToBottom()
+void GfxEventsPanel::scrollToNewest()
 {
 	++programmatic_;
-	view_->verticalScrollBar()->setValue(view_->verticalScrollBar()->maximum());
+	view_->verticalScrollBar()->setValue(view_->verticalScrollBar()->minimum());
 	--programmatic_;
 }
 
 void GfxEventsPanel::updateJump()
 {
 	const bool show = !autoScrolling() && pendingNew_ > 0;
-	jump_->setText(show ? QStringLiteral("↓  %1 new event%2")
+	jump_->setText(show ? QStringLiteral("↑  %1 new event%2")
 				       .arg(pendingNew_)
 				       .arg(pendingNew_ == 1 ? QString() : QStringLiteral("s"))
 			    : QString());
@@ -895,18 +957,30 @@ void GfxEventsPanel::setShoutoutStatus(const QString &status)
 	renderNotice();
 }
 
+void GfxEventsPanel::setHypeTrainStatus(const QString &status)
+{
+	if (status == htStatus_)
+		return;
+	htStatus_ = status;
+	renderNotice();
+}
+
 // One Reconnect bar for whatever needs a fresher Twitch login.
 void GfxEventsPanel::renderNotice()
 {
-	const bool cp = cpStatus_ == QLatin1String("needs_reconnect");
-	const bool so = soStatus_ == QLatin1String("needs_reconnect");
+	QStringList parts;
+	if (cpStatus_ == QLatin1String("needs_reconnect"))
+		parts << QStringLiteral("Channel point redemptions");
+	if (soStatus_ == QLatin1String("needs_reconnect"))
+		parts << QStringLiteral("Twitch /shoutout");
+	if (htStatus_ == QLatin1String("needs_reconnect"))
+		parts << QStringLiteral("Hype Trains");
 	QString what;
-	if (cp && so)
-		what = QStringLiteral("Channel point redemptions and Twitch /shoutout");
-	else if (cp)
-		what = QStringLiteral("Channel point redemptions");
-	else if (so)
-		what = QStringLiteral("Twitch /shoutout");
+	if (parts.size() == 1)
+		what = parts.first();
+	else if (parts.size() > 1)
+		what = parts.mid(0, parts.size() - 1).join(QStringLiteral(", ")) + QStringLiteral(" and ") +
+		       parts.last();
 	if (what.isEmpty()) {
 		notice_->hide();
 		return;

@@ -450,6 +450,7 @@ const NoticeMeta kNotices[] = {
 	{"shoutout", "📣", "SHOUTOUT", "#22d3ee", "shoutouts"},
 	{"shoutout_in", "📣", "SHOUTOUT", "#22d3ee", "shoutouts"},
 	{"streak", "🔥", "WATCH STREAK", "#fb923c", "streaks"},
+	{"hypetrain", "🚂", "HYPE TRAIN", "#a970ff", "hypetrain"},
 	{"points", "🎯", "REDEEMED", "#c4b5fd", "points"},
 	{"announcement", "📢", "ANNOUNCEMENT", "#9146ff", "announcements"},
 	{"bitsbadge", "💎", "BITS BADGE", "#c084fc", "other"},
@@ -2428,6 +2429,8 @@ bool GfxChatPanel::noticeWanted(const ChatMessage &m) const
 		return m.platform == QLatin1String("tiktok") ? s.ncTikTokFollows : s.ncFollows;
 	if (g == QLatin1String("shoutouts"))
 		return s.ncShoutouts;
+	if (g == QLatin1String("hypetrain"))
+		return s.ncHypeTrain;
 	if (g == QLatin1String("streaks"))
 		return s.ncStreaks;
 	if (g == QLatin1String("points"))

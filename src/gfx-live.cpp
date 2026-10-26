@@ -26,6 +26,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QAbstractItemView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -400,6 +401,72 @@ void GfxLivePanel::buildUi()
 	connect(gPlus, &QPushButton::clicked, this, [this] { act(QStringLiteral("goal.adjust"), 1); });
 	root->addWidget(goalCard_);
 
+	// ── Presets ────────────────────────────────────────────────────
+	// Switch the Sub Goal / Follower Goal look to one of the presets saved on
+	// goalforgex.com. ✓ = the one on screen right now (server-computed).
+	QVBoxLayout *pb = nullptr;
+	presetsCard_ = makeCard(QStringLiteral("🎨 Presets"), &pb);
+	const auto presetRow = [this, pb](const QString &label, QWidget **row, QComboBox **box, QPushButton **apply,
+					  bool follower) {
+		*row = new QWidget(presetsCard_);
+		auto *h = new QHBoxLayout(*row);
+		h->setContentsMargins(0, 0, 0, 0);
+		h->setSpacing(4);
+		auto *lbl = new QLabel(label, *row);
+		lbl->setMinimumWidth(62);
+		*box = new QComboBox(*row);
+		(*box)->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+		(*box)->setMinimumContentsLength(8);
+		(*box)->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+		*apply = smallBtn(
+			*row, QStringLiteral("Apply"),
+			follower ? QStringLiteral("Switch the Follower Goal to this preset — live on your OBS source")
+				 : QStringLiteral("Switch the Sub Goal to this preset — live on your OBS source"));
+		gfx::theme::setRole(*apply, "primary");
+		// 📌 = a source that ALWAYS shows this preset's look, in the current
+		// scene — so each scene can have its own look at the same time.
+		auto *pin = smallBtn(
+			*row, QStringLiteral("📌"),
+			QStringLiteral("Add a source pinned to this preset to the current scene — that scene keeps "
+				       "this look while other scenes show theirs"));
+		pin->setFixedWidth(30);
+		h->addWidget(lbl);
+		h->addWidget(*box, 1);
+		h->addWidget(*apply);
+		h->addWidget(pin);
+		pb->addWidget(*row);
+		QComboBox *b = *box;
+		QPushButton *a = *apply;
+		connect(b, &QComboBox::currentIndexChanged, this, [this, b, a, follower](int) {
+			refreshPresetApply(b, a, follower ? state_.followerPresets : state_.goalPresets);
+		});
+		connect(a, &QPushButton::clicked, this, [this, follower] { applyPreset(follower); });
+		connect(pin, &QPushButton::clicked, this, [this, b] {
+			const QString id = b->currentData().toString();
+			if (id.isEmpty())
+				return;
+			QJsonObject o;
+			o.insert(QStringLiteral("id"), id);
+			act(QStringLiteral("preset.pin"), o);
+		});
+	};
+	presetRow(QStringLiteral("Sub Goal"), &goalPresetRow_, &goalPresetBox_, &goalPresetApply_, false);
+	presetRow(QStringLiteral("Follower"), &folPresetRow_, &folPresetBox_, &folPresetApply_, true);
+	presetsEmpty_ = new QLabel(presetsCard_);
+	presetsEmpty_->setObjectName(QStringLiteral("gfxMuted"));
+	presetsEmpty_->setWordWrap(true);
+	presetsEmpty_->setTextFormat(Qt::RichText);
+	presetsEmpty_->setOpenExternalLinks(true);
+	presetsEmpty_->setText(
+		QStringLiteral("No presets yet — save a Sub Goal or Follower Goal look on "
+			       "<a href='%1/dashboard'>goalforgex.com</a> (Presets), then switch between them here.")
+			.arg(baseUrl()));
+	presetsEmpty_->hide();
+	pb->addWidget(presetsEmpty_);
+	presetsLock_ = lockLine(presetsCard_, QStringLiteral("Presets need Pro"));
+	pb->addWidget(presetsLock_);
+	root->addWidget(presetsCard_);
+
 	// ── Spin wheel ─────────────────────────────────────────────────
 	QVBoxLayout *wb = nullptr;
 	wheelCard_ = makeCard(QStringLiteral("🎡 Spin wheel"), &wb);
@@ -523,10 +590,12 @@ void GfxLivePanel::applySettings()
 	goalCard_->setVisible(s.cardGoal);
 	wheelCard_->setVisible(s.cardWheel);
 	countersCard_->setVisible(s.cardCounters && (!st.valid || !st.counters.isEmpty() || st.countersLocked));
+	// Only once the server says it knows about presets — older servers never send them.
+	presetsCard_->setVisible(s.cardPresets && st.valid && st.presetsKnown);
 	alertsCard_->setVisible(s.cardAlerts);
 	activityCard_->setVisible(s.cardActivity);
 	const bool any = s.cardStats || s.cardTimer || s.cardActionTimer || s.cardGoal || s.cardWheel ||
-			 s.cardCounters || s.cardAlerts || s.cardActivity;
+			 s.cardCounters || s.cardPresets || s.cardAlerts || s.cardActivity;
 	empty_->setVisible(!any);
 }
 
@@ -615,8 +684,94 @@ void GfxLivePanel::setState(const LiveState &s)
 	replayBtn_->setEnabled(s.hasLastAlert);
 
 	rebuildCounters();
+	syncPresets();
 	applySettings();
 	tick();
+}
+
+void GfxLivePanel::syncPresets()
+{
+	const LiveState &s = state_;
+	const bool locked = s.presetsLocked;
+	const bool none = s.goalPresets.isEmpty() && s.followerPresets.isEmpty();
+	presetsLock_->setVisible(locked);
+	presetsEmpty_->setVisible(!locked && none);
+	goalPresetRow_->setVisible(!locked && !s.goalPresets.isEmpty());
+	folPresetRow_->setVisible(!locked && !s.followerPresets.isEmpty());
+	if (locked)
+		return;
+	syncPresetBox(goalPresetBox_, goalPresetApply_, s.goalPresets, goalPresetSig_);
+	syncPresetBox(folPresetBox_, folPresetApply_, s.followerPresets, folPresetSig_);
+}
+
+// Rebuilds a preset combo only when the list itself changed (names, order or
+// which one is on screen) and never while its popup is open, so the 2 s state
+// poll can't yank a choice out from under the streamer.
+void GfxLivePanel::syncPresetBox(QComboBox *box, QPushButton *apply, const QList<PresetState> &list, QString &sig)
+{
+	QString next;
+	for (const PresetState &p : list)
+		next += p.id + QLatin1Char('|') + p.name + (p.active ? QStringLiteral("|1\n") : QStringLiteral("|0\n"));
+	if (next != sig && !(box->view() && box->view()->isVisible())) {
+		sig = next;
+		const QString keep = box->currentData().toString();
+		const QSignalBlocker block(box);
+		box->clear();
+		int pick = -1, activeIdx = -1;
+		for (int i = 0; i < list.size(); ++i) {
+			const PresetState &p = list.at(i);
+			box->addItem(p.active ? QStringLiteral("%1  ✓").arg(p.name) : p.name, p.id);
+			if (p.active) {
+				activeIdx = i;
+				box->setItemData(i, QStringLiteral("On screen now"), Qt::ToolTipRole);
+			}
+			if (p.id == keep)
+				pick = i;
+		}
+		// Keep what the streamer had picked; otherwise show what's on screen.
+		box->setCurrentIndex(pick >= 0 ? pick : (activeIdx >= 0 ? activeIdx : 0));
+	}
+	refreshPresetApply(box, apply, list);
+}
+
+void GfxLivePanel::refreshPresetApply(QComboBox *box, QPushButton *apply, const QList<PresetState> &list)
+{
+	const QString id = box->currentData().toString();
+	bool onScreen = false;
+	for (const PresetState &p : list)
+		if (p.id == id)
+			onScreen = p.active;
+	apply->setEnabled(!id.isEmpty() && !onScreen);
+	apply->setText(onScreen ? QStringLiteral("On screen") : QStringLiteral("Apply"));
+}
+
+void GfxLivePanel::applyPreset(bool follower)
+{
+	QComboBox *box = follower ? folPresetBox_ : goalPresetBox_;
+	const QList<PresetState> &list = follower ? state_.followerPresets : state_.goalPresets;
+	const QString id = box->currentData().toString();
+	QString name;
+	bool anyOnScreen = false;
+	for (const PresetState &p : list) {
+		anyOnScreen = anyOnScreen || p.active;
+		if (p.id == id)
+			name = p.name;
+	}
+	if (id.isEmpty())
+		return;
+	// Switching is instant mid-stream — only stop to ask when it would throw
+	// away a look that isn't saved as any preset (tweaked since the last load).
+	const QString what = follower ? QStringLiteral("Follower Goal") : QStringLiteral("Sub Goal");
+	if (!anyOnScreen &&
+	    QMessageBox::question(this, QStringLiteral("Switch preset"),
+				  QStringLiteral("Your current %1 look isn't saved as a preset. Switching to “%2” "
+						 "replaces it.\n\nSwitch anyway?")
+					  .arg(what, name)) != QMessageBox::Yes)
+		return;
+	QJsonObject a;
+	a.insert(QStringLiteral("id"), id);
+	a.insert(QStringLiteral("name"), name);
+	act(follower ? QStringLiteral("preset.follower") : QStringLiteral("preset.goal"), a);
 }
 
 void GfxLivePanel::rebuildCounters()

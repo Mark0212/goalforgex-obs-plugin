@@ -117,6 +117,7 @@ private:
 	const gfx::WidgetInfo *selectedWidget() const;
 	obs_source_t *selectedScene() const; // new reference or nullptr
 	void addSelected();
+	void addPinnedPreset(const QString &presetId); // Live tab → Presets → 📌
 	void addStarterLayout();
 	void toggleSelected();
 	void removeSelected();

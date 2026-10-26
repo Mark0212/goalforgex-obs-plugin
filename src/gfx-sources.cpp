@@ -514,6 +514,12 @@ static QString widgetIdForUrl(const QUrl &u)
 	if (f.endsWith(QLatin1String(".html")))
 		f.chop(5);
 	if (f == QLatin1String("widget")) {
+		// Pinned to a saved preset (server 2.10+): its own catalogue entry, never
+		// the plain goal/follower one — adopting it as "goal" would rewrite the
+		// URL and drop the pin.
+		const QString preset = q.queryItemValue(QStringLiteral("preset"));
+		if (!preset.isEmpty())
+			return QStringLiteral("preset:") + preset;
 		const QString t = q.queryItemValue(QStringLiteral("type"));
 		if (t == QLatin1String("follower") || t == QLatin1String("timer") || t == QLatin1String("actiontimer"))
 			return t;

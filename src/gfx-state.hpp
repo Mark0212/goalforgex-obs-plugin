@@ -46,10 +46,18 @@ struct CounterState {
 	int value = 0;
 };
 
+// A saved Sub Goal / Follower Goal preset (server 2.10+). active = its saved
+// look is what's on screen right now (the server compares it to the config).
+struct PresetState {
+	QString id;
+	QString name;
+	bool active = false;
+};
+
 struct FeedEvent {
 	qint64 seq = 0;
 	qint64 at = 0;
-	// alert | timer | actiontimer | wheel | giftbomb | points | streak | tiktok | youtube
+	// alert | timer | actiontimer | wheel | giftbomb | points | streak | tiktok | youtube | hypetrain
 	QString kind;
 	QString type;      // raw broadcast type
 	QString alertType; // for kind == alert
@@ -69,6 +77,12 @@ struct FeedEvent {
 	QString bombId;
 	bool partial = false;
 	bool update = false;
+	// Hype Train (server 2.10+, kind == hypetrain; amount = level, sub = begin|progress|end)
+	qint64 progress = 0;  // points at the current level
+	qint64 goal = 0;      // points the level needs
+	qint64 total = 0;     // points in the whole train
+	QString trainType;    // regular | golden_kappa | treasure
+	qint64 expiresAt = 0; // ms epoch, 0 = ended / unknown
 };
 
 // GET /api/obs/state
@@ -94,6 +108,12 @@ struct LiveState {
 	int wheelSegments = 0;
 	QList<CounterState> counters;
 	bool countersLocked = true;
+	// Presets card. presetsKnown == false on servers that don't send presets
+	// yet — the dock then hides the card.
+	bool presetsKnown = false;
+	bool presetsLocked = true;
+	QList<PresetState> goalPresets;
+	QList<PresetState> followerPresets;
 	bool alertsLocked = true;
 	bool hasLastAlert = false;
 
@@ -109,6 +129,8 @@ struct LiveState {
 	// Twitch's native /shoutout in MultiChat: ok | pending | needs_scope | … —
 	// empty on servers before 2.7.
 	QString shoutouts;
+	// Hype Train cards + notices: ok | pending | needs_reconnect | … — empty on servers before 2.10.
+	QString hypeTrain;
 
 	static LiveState fromJson(const QJsonObject &o);
 };

@@ -120,7 +120,9 @@ GfxDock::GfxDock(QWidget *parent) : QWidget(parent), reactions_(this)
 	connect(&pollTimer_, &QTimer::timeout, this, [this] { pollOnce(); });
 	stateTimer_.setInterval(2000);
 	connect(&stateTimer_, &QTimer::timeout, this, [this] { pollState(); });
-	updateTimer_.setInterval(6 * 60 * 60 * 1000);
+	// Hourly: a release that lands mid-session is downloaded long before the
+	// streamer closes OBS (the check itself is one small cached request).
+	updateTimer_.setInterval(60 * 60 * 1000);
 	connect(&updateTimer_, &QTimer::timeout, this, [this] { checkForUpdate(); });
 	msgClear_.setSingleShot(true);
 	connect(&msgClear_, &QTimer::timeout, this, [this] {
@@ -663,6 +665,7 @@ void GfxDock::openSettings(const QString &startPage)
 	       {QStringLiteral("Goal"), &s.cardGoal},
 	       {QStringLiteral("Spin wheel"), &s.cardWheel},
 	       {QStringLiteral("Counters"), &s.cardCounters},
+	       {QStringLiteral("Presets (switch Sub Goal / Follower Goal looks)"), &s.cardPresets},
 	       {QStringLiteral("Alerts (test / replay / clear chat)"), &s.cardAlerts},
 	       {QStringLiteral("Activity feed"), &s.cardActivity}});
 	group(gen, QStringLiteral("Automation"),
@@ -723,6 +726,7 @@ void GfxDock::openSettings(const QString &startPage)
 	       {QStringLiteral("➕  Twitch and Kick follows"), &s.ncFollows},
 	       {QStringLiteral("➕  TikTok follows (can be a lot)"), &s.ncTikTokFollows},
 	       {QStringLiteral("📣  Shoutouts — ForgeBot !so and Twitch /shoutout, sent and received"), &s.ncShoutouts},
+	       {QStringLiteral("🚂  Hype Trains — started, each new level, ended"), &s.ncHypeTrain},
 	       {QStringLiteral("🔥  Watch streaks"), &s.ncStreaks},
 	       {QStringLiteral("🎯  Channel point redemptions"), &s.ncPoints},
 	       {QStringLiteral("📢  Announcements (/announce)"), &s.ncAnnouncements},
@@ -769,6 +773,9 @@ void GfxDock::openSettings(const QString &startPage)
 	    lastState_.shoutouts == QLatin1String("needs_scope"))
 		soNote += QStringLiteral(" Twitch's own /shoutout needs one more Twitch permission: click Reconnect "
 					 "in the Events dock and approve it. Until then only ForgeBot's !so shows.");
+	if (lastState_.hypeTrain == QLatin1String("needs_reconnect"))
+		soNote += QStringLiteral(" Hype Trains need one more Twitch permission too — click Reconnect in the "
+					 "Events dock and approve it.");
 	note(mc, soNote);
 	mc->addStretch(1);
 
@@ -783,6 +790,7 @@ void GfxDock::openSettings(const QString &startPage)
 	       {QStringLiteral("🔥  Watch streaks"), &s.evStreaks},
 	       {QStringLiteral("🔔  Sub / resub / bits / raid / follow alerts"), &s.evAlerts},
 	       {QStringLiteral("📣  Shoutouts — sent (ForgeBot !so, Twitch /shoutout) and received"), &s.evShoutouts},
+	       {QStringLiteral("🚂  Hype Trains — level, progress, top contributors, cooldown"), &s.evHypeTrain},
 	       {QStringLiteral("🎵  TikTok gifts, follows and subs"), &s.evTikTok},
 	       {QStringLiteral("▶️  YouTube Super Chats, Super Stickers and memberships"), &s.evYouTube},
 	       {QStringLiteral("⏱  Timer and spin-wheel activity"), &s.evTimers}});
@@ -1009,8 +1017,8 @@ void GfxDock::reconnectTwitch()
 			if (url.startsWith(QLatin1String("https://id.twitch.tv/"))) {
 				QDesktopServices::openUrl(QUrl(url));
 				showMessage(QStringLiteral(
-					"Approve it on Twitch in your browser — shoutouts and channel points "
-					"show up here a few seconds later."));
+					"Approve it on Twitch in your browser — shoutouts, channel points and Hype "
+					"Trains show up here a few seconds later."));
 			} else if (r.http.status == 404) {
 				// Older site: reconnect from the account page instead.
 				QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/account")));
@@ -1383,6 +1391,7 @@ void GfxDock::pollState()
 			livePanel_->addEvents(firstSeen);
 			eventsPanel_->setChannelPointsStatus(st.channelPoints);
 			eventsPanel_->setShoutoutStatus(st.shoutouts);
+			eventsPanel_->setHypeTrainStatus(st.hypeTrain);
 			const int shownNew = eventsPanel_->addEvents(fresh);
 			// History from before OBS connected isn't "unread".
 			if (!firstLoad && shownNew > 0 && !eventsVisibleNow()) {
@@ -1489,6 +1498,25 @@ void GfxDock::performAction(const QString &id, const QJsonValue &arg)
 		body.insert(QStringLiteral("delta"), delta);
 		ok = QStringLiteral("%1 %2.").arg(cname.isEmpty() ? QStringLiteral("Counter") : cname,
 						  delta >= 0 ? QStringLiteral("+1") : QStringLiteral("−1"));
+	} else if (id == QLatin1String("preset.pin")) {
+		const QString pid = arg.toObject().value(QStringLiteral("id")).toString();
+		if (!pid.isEmpty())
+			addPinnedPreset(pid);
+		return;
+	} else if (id == QLatin1String("preset.goal") || id == QLatin1String("preset.follower")) {
+		// Live tab → Presets: same as the dashboard's "Load" — the look switches,
+		// live progress (current/target) stays.
+		const QJsonObject a = arg.toObject();
+		const QString pid = a.value(QStringLiteral("id")).toString();
+		if (pid.isEmpty())
+			return;
+		const bool follower = id == QLatin1String("preset.follower");
+		path = QStringLiteral("/api/%1-presets/%2/apply")
+			       .arg(follower ? QStringLiteral("follower") : QStringLiteral("goal"),
+				    QString::fromUtf8(QUrl::toPercentEncoding(pid)));
+		ok = QStringLiteral("🎨 %1 switched to “%2” — live on your OBS source.")
+			     .arg(follower ? QStringLiteral("Follower Goal") : QStringLiteral("Sub Goal"),
+				  a.value(QStringLiteral("name")).toString());
 	} else if (id == QLatin1String("alert.test")) {
 		path = QStringLiteral("/api/obs/alerts/test");
 		body.insert(QStringLiteral("type"), arg.toString());
@@ -1634,12 +1662,18 @@ void GfxDock::checkForUpdate()
 			latestVersion_ = newer ? info.version : QString();
 			if (info.required() && !updateRequired_)
 				enterUpdateRequired(QString());
+			const bool autoOn = info.installable() && (settings().autoInstallUpdates || updateRequired_);
 			if (newer && upd_ == Upd::None) {
 				upd_ = Upd::Available;
 				updatePath_ = installerPath(info.version);
 				// Background download so it's ready to install on exit.
-				if (info.installable() && (settings().autoInstallUpdates || updateRequired_))
+				if (autoOn)
 					startUpdateDownload();
+			} else if (newer && autoOn && (upd_ == Upd::Failed || upd_ == Upd::Available)) {
+				// A download that failed earlier (network blip, GitHub hiccup) is
+				// retried on every later check, so auto-update can't stay stuck.
+				upd_ = Upd::Available;
+				startUpdateDownload();
 			}
 			renderUpdate();
 			renderVersion();
@@ -1899,9 +1933,16 @@ void GfxDock::renderUpdate()
 		break;
 	case Upd::Ready:
 		updateLbl_->setText(
-			settings().autoInstallUpdates
-				? QStringLiteral("✅ Version %1 is ready — it installs when you close OBS.").arg(v)
-				: QStringLiteral("✅ Version %1 is ready to install.").arg(v));
+			!settings().autoInstallUpdates ? QStringLiteral("✅ Version %1 is ready to install.").arg(v)
+			: settings().updateDeclined == update_.version
+				? QStringLiteral(
+					  "⚠ Version %1 didn't install last time — Windows asked to allow it and it "
+					  "wasn't approved. Close OBS and click Yes, or Restart now.")
+					  .arg(v)
+				: QStringLiteral(
+					  "✅ Version %1 is ready — it installs when you close OBS (click Yes when "
+					  "Windows asks).")
+					  .arg(v));
 		updateBtn_->setText(QStringLiteral("Restart now"));
 		break;
 	case Upd::Failed:
@@ -2270,6 +2311,58 @@ void GfxDock::addSelected()
 	refreshStatuses();
 }
 
+// Live tab → Presets → 📌: adds a goal source pinned to that saved preset
+// (catalogue entry "preset:<id>", widget.html &preset=) to the scene OBS has
+// open — the preview scene in Studio Mode, so nothing changes on stream until
+// the streamer transitions. Each preset is its own source, so different scenes
+// can show different looks at once.
+void GfxDock::addPinnedPreset(const QString &presetId)
+{
+	const QString wid = QStringLiteral("preset:") + presetId;
+	const WidgetInfo *w = nullptr;
+	for (const WidgetInfo &x : widgets_)
+		if (x.id == wid) {
+			w = &x;
+			break;
+		}
+	if (!w) {
+		// A preset saved after the catalogue was fetched — re-fetch it.
+		loadCatalogue(true);
+		showMessage(QStringLiteral("Getting that preset ready — try 📌 again in a moment."), true);
+		return;
+	}
+	if (w->locked) {
+		QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/subscribe")));
+		return;
+	}
+	obs_source_t *scene = obs_frontend_preview_program_mode_active() ? obs_frontend_get_current_preview_scene()
+									 : obs_frontend_get_current_scene();
+	if (!scene) {
+		showMessage(QStringLiteral("Open a scene in OBS first."), true);
+		return;
+	}
+	const Credentials c = Auth::instance().credentials();
+	QString err;
+	const auto res = sources::addToScene(scene, *w, c.overlayKey, c.username, &err);
+	const QString sceneName = QString::fromUtf8(obs_source_get_name(scene));
+	obs_source_release(scene);
+	switch (res) {
+	case sources::AddResult::Added:
+	case sources::AddResult::Reused:
+		showMessage(
+			QStringLiteral("📌 Added %1 to “%2” — this scene keeps that look, other scenes keep theirs.")
+				.arg(w->name, sceneName));
+		break;
+	case sources::AddResult::AlreadyInScene:
+		showMessage(QStringLiteral("%1 is already in “%2” — selected it for you.").arg(w->name, sceneName));
+		break;
+	case sources::AddResult::Failed:
+		showMessage(err, true);
+		break;
+	}
+	refreshStatuses();
+}
+
 // One click: alerts + chat box (full canvas), goal top-left, timer top-right.
 void GfxDock::addStarterLayout()
 {
@@ -2539,6 +2632,10 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		renderAirChip();
 		reportStreaming(false, startedMs);
 		streamingChanged(false);
+		// Stream over = OBS is probably about to close: make sure the newest
+		// version is downloaded and verified now, so the exit install has it.
+		if (settings().autoInstallUpdates || updateRequired_)
+			checkForUpdate();
 	} break;
 	case OBS_FRONTEND_EVENT_RECORDING_STARTED:
 		recordStartMs_ = QDateTime::currentMSecsSinceEpoch();
@@ -2547,6 +2644,8 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 	case OBS_FRONTEND_EVENT_RECORDING_STOPPED:
 		recordStartMs_ = 0;
 		renderAirChip();
+		if (settings().autoInstallUpdates || updateRequired_)
+			checkForUpdate();
 		break;
 	case OBS_FRONTEND_EVENT_EXIT:
 		if (msDock_)
@@ -2557,6 +2656,10 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		    fileMatches(updatePath_, update_.sha256)) {
 			QString err;
 			installerLaunched_ = launchInstaller(updatePath_, false, &err);
+			// Declined at Windows' prompt (or couldn't start): say so next time,
+			// it'll ask again on the next close. Launched: nothing to remember.
+			settings().updateDeclined = installerLaunched_ ? QString() : update_.version;
+			saveSettings();
 		}
 		loaded_ = false;
 		statusTimer_.stop();
