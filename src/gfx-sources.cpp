@@ -136,6 +136,7 @@ struct AimCtx {
 	int depth = 0; // nested scenes / groups being walked
 	bool goal = false;
 	bool alerts = false;
+	std::string goalId; // "goal" or "preset:<id>"
 	struct matrix4 goalM;
 	struct matrix4 alertsM;
 };
@@ -232,6 +233,7 @@ void aimItem(obs_sceneitem_t *item, const struct matrix4 *parent, AimCtx *c)
 	if (goal) {
 		c->goalM = m;
 		c->goal = true;
+		c->goalId = w;
 	} else {
 		c->alertsM = m;
 		c->alerts = true;
@@ -259,7 +261,8 @@ void rectOf(const struct matrix4 *m, double *x0, double *y0, double *x1, double 
 
 } // namespace
 
-bool coinTarget(const QString &account, double *xPct, double *yPct, QString *sceneName)
+bool coinTarget(const QString &account, double *xPct, double *yPct, QString *sceneName, double *wPct, double *hPct,
+		QString *widgetId)
 {
 	obs_source_t *scene = obs_frontend_get_current_scene(); // the scene on air (program)
 	if (!scene)
@@ -282,6 +285,12 @@ bool coinTarget(const QString &account, double *xPct, double *yPct, QString *sce
 		return false;
 	*xPct = ((gx0 + gx1) / 2.0 - ax0) / aw * 100.0;
 	*yPct = ((gy0 + gy1) / 2.0 - ay0) / ah * 100.0;
+	if (wPct)
+		*wPct = (gx1 - gx0) / aw * 100.0;
+	if (hPct)
+		*hPct = (gy1 - gy0) / ah * 100.0;
+	if (widgetId)
+		*widgetId = QString::fromStdString(c.goalId);
 	return true;
 }
 

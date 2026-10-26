@@ -63,6 +63,11 @@ const Note k280[] = {
 	{"✏️", "One title, every platform",
 	 "Change your stream title and category on Twitch and Kick at once from the Multistream dock (Pro)."},
 };
+const Note k2102[] = {
+	{"🎯", "Finds your overlays more reliably",
+	 "GoalForgeX now recognises your goal and alert sources in OBS even when you added them by hand or put them "
+	 "inside a nested scene, and tells the site exactly where they sit — so on-screen effects line up."},
+};
 const Note k2100[] = {
 	{"🎨", "Switch presets from OBS",
 	 "New Presets card on the Live tab: pick one of your saved Sub Goal or Follower Goal looks and hit Apply — it "
@@ -139,6 +144,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"2.10.2", "October 2026", k2102, static_cast<int>(std::size(k2102))},
 	{"2.10.1", "October 2026", k2100, static_cast<int>(std::size(k2100))},
 	{"2.9.1", "October 2026", k291, static_cast<int>(std::size(k291))},
 	{"2.9.0", "October 2026", k290, static_cast<int>(std::size(k290))},

@@ -2380,11 +2380,16 @@ void GfxDock::reportCoinAim()
 	const QString account = Auth::instance().credentials().username;
 	if (account.isEmpty())
 		return;
-	double x = 0.0, y = 0.0;
-	QString scene;
-	const bool found = sources::coinTarget(account, &x, &y, &scene);
+	double x = 0.0, y = 0.0, w = 0.0, h = 0.0;
+	QString scene, widget;
+	const bool found = sources::coinTarget(account, &x, &y, &scene, &w, &h, &widget);
 	// half-percent steps: sub-pixel jitter never counts as a move
-	const QString key = found ? QStringLiteral("%1|%2|%3").arg(qRound(x * 2)).arg(qRound(y * 2)).arg(scene)
+	const QString key = found ? QStringLiteral("%1|%2|%3|%4|%5|%6")
+					    .arg(qRound(x * 2))
+					    .arg(qRound(y * 2))
+					    .arg(qRound(w * 2))
+					    .arg(qRound(h * 2))
+					    .arg(scene, widget)
 				  : QStringLiteral("none");
 	if (key == lastAim_)
 		return;
@@ -2395,6 +2400,10 @@ void GfxDock::reportCoinAim()
 		body.insert(QStringLiteral("x"), qRound(x * 10) / 10.0);
 		body.insert(QStringLiteral("y"), qRound(y * 10) / 10.0);
 		body.insert(QStringLiteral("scene"), scene.left(80));
+		// the goal's size + which one, so the site can aim at the number inside it
+		body.insert(QStringLiteral("w"), qRound(w * 10) / 10.0);
+		body.insert(QStringLiteral("h"), qRound(h * 10) / 10.0);
+		body.insert(QStringLiteral("widget"), widget.left(60));
 	}
 	runAsync(
 		this, [body] { return apiPost(QStringLiteral("/api/goal/coin-target"), body); },
