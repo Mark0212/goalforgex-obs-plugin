@@ -445,7 +445,7 @@ QString tag(const char *text, const char *color, qreal pt)
 QTextBlockFormat lineFormat(bool host, bool highlighted, bool firstTimer, bool shaded)
 {
 	QTextBlockFormat f;
-	const int gap = settings().chatCompact ? 1 : 3;
+	const int gap = settings().chatCompact ? 2 : 4;
 	f.setTopMargin(gap);
 	f.setBottomMargin(gap);
 	f.setLeftMargin(6);
@@ -623,7 +623,10 @@ void paintCards(QTextEdit *view, QPainter &p)
 		const QVariant bg = f.property(kCardProp), bar = f.property(kBarProp);
 		if (!bg.isValid() && !bar.isValid())
 			continue;
-		const qreal padV = qBound(0.0, qMin(f.topMargin(), f.bottomMargin()) - 2.0, 6.0);
+		// Rich text collapses neighbouring margins (the gap is the larger of the two,
+		// not the sum), so a card may only use what's left after the gap it needs.
+		const qreal minGap = bar.isValid() ? 6.0 : 2.0;
+		const qreal padV = qBound(0.0, (qMin(f.topMargin(), f.bottomMargin()) - minGap) / 2.0, 6.0);
 		const QRectF r(text.left() - f.leftMargin(), text.top() - padV,
 			       text.width() + f.leftMargin() + f.rightMargin(), text.height() + 2 * padV);
 		const qreal radius = qMin<qreal>(bar.isValid() ? 8.0 : 6.0, r.height() / 2);
@@ -2903,7 +2906,7 @@ QTextBlockFormat GfxChatPanel::blockFormat(const ChatMessage &m, bool odd) const
 	const bool card = s.noticeStyle == QLatin1String("card");
 	f.setLineHeight(card ? 118 : 112, QTextBlockFormat::ProportionalHeight);
 	const QColor tint(noticeTint(m));
-	const int gap = s.chatCompact ? 5 : (card ? 8 : 6);
+	const int gap = s.chatCompact ? 12 : (card ? 16 : 14);
 	f.setTopMargin(gap);
 	f.setBottomMargin(gap);
 	f.setLeftMargin(14); // accent bar + padding

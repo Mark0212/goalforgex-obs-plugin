@@ -63,6 +63,14 @@ const Note k280[] = {
 	{"✏️", "One title, every platform",
 	 "Change your stream title and category on Twitch and Kick at once from the Multistream dock (Pro)."},
 };
+const Note k2112[] = {
+	{"✨", "A brand-new Events feed",
+	 "Every event is now its own card: a coloured tile with the event and platform, the time on the right, what "
+	 "happened, what the viewer wrote and, for gift bombs, who got one. Cards have proper space between them, "
+	 "and right-click still copies names or a thank-you message."},
+	{"💬", "Room to breathe in MultiChat",
+	 "Event cards in MultiChat no longer touch — there's a clear gap between each one."},
+};
 const Note k2111[] = {
 	{"🎮", "Find any game in a couple of letters",
 	 "In the Multistream dock, start typing a category (\"valo\", \"just chat\") and matching games show up "
@@ -163,6 +171,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"2.11.2", "October 2026", k2112, static_cast<int>(std::size(k2112))},
 	{"2.11.1", "October 2026", k2111, static_cast<int>(std::size(k2111))},
 	{"2.11.0", "October 2026", k2110, static_cast<int>(std::size(k2110))},
 	{"2.10.2", "October 2026", k2102, static_cast<int>(std::size(k2102))},

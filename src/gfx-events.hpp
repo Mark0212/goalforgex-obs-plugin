@@ -11,12 +11,12 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include "gfx-state.hpp"
 
+#include <QHash>
 #include <QList>
 #include <QPair>
 #include <QSet>
 #include <QString>
 #include <QStringList>
-#include <QTextBlockFormat>
 #include <QWidget>
 
 #include <functional>
@@ -25,13 +25,15 @@ class QFrame;
 class QLabel;
 class QPoint;
 class QPushButton;
-class QTextBrowser;
+class QScrollArea;
+class QVBoxLayout;
 
 // "Events": everything that happened on stream as a feed of cards, newest at
-// the bottom like a chat — gift bombs (with who got a sub), channel-point
-// redemptions, watch streaks, subs / bits / raids / follows, TikTok gifts and
-// YouTube Super Chats / memberships. The cards are drawn exactly like
-// MultiChat's event notices, so a raid looks the same in both places.
+// the top — gift bombs (with who got a sub), channel-point redemptions, watch
+// streaks, subs / bits / raids / follows, TikTok gifts and YouTube Super Chats /
+// memberships. Each event is its own card widget: a coloured tile with the
+// event's emoji (platform badge in the corner), its label + time, the headline,
+// what the viewer wrote, and a gift bomb's recipients.
 // Fed by the /api/obs/state poll (and nudged by the MultiChat long-poll).
 class GfxEventsPanel : public QWidget {
 public:
@@ -73,31 +75,29 @@ private:
 	bool shown(const gfx::FeedEvent &e) const;
 	QString group(const gfx::FeedEvent &e) const;
 	Card describe(const gfx::FeedEvent &e) const;
-	QString cardHtml(const gfx::FeedEvent &e) const;
-	QTextBlockFormat cardFormat(const gfx::FeedEvent &e) const;
-	void appendCard(const gfx::FeedEvent &e);  // at the bottom (rebuild walks newest → oldest)
-	void prependCard(const gfx::FeedEvent &e); // a new event, at the top
+	QWidget *makeCard(const gfx::FeedEvent &e);
+	void clearCards();
 	void showPlaceholder();
 	void renderTally();
 	void renderNotice();
-	void showMenu(const QPoint &pos);
+	void showMenu(qint64 seq, const QPoint &globalPos);
 	const gfx::FeedEvent *eventBySeq(qint64 seq) const;
 	bool autoScrolling() const;
 	void scrollToNewest(); // newest events are at the top
 	void updateJump();
 
 	QList<gfx::FeedEvent> events_; // oldest → newest, capped
-	QList<qint64> shownSeq_;       // block n of the feed shows the event with this seq
 	QSet<qint64> toggled_;         // gift bombs whose recipient list was opened / closed by hand
 	QString filter_ = QStringLiteral("all");
 	QString cpStatus_;
 	QString soStatus_;
 	QString htStatus_;
-	qint64 nextSeq_ = 1;        // panel-local ids — a server that restarts its feed can reuse seq numbers
-	bool seenGiftBomb_ = false; // server sends gift-bomb cards → hide the duplicate "gift subs" alert card
-	bool placeholder_ = true;
-	bool follow_ = true; // pinned to the top (newest)
-	int fromBottom_ = 0; // scrolled away: distance from the bottom the view holds
+	qint64 nextSeq_ = 1;             // panel-local ids — a server that restarts its feed can reuse seq numbers
+	bool seenGiftBomb_ = false;      // server sends gift-bomb cards → hide the duplicate "gift subs" alert card
+	int shownCount_ = 0;             // cards in the list
+	QHash<qint64, QWidget *> cards_; // seq → its card (a gift bomb filling in swaps just its own)
+	bool follow_ = true;             // pinned to the top (newest)
+	int fromBottom_ = 0;             // scrolled away: distance from the bottom the view holds
 	int programmatic_ = 0;
 	int pendingNew_ = 0;
 
@@ -108,6 +108,9 @@ private:
 	QLabel *tileSupport_ = nullptr;
 	QLabel *tilePoints_ = nullptr;
 	QLabel *tileStreaks_ = nullptr;
-	QTextBrowser *view_ = nullptr;
+	QScrollArea *scroll_ = nullptr;
+	QWidget *list_ = nullptr;
+	QVBoxLayout *listLay_ = nullptr; // [placeholder] [cards, newest first] [stretch]
+	QLabel *placeholderLbl_ = nullptr;
 	QPushButton *jump_ = nullptr;
 };

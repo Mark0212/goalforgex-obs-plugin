@@ -14,13 +14,12 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-settings.hpp"
 #include "gfx-theme.hpp"
 
-#include <QAbstractTextDocumentLayout>
 #include <QAction>
 #include <QClipboard>
 #include <QColor>
 #include <QDateTime>
 #include <QDesktopServices>
-#include <QFontInfo>
+#include <QFont>
 #include <QFrame>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -31,16 +30,14 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QPaintEvent>
 #include <QPoint>
 #include <QPushButton>
+#include <QPixmap>
 #include <QRectF>
 #include <QRegularExpression>
+#include <QScrollArea>
+#include <QTextDocumentFragment>
 #include <QScrollBar>
 #include <QSizePolicy>
 #include <QStringList>
-#include <QTextBlock>
-#include <QTextBrowser>
-#include <QTextCharFormat>
-#include <QTextCursor>
-#include <QTextDocument>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -49,8 +46,6 @@ using namespace gfx;
 namespace {
 
 constexpr int kKeep = 300; // events kept in the list
-// Block property: accent bar colour, painted down a card's left edge (same as MultiChat).
-constexpr int kBarProp = QTextFormat::UserProperty + 7;
 
 const char *const kFilters[][2] = {
 	{"all", "All"},       {"gifts", "Subs & gifts"}, {"support", "Support"},
@@ -83,31 +78,36 @@ QString trailingParen(const QString &text)
 	return m.hasMatch() ? m.captured(1).trimmed() : QString();
 }
 
-// The feed: platform icons as gfx:<platform>/<px>, plus each card's accent bar.
-class EventsView : public QTextBrowser {
-public:
-	explicit EventsView(QWidget *parent) : QTextBrowser(parent) {}
-
-protected:
-	void paintEvent(QPaintEvent *e) override
-	{
-		// Rounded cards + accent bar under the text (shared with MultiChat).
-		{
-			QPainter p(viewport());
-			notice::paintCards(this, p);
-		}
-		QTextBrowser::paintEvent(e);
+// The tile on the left of a card: the event's emoji on a wash of its colour,
+// with the platform's icon in the corner.
+QPixmap eventTile(const QString &emoji, const QColor &color, const QString &platform, int px, qreal dpr)
+{
+	QPixmap pm(qMax(1, qRound(px * dpr)), qMax(1, qRound(px * dpr)));
+	pm.setDevicePixelRatio(dpr);
+	pm.fill(Qt::transparent);
+	QPainter p(&pm);
+	p.setRenderHint(QPainter::Antialiasing, true);
+	p.setRenderHint(QPainter::TextAntialiasing, true);
+	const QRectF r(0, 0, px, px);
+	const QColor base(theme::mapColor(QStringLiteral("#101217")));
+	p.setPen(Qt::NoPen);
+	p.setBrush(notice::mix(base, color, 0.26));
+	p.drawRoundedRect(r, px * 0.3, px * 0.3);
+	QFont f;
+	f.setPixelSize(qMax(8, qRound(px * 0.48)));
+	p.setFont(f);
+	p.setPen(QColor(Qt::white));
+	p.drawText(r, Qt::AlignCenter, emoji);
+	if (!platform.isEmpty()) {
+		const int ip = qMax(8, qRound(px * 0.4));
+		const QRectF ir(px - ip - 1, px - ip - 1, ip, ip);
+		p.setBrush(base);
+		p.drawEllipse(ir.adjusted(-1.5, -1.5, 1.5, 1.5));
+		p.drawImage(ir, notice::platformIcon(platform, ip, dpr));
 	}
-	QVariant loadResource(int type, const QUrl &name) override
-	{
-		if (type == QTextDocument::ImageResource && name.scheme() == QLatin1String("gfx")) {
-			const QStringList parts = name.path().split(QLatin1Char('/'));
-			const int px = parts.size() > 1 ? qBound(8, parts.at(1).toInt(), 48) : 15;
-			return QVariant::fromValue(notice::platformIcon(parts.value(0), px, devicePixelRatioF()));
-		}
-		return QTextBrowser::loadResource(type, name);
-	}
-};
+	p.end();
+	return pm;
+}
 
 } // namespace
 
@@ -194,43 +194,40 @@ void GfxEventsPanel::buildUi()
 			QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/account")));
 	});
 
-	// ── The feed: same frame and cards as MultiChat ──
-	view_ = new EventsView(this);
-	view_->setObjectName(QStringLiteral("gfxChatView"));
-	view_->setOpenLinks(false);
-	view_->setReadOnly(true);
-	view_->setContextMenuPolicy(Qt::CustomContextMenu);
-	view_->setMinimumHeight(160);
-	view_->document()->setDocumentMargin(6);
-	root->addWidget(view_, 1);
-	connect(view_, &QWidget::customContextMenuRequested, this, [this](const QPoint &p) { showMenu(p); });
-	// toggle:<seq> — show / hide a gift bomb's recipients.
-	connect(view_, &QTextBrowser::anchorClicked, this, [this](const QUrl &u) {
-		if (u.scheme() != QLatin1String("toggle"))
-			return;
-		bool ok = false;
-		const qint64 seq = u.path().toLongLong(&ok);
-		if (!ok)
-			return;
-		if (toggled_.contains(seq))
-			toggled_.remove(seq);
-		else
-			toggled_.insert(seq);
-		rebuild();
-	});
-	QScrollBar *vsb = view_->verticalScrollBar();
+	// ── The feed: one card widget per event, newest at the top ──
+	scroll_ = new QScrollArea(this);
+	scroll_->setObjectName(QStringLiteral("gfxEvScroll"));
+	scroll_->setWidgetResizable(true);
+	scroll_->setFrameShape(QFrame::NoFrame);
+	scroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+	scroll_->setMinimumHeight(160);
+	list_ = new QWidget(scroll_);
+	list_->setObjectName(QStringLiteral("gfxEvList"));
+	listLay_ = new QVBoxLayout(list_);
+	listLay_->setContentsMargins(0, 0, 4, 4);
+	listLay_->setSpacing(6);
+	placeholderLbl_ = new QLabel(list_);
+	placeholderLbl_->setObjectName(QStringLiteral("gfxMuted"));
+	placeholderLbl_->setWordWrap(true);
+	placeholderLbl_->setAlignment(Qt::AlignCenter);
+	placeholderLbl_->setContentsMargins(12, 24, 12, 12);
+	listLay_->addWidget(placeholderLbl_);
+	listLay_->addStretch(1);
+	scroll_->setWidget(list_);
+	root->addWidget(scroll_, 1);
+	QScrollBar *vsb = scroll_->verticalScrollBar();
 	// Newest events are at the TOP. follow_ = pinned to the top; scrolled down
 	// reading older ones, the view holds its distance from the bottom, so cards
 	// landing above never move what the streamer is reading.
 	connect(vsb, &QScrollBar::rangeChanged, this, [this](int min, int max) {
 		++programmatic_;
-		view_->verticalScrollBar()->setValue(follow_ ? min : qMax(min, max - fromBottom_));
+		scroll_->verticalScrollBar()->setValue(follow_ ? min : qMax(min, max - fromBottom_));
 		--programmatic_;
 	});
 	connect(vsb, &QScrollBar::valueChanged, this, [this](int v) {
 		if (programmatic_)
 			return;
-		QScrollBar *sb = view_->verticalScrollBar();
+		QScrollBar *sb = scroll_->verticalScrollBar();
 		fromBottom_ = sb->maximum() - v;
 		follow_ = v <= sb->minimum() + 4;
 		if (follow_)
@@ -245,7 +242,7 @@ void GfxEventsPanel::buildUi()
 	jump_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
 	jump_->hide();
 	// Above the feed — new events land at the top, so that's where "↑ N new" points.
-	root->insertWidget(root->indexOf(view_), jump_);
+	root->insertWidget(root->indexOf(scroll_), jump_);
 	connect(jump_, &QPushButton::clicked, this, [this] {
 		follow_ = true;
 		pendingNew_ = 0;
@@ -556,63 +553,72 @@ GfxEventsPanel::Card GfxEventsPanel::describe(const FeedEvent &e) const
 	return c;
 }
 
-// Built exactly like MultiChat's noticeHtml() — same pill, sizes, spacing and
-// Settings → Event notices look (card / strip / minimal) and colour.
-QString GfxEventsPanel::cardHtml(const FeedEvent &e) const
+QWidget *GfxEventsPanel::makeCard(const FeedEvent &e)
 {
 	const Settings &s = settings();
 	const Card c = describe(e);
 	const notice::Look lk = notice::look(c.type);
 	const QString icon = c.pillIcon.isEmpty() ? lk.icon : c.pillIcon;
 	const QString label = c.pillLabel.isEmpty() ? lk.label : c.pillLabel;
-	const QColor evColor(c.pillColor.isEmpty() ? lk.color : c.pillColor);
-	const bool card = s.noticeStyle == QLatin1String("card");
-	const bool minimal = s.noticeStyle == QLatin1String("minimal");
-	view_->ensurePolished();
-	const qreal fontPt = QFontInfo(view_->font()).pointSizeF();
-	const qreal base = fontPt > 0 ? fontPt : 9.0;
-	const qreal tagPt = qMax<qreal>(6.0, base * 0.78);
-	const qreal smallPt = qMax<qreal>(6.5, base * 0.88);
-	const int iconPx = qBound(12, qRound(base * 1.65), 32);
-	const QString soft = minimal ? QStringLiteral("#9aa1b0") : QStringLiteral("#d6d9e0");
+	const QColor color(c.pillColor.isEmpty() ? lk.color : c.pillColor);
+	const bool compact = s.chatCompact;
+	const qint64 seq = e.seq;
 
-	QString h;
-	if (s.chatIcons && !c.platform.isEmpty())
-		h += QStringLiteral("<img src='gfx:%1/%2' width='%2' height='%2' style='vertical-align:middle'>&nbsp;")
-			     .arg(c.platform)
-			     .arg(iconPx);
-	if (minimal) {
-		h += icon + QStringLiteral("&nbsp;");
-	} else {
-		h += QStringLiteral("<span style='color:%1;font-size:%2pt;font-weight:800;'>%3&nbsp;%4</span>"
-				    "<span style='color:#5b6270;font-size:%5pt;'>&nbsp;&nbsp;·&nbsp;&nbsp;%6</span>")
-			     .arg(evColor.name(), QString::number(tagPt, 'f', 1), icon, label,
-				  QString::number(smallPt, 'f', 1), fmtTime(e.at));
-		h += card ? QString() : QStringLiteral("&nbsp;&nbsp;");
-	}
-	const QString head = minimal ? QStringLiteral("<span style='color:%1'>%2</span>").arg(soft, c.head) : c.head;
-	const QString indent = QStringLiteral("<br>");
-	h += card ? indent + head : head;
+	auto *card = new QFrame(list_);
+	card->setObjectName(QStringLiteral("gfxEvCard"));
+	card->setContextMenuPolicy(Qt::CustomContextMenu);
+	connect(card, &QWidget::customContextMenuRequested, this,
+		[this, card, seq](const QPoint &p) { showMenu(seq, card->mapToGlobal(p)); });
+	auto *h = new QHBoxLayout(card);
+	h->setContentsMargins(10, compact ? 6 : 9, 10, compact ? 6 : 9);
+	h->setSpacing(10);
+	const int tilePx = compact ? 28 : 36;
+	auto *tile = new QLabel(card);
+	tile->setFixedSize(tilePx, tilePx);
+	tile->setPixmap(eventTile(icon, color, s.chatIcons ? c.platform : QString(), tilePx, devicePixelRatioF()));
+	h->addWidget(tile, 0, Qt::AlignTop);
+
+	auto *col = new QVBoxLayout();
+	col->setContentsMargins(0, 0, 0, 0);
+	col->setSpacing(compact ? 1 : 3);
+	auto *top = new QHBoxLayout();
+	top->setSpacing(6);
+	auto *what = new QLabel(
+		QStringLiteral("<span style='color:%1'>%2</span>").arg(color.name(), label.toHtmlEscaped()), card);
+	what->setObjectName(QStringLiteral("gfxEvLabel"));
+	what->setTextFormat(Qt::RichText);
+	auto *when = new QLabel(fmtTime(e.at), card);
+	when->setObjectName(QStringLiteral("gfxEvTime"));
+	top->addWidget(what);
+	top->addStretch(1);
+	top->addWidget(when);
+	col->addLayout(top);
+	const auto text = [card, col](const QString &html, const char *name) {
+		auto *l = new QLabel(html, card);
+		l->setObjectName(QString::fromLatin1(name));
+		l->setTextFormat(Qt::RichText);
+		l->setWordWrap(true);
+		l->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+		col->addWidget(l);
+		return l;
+	};
+	text(c.head, "gfxEvHead");
 	if (!c.message.trimmed().isEmpty()) {
 		QString msg = c.message;
 		msg.replace(QLatin1Char('\n'), QLatin1Char(' '));
-		if (card)
-			h += indent + QStringLiteral("<span style='color:#c9ced8'>%1</span>").arg(msg.toHtmlEscaped());
-		else
-			h += QStringLiteral(" <span style='color:%1'>— %2</span>")
-				     .arg(minimal ? soft : QStringLiteral("#e8eaf0"), msg.toHtmlEscaped());
+		text(QStringLiteral("“%1”").arg(msg.toHtmlEscaped()), "gfxEvMsg");
 	}
 	// Gift bomb: who got one — open by default (Settings → Events), click to show / hide.
-	if (c.bomb && card) {
-		const bool open = s.evAutoExpand != toggled_.contains(e.seq);
+	if (c.bomb) {
+		const bool open = s.evAutoExpand != toggled_.contains(seq);
 		QString line;
 		if (c.names.isEmpty()) {
 			line = e.partial ? QStringLiteral("Handing out gifts…")
 					 : QStringLiteral("Recipients weren't reported for this one");
 		} else if (!open) {
-			line = QStringLiteral("<a href='toggle:%1' style='color:#7aa2ff;text-decoration:none;'>▸ Show "
-					      "who got one (%2)</a>")
-				       .arg(e.seq)
+			line = QStringLiteral(
+				       "<a href='toggle' style='color:#7aa2ff;text-decoration:none;'>▸ Show who got one "
+				       "(%1)</a>")
 				       .arg(c.names.size());
 		} else {
 			QStringList esc;
@@ -623,136 +629,62 @@ QString GfxEventsPanel::cardHtml(const FeedEvent &e) const
 				line += e.partial ? QStringLiteral(" … +%1 on the way").arg(c.missing)
 						  : QStringLiteral(" · +%1 not reported").arg(c.missing);
 			line += QStringLiteral(
-					"&nbsp;&nbsp;<a href='toggle:%1' style='color:#7aa2ff;text-decoration:none;'>"
-					"hide</a>")
-					.arg(e.seq);
+				"&nbsp;&nbsp;<a href='toggle' style='color:#7aa2ff;text-decoration:none;'>hide</a>");
 		}
-		h += indent + QStringLiteral("<span style='color:#9aa1b0;font-size:%1pt'>%2</span>")
-				      .arg(QString::number(smallPt, 'f', 1), line);
+		QLabel *names = text(line, "gfxEvNames");
+		connect(names, &QLabel::linkActivated, this, [this, seq](const QString &) {
+			if (toggled_.contains(seq))
+				toggled_.remove(seq);
+			else
+				toggled_.insert(seq);
+			rebuild();
+		});
 	}
-	return h;
+	h->addLayout(col, 1);
+	cards_.insert(seq, card);
+	return card;
 }
 
-QTextBlockFormat GfxEventsPanel::cardFormat(const FeedEvent &e) const
+void GfxEventsPanel::clearCards()
 {
-	const Settings &s = settings();
-	QTextBlockFormat f;
-	f.setLineHeight(112, QTextBlockFormat::ProportionalHeight);
-	if (s.noticeStyle == QLatin1String("minimal")) {
-		f.setTopMargin(s.chatCompact ? 1 : 3);
-		f.setBottomMargin(s.chatCompact ? 1 : 3);
-		f.setLeftMargin(6);
-		return f;
+	// Keep the placeholder (first) and the stretch (last).
+	while (listLay_->count() > 2) {
+		QLayoutItem *it = listLay_->takeAt(1);
+		if (QWidget *w = it->widget()) {
+			w->hide();
+			w->deleteLater();
+		}
+		delete it;
 	}
-	const Card c = describe(e);
-	const QString evColor = c.pillColor.isEmpty() ? notice::look(c.type).color : c.pillColor;
-	const QColor tint(c.platform.isEmpty() ? evColor : notice::tint(c.platform, evColor));
-	const bool card = s.noticeStyle == QLatin1String("card");
-	if (card)
-		f.setLineHeight(118, QTextBlockFormat::ProportionalHeight);
-	const int gap = s.chatCompact ? 5 : (card ? 8 : 6);
-	f.setTopMargin(gap);
-	f.setBottomMargin(gap);
-	f.setLeftMargin(14); // accent bar + padding
-	f.setRightMargin(10);
-	f.setProperty(notice::kCardProp,
-		      notice::mix(QColor(theme::mapColor(QStringLiteral("#101217"))), tint, card ? 0.13 : 0.09));
-	f.setProperty(kBarProp, tint);
-	return f;
-}
-
-// ── Feed ────────────────────────────────────────────────────────
-
-void GfxEventsPanel::appendCard(const FeedEvent &e)
-{
-	++programmatic_;
-	QTextDocument *doc = view_->document();
-	if (placeholder_) {
-		doc->clear();
-		shownSeq_.clear();
-		placeholder_ = false;
-	}
-	const QTextBlockFormat fmt = cardFormat(e);
-	QTextCursor c(doc);
-	c.movePosition(QTextCursor::End);
-	if (!shownSeq_.isEmpty())
-		c.insertBlock(fmt, QTextCharFormat());
-	c.setCharFormat(QTextCharFormat());
-	c.insertHtml(cardHtml(e));
-	c.setBlockFormat(fmt);
-	shownSeq_.push_back(e.seq);
-	--programmatic_;
-}
-
-// A new event goes in at the TOP (newest first). Splits in front of the current
-// first card: that card moves to block 2 keeping its own format, block 1 is the
-// new one — so shownSeq_[n] still matches block n for the right-click menu.
-void GfxEventsPanel::prependCard(const FeedEvent &e)
-{
-	++programmatic_;
-	QTextDocument *doc = view_->document();
-	if (placeholder_) {
-		doc->clear();
-		shownSeq_.clear();
-		placeholder_ = false;
-	}
-	const QTextBlockFormat fmt = cardFormat(e);
-	QTextCursor c(doc);
-	c.movePosition(QTextCursor::Start);
-	if (!shownSeq_.isEmpty()) {
-		c.insertBlock(doc->firstBlock().blockFormat(), QTextCharFormat());
-		c.movePosition(QTextCursor::Start);
-	}
-	c.setBlockFormat(fmt);
-	c.setCharFormat(QTextCharFormat());
-	c.insertHtml(cardHtml(e));
-	c.setBlockFormat(fmt);
-	shownSeq_.prepend(e.seq);
-	--programmatic_;
+	shownCount_ = 0;
+	cards_.clear();
 }
 
 void GfxEventsPanel::showPlaceholder()
 {
-	++programmatic_;
-	QTextDocument *doc = view_->document();
-	doc->clear();
-	shownSeq_.clear();
-	placeholder_ = true;
-	const QString text =
+	placeholderLbl_->setText(
 		events_.isEmpty()
 			? QStringLiteral(
 				  "Nothing yet — gift bombs, channel-point redemptions, watch streaks, subs, raids "
 				  "and TikTok / YouTube support show up here the moment they happen.")
-			: QStringLiteral("Nothing matches this filter yet.");
-	QTextBlockFormat f;
-	f.setAlignment(Qt::AlignCenter);
-	f.setTopMargin(24);
-	QTextCursor c(doc);
-	c.insertHtml(QStringLiteral("<span style='color:#6b7280'>%1</span>").arg(text.toHtmlEscaped()));
-	c.setBlockFormat(f);
-	--programmatic_;
+			: QStringLiteral("Nothing matches this filter yet."));
+	placeholderLbl_->setVisible(shownCount_ == 0);
 }
 
 void GfxEventsPanel::rebuild()
 {
-	QScrollBar *sb = view_->verticalScrollBar();
+	QScrollBar *sb = scroll_->verticalScrollBar();
 	++programmatic_;
-	{
-		QTextCursor batch(view_->document());
-		batch.beginEditBlock();
-		view_->document()->clear();
-		shownSeq_.clear();
-		placeholder_ = false;
-		// Newest first: walk the (oldest → newest) list backwards.
-		for (qsizetype i = events_.size() - 1; i >= 0; --i)
-			if (shown(events_.at(i)))
-				appendCard(events_.at(i));
-		if (shownSeq_.isEmpty())
-			showPlaceholder();
-		batch.endEditBlock();
-	}
-	--programmatic_;
-	++programmatic_;
+	list_->setUpdatesEnabled(false);
+	clearCards();
+	// Newest first: walk the (oldest → newest) list backwards.
+	for (qsizetype i = events_.size() - 1; i >= 0; --i)
+		if (shown(events_.at(i))) {
+			listLay_->insertWidget(listLay_->count() - 1, makeCard(events_.at(i)));
+			++shownCount_;
+		}
+	showPlaceholder();
+	list_->setUpdatesEnabled(true);
 	sb->setValue(follow_ ? sb->minimum() : qMax(sb->minimum(), sb->maximum() - fromBottom_));
 	--programmatic_;
 	renderTally();
@@ -763,7 +695,7 @@ int GfxEventsPanel::addEvents(const QList<FeedEvent> &events)
 {
 	int visible = 0;
 	bool needRebuild = false;
-	QList<qint64> fresh;
+	QList<qint64> fresh, updated;
 	for (const FeedEvent &e : events) {
 		// A gift bomb filling in (2.7+ server): replace its card where it is.
 		if (!e.bombId.isEmpty()) {
@@ -776,7 +708,7 @@ int GfxEventsPanel::addEvents(const QList<FeedEvent> &events)
 				upd.seq = events_.at(at).seq; // keep its place and its open / closed state
 				upd.at = events_.at(at).at;
 				events_[at] = upd;
-				needRebuild = true;
+				updated.push_back(upd.seq);
 				continue; // not a new event — no unread count
 			}
 		}
@@ -792,9 +724,16 @@ int GfxEventsPanel::addEvents(const QList<FeedEvent> &events)
 			fresh.push_back(ev.seq);
 		}
 	}
+	// Over the cap: the oldest event (and its card, at the bottom) goes.
 	while (events_.size() > kKeep) {
+		if (QWidget *w = cards_.take(events_.first().seq)) {
+			listLay_->removeWidget(w);
+			w->hide();
+			w->deleteLater();
+			--shownCount_;
+		}
+		toggled_.remove(events_.first().seq);
 		events_.removeFirst();
-		needRebuild = true;
 	}
 	if (needRebuild) {
 		if (!follow_)
@@ -802,20 +741,29 @@ int GfxEventsPanel::addEvents(const QList<FeedEvent> &events)
 		rebuild();
 		return visible;
 	}
-	{
-		QTextCursor batch(view_->document());
-		batch.beginEditBlock();
-		for (const qint64 seq : fresh)
-			if (const FeedEvent *e = eventBySeq(seq))
-				prependCard(*e);
-		batch.endEditBlock();
+	// A gift bomb filling in: swap just its card, where it is.
+	for (const qint64 seq : updated) {
+		QWidget *old = cards_.value(seq);
+		const FeedEvent *e = eventBySeq(seq);
+		const int idx = old ? listLay_->indexOf(old) : -1;
+		if (!e || idx < 0)
+			continue;
+		listLay_->insertWidget(idx, makeCard(*e));
+		listLay_->removeWidget(old);
+		old->hide();
+		old->deleteLater();
 	}
+	// New events go in at the top, oldest of the batch first so the newest ends up on top.
+	for (const qint64 seq : fresh)
+		if (const FeedEvent *e = eventBySeq(seq)) {
+			listLay_->insertWidget(1, makeCard(*e));
+			++shownCount_;
+		}
 	if (!follow_)
 		pendingNew_ += visible;
 	else
 		scrollToNewest();
-	if (shownSeq_.isEmpty())
-		showPlaceholder();
+	showPlaceholder();
 	renderTally();
 	updateJump();
 	return visible;
@@ -837,7 +785,7 @@ bool GfxEventsPanel::autoScrolling() const
 void GfxEventsPanel::scrollToNewest()
 {
 	++programmatic_;
-	view_->verticalScrollBar()->setValue(view_->verticalScrollBar()->minimum());
+	scroll_->verticalScrollBar()->setValue(scroll_->verticalScrollBar()->minimum());
 	--programmatic_;
 }
 
@@ -880,20 +828,17 @@ void GfxEventsPanel::renderTally()
 
 // ── Right-click ─────────────────────────────────────────────────
 
-void GfxEventsPanel::showMenu(const QPoint &pos)
+void GfxEventsPanel::showMenu(qint64 seq, const QPoint &globalPos)
 {
-	if (placeholder_)
-		return;
-	const int block = view_->cursorForPosition(pos).block().blockNumber();
-	if (block < 0 || block >= shownSeq_.size())
-		return;
-	const qint64 seq = shownSeq_.at(block);
 	const FeedEvent *e = eventBySeq(seq);
 	if (!e)
 		return;
 	const QString who = e->user;
 	const QStringList names = e->recipients;
-	const QString line = view_->document()->findBlockByNumber(block).text().simplified();
+	const Card card = describe(*e);
+	QString line = QTextDocumentFragment::fromHtml(card.head).toPlainText().simplified();
+	if (!card.message.trimmed().isEmpty())
+		line += QStringLiteral(" — ") + card.message.simplified();
 	QMenu menu(this);
 	if (!who.isEmpty())
 		connect(menu.addAction(QStringLiteral("📋   Copy “%1”").arg(who)), &QAction::triggered, this,
@@ -926,7 +871,7 @@ void GfxEventsPanel::showMenu(const QPoint &pos)
 	menu.addSeparator();
 	connect(menu.addAction(QStringLiteral("📋   Copy this event")), &QAction::triggered, this,
 		[line] { QGuiApplication::clipboard()->setText(line); });
-	menu.exec(view_->viewport()->mapToGlobal(pos));
+	menu.exec(globalPos);
 }
 
 void GfxEventsPanel::clearEvents()

@@ -427,6 +427,14 @@ QListWidget::item:hover:!selected { background: #1d2129; }
 QListWidget::item:selected { background: #2a2212; color: #ffffff; border: 1px solid #6b4d14; }
 QListWidget#gfxActivity::item { padding: 4px 6px; color: #c9ced8; }
 QListWidget#gfxGameResults { background: #0f1115; border-color: #2b313b; padding: 3px; }
+/* Events dock cards */
+QFrame#gfxEvCard { background: #161920; border: 1px solid #22262f; border-radius: 11px; }
+QFrame#gfxEvCard:hover { background: #191c24; border-color: #313744; }
+QLabel#gfxEvLabel { font-size: 7.5pt; font-weight: 800; }
+QLabel#gfxEvTime { color: #6b7280; font-size: 7.5pt; }
+QLabel#gfxEvHead { color: #d6d9e0; }
+QLabel#gfxEvMsg { color: #9aa1b0; }
+QLabel#gfxEvNames { color: #8a91a0; font-size: 8pt; }
 QListWidget#gfxGameResults::item { padding: 3px 6px; }
 QListWidget#gfxGameResults::item:hover { background: #20242d; }
 
