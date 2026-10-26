@@ -1112,6 +1112,7 @@ void GfxDock::setState(State s, const QString &message, bool isError)
 		stateTimer_.start();
 		aimTimer_.start();
 		lastAim_.clear(); // (re)connected: tell the site where things are now
+		aimOff_ = false;  // …and ask again even if the site said no last time
 		scheduleChat(300);
 	} else {
 		stateTimer_.stop();

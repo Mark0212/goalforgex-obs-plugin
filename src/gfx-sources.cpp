@@ -126,10 +126,14 @@ obs_source_t *find(const QString &account, const QString &widgetId)
 }
 
 // ── Alert Coin Drop aim ────────────────────────────────────────────────
+static QString widgetIdForUrl(const QUrl &u);
+static bool goalforgexHost(const QString &host);
+
 namespace {
 
 struct AimCtx {
 	const char *account = "";
+	int depth = 0; // nested scenes / groups being walked
 	bool goal = false;
 	bool alerts = false;
 	struct matrix4 goalM;
@@ -141,7 +145,8 @@ struct AimGroup {
 	struct matrix4 parent;
 };
 
-// This account's widget id for a source we created / adopted ("" = not ours).
+// This account's widget id for a GoalForgeX Browser Source ("" = not ours):
+// one we created / adopted, or one added by hand — recognised by its URL.
 std::string widgetOf(obs_source_t *src, const char *account)
 {
 	if (!src)
@@ -149,14 +154,23 @@ std::string widgetOf(obs_source_t *src, const char *account)
 	const char *id = obs_source_get_unversioned_id(src);
 	if (!id || strcmp(id, kBrowserId) != 0)
 		return std::string();
-	obs_data_t *priv = obs_source_get_private_settings(src);
-	if (!priv)
-		return std::string();
 	std::string w;
-	if (strcmp(obs_data_get_string(priv, kAccountKey), account) == 0)
-		w = obs_data_get_string(priv, kWidgetKey);
-	obs_data_release(priv);
-	return w;
+	bool tagged = false;
+	if (obs_data_t *priv = obs_source_get_private_settings(src)) {
+		tagged = obs_data_get_string(priv, kWidgetKey)[0] != '\0';
+		if (strcmp(obs_data_get_string(priv, kAccountKey), account) == 0)
+			w = obs_data_get_string(priv, kWidgetKey);
+		obs_data_release(priv);
+	}
+	if (tagged)
+		return w;
+	const QUrl u(sourceUrl(src));
+	if (!u.isValid() || !goalforgexHost(u.host()))
+		return std::string();
+	if (QUrlQuery(u).queryItemValue(QStringLiteral("id")).compare(QString::fromUtf8(account), Qt::CaseInsensitive) !=
+	    0)
+		return std::string();
+	return widgetIdForUrl(u).toStdString();
 }
 
 void aimItem(obs_sceneitem_t *item, const struct matrix4 *parent, AimCtx *c);
@@ -175,13 +189,18 @@ bool aimSceneCb(obs_scene_t *, obs_sceneitem_t *item, void *param)
 }
 
 // Records the box transform (unit square → canvas) of the first visible goal
-// and alerts source; a group's children are composed with the group's own
-// draw transform (row vectors: child × parent).
+// and alerts source; the children of a group or a nested scene (a scene added
+// as a source) are composed with its own draw transform (row vectors: child ×
+// parent).
 void aimItem(obs_sceneitem_t *item, const struct matrix4 *parent, AimCtx *c)
 {
 	if (!obs_sceneitem_visible(item))
 		return;
-	if (obs_sceneitem_is_group(item)) {
+	obs_scene_t *nested = obs_sceneitem_is_group(item) ? nullptr
+							   : obs_scene_from_source(obs_sceneitem_get_source(item));
+	if (obs_sceneitem_is_group(item) || nested) {
+		if (c->depth >= 8)
+			return;
 		AimGroup g;
 		g.aim = c;
 		struct matrix4 own;
@@ -190,7 +209,12 @@ void aimItem(obs_sceneitem_t *item, const struct matrix4 *parent, AimCtx *c)
 			matrix4_mul(&g.parent, &own, parent);
 		else
 			g.parent = own;
-		obs_sceneitem_group_enum_items(item, aimGroupCb, &g);
+		++c->depth;
+		if (nested)
+			obs_scene_enum_items(nested, aimGroupCb, &g);
+		else
+			obs_sceneitem_group_enum_items(item, aimGroupCb, &g);
+		--c->depth;
 		return;
 	}
 	const std::string w = widgetOf(obs_sceneitem_get_source(item), c->account);
