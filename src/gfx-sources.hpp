@@ -95,5 +95,12 @@ double scalePercent(obs_sceneitem_t *item);
 void fitToCanvas(obs_sceneitem_t *item);
 bool reload(obs_source_t *source);
 
+// Alert Coin Drop aim (2.10): where this account's Sub Goal (the goal widget or
+// a source pinned to a Sub Goal preset) sits inside its Alerts source in the
+// scene on air — the goal's centre as % of the Alerts source, so the overlay
+// throws its coins dead on. Looks inside groups. False when either isn't
+// visibly in that scene. sceneName is set either way.
+bool coinTarget(const QString &account, double *xPct, double *yPct, QString *sceneName);
+
 } // namespace sources
 } // namespace gfx

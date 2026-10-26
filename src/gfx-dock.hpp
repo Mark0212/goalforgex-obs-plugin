@@ -118,6 +118,7 @@ private:
 	obs_source_t *selectedScene() const; // new reference or nullptr
 	void addSelected();
 	void addPinnedPreset(const QString &presetId); // Live tab → Presets → 📌
+	void reportCoinAim(); // where the Sub Goal sits inside the Alerts source (Alert Coin Drop)
 	void addStarterLayout();
 	void toggleSelected();
 	void removeSelected();
@@ -181,6 +182,9 @@ private:
 	QTimer pollTimer_;
 	QTimer stateTimer_;
 	QTimer updateTimer_;
+	QTimer aimTimer_;     // Alert Coin Drop aim, every few seconds while connected
+	QString lastAim_;     // what was last reported ("" = report next tick)
+	bool aimOff_ = false; // the site doesn't take aim reports (older server) — stop asking
 	QTimer msgClear_;
 	QTimer clockTimer_; // 1 s — the header's ON AIR clock
 	qint64 streamStartMs_ = 0;

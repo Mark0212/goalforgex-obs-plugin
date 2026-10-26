@@ -122,6 +122,8 @@ GfxDock::GfxDock(QWidget *parent) : QWidget(parent), reactions_(this)
 	connect(&stateTimer_, &QTimer::timeout, this, [this] { pollState(); });
 	// Hourly: a release that lands mid-session is downloaded long before the
 	// streamer closes OBS (the check itself is one small cached request).
+	aimTimer_.setInterval(3000);
+	connect(&aimTimer_, &QTimer::timeout, this, [this] { reportCoinAim(); });
 	updateTimer_.setInterval(60 * 60 * 1000);
 	connect(&updateTimer_, &QTimer::timeout, this, [this] { checkForUpdate(); });
 	msgClear_.setSingleShot(true);
@@ -1108,9 +1110,12 @@ void GfxDock::setState(State s, const QString &message, bool isError)
 	if (s == State::Connected) {
 		statusTimer_.start();
 		stateTimer_.start();
+		aimTimer_.start();
+		lastAim_.clear(); // (re)connected: tell the site where things are now
 		scheduleChat(300);
 	} else {
 		stateTimer_.stop();
+		aimTimer_.stop();
 		chatTimer_.stop();
 		if (s != State::NeedsReconnect)
 			statusTimer_.stop();
@@ -2363,6 +2368,43 @@ void GfxDock::addPinnedPreset(const QString &presetId)
 	refreshStatuses();
 }
 
+// Alert Coin Drop: coins burst out of the alert and fly to the Sub Goal. Tell
+// the site where the goal sits inside the Alerts source in the scene on air, so
+// they land dead on — re-checked every 3 s (moved / resized sources) and on
+// every scene switch, sent only when it changes.
+void GfxDock::reportCoinAim()
+{
+	if (aimOff_ || state_ != State::Connected || updateRequired_)
+		return;
+	const QString account = Auth::instance().credentials().username;
+	if (account.isEmpty())
+		return;
+	double x = 0.0, y = 0.0;
+	QString scene;
+	const bool found = sources::coinTarget(account, &x, &y, &scene);
+	// half-percent steps: sub-pixel jitter never counts as a move
+	const QString key = found ? QStringLiteral("%1|%2|%3").arg(qRound(x * 2)).arg(qRound(y * 2)).arg(scene)
+				  : QStringLiteral("none");
+	if (key == lastAim_)
+		return;
+	lastAim_ = key;
+	QJsonObject body;
+	body.insert(QStringLiteral("found"), found);
+	if (found) {
+		body.insert(QStringLiteral("x"), qRound(x * 10) / 10.0);
+		body.insert(QStringLiteral("y"), qRound(y * 10) / 10.0);
+		body.insert(QStringLiteral("scene"), scene.left(80));
+	}
+	runAsync(
+		this, [body] { return apiPost(QStringLiteral("/api/goal/coin-target"), body); },
+		[this](const ApiResult &r) {
+			if (r.http.status == 404 || r.http.status == 403)
+				aimOff_ = true; // older site — nothing to report to
+			else if (!r.ok())
+				lastAim_.clear(); // try again on the next tick
+		});
+}
+
 // One click: alerts + chat box (full canvas), goal top-left, timer top-right.
 void GfxDock::addStarterLayout()
 {
@@ -2594,6 +2636,7 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 	case OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED:
 	case OBS_FRONTEND_EVENT_SCENE_CHANGED:
 		refreshScenes();
+		reportCoinAim(); // a new scene can put the goal somewhere else — re-aim at once
 		break;
 	case OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED:
 		loaded_ = true;
@@ -2666,6 +2709,7 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		catalogueTimer_.stop();
 		pollTimer_.stop();
 		stateTimer_.stop();
+		aimTimer_.stop();
 		updateTimer_.stop();
 		clockTimer_.stop();
 		chatTimer_.stop();

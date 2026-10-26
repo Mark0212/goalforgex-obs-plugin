@@ -13,10 +13,14 @@ the Free Software Foundation; either version 2 of the License, or
 #include <obs-module.h>
 #include <plugin-support.h>
 #include <graphics/vec2.h>
+#include <graphics/vec3.h>
+#include <graphics/matrix4.h>
+#include <obs-frontend-api.h>
 
 #include <QUrl>
 #include <QUrlQuery>
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 
@@ -119,6 +123,142 @@ obs_source_t *find(const QString &account, const QString &widgetId)
 		},
 		&ctx);
 	return ctx.found;
+}
+
+// ── Alert Coin Drop aim ────────────────────────────────────────────────
+namespace {
+
+struct AimCtx {
+	const char *account = "";
+	bool goal = false;
+	bool alerts = false;
+	struct matrix4 goalM;
+	struct matrix4 alertsM;
+};
+
+struct AimGroup {
+	AimCtx *aim;
+	struct matrix4 parent;
+};
+
+// This account's widget id for a source we created / adopted ("" = not ours).
+std::string widgetOf(obs_source_t *src, const char *account)
+{
+	if (!src)
+		return std::string();
+	const char *id = obs_source_get_unversioned_id(src);
+	if (!id || strcmp(id, kBrowserId) != 0)
+		return std::string();
+	obs_data_t *priv = obs_source_get_private_settings(src);
+	if (!priv)
+		return std::string();
+	std::string w;
+	if (strcmp(obs_data_get_string(priv, kAccountKey), account) == 0)
+		w = obs_data_get_string(priv, kWidgetKey);
+	obs_data_release(priv);
+	return w;
+}
+
+void aimItem(obs_sceneitem_t *item, const struct matrix4 *parent, AimCtx *c);
+
+bool aimGroupCb(obs_scene_t *, obs_sceneitem_t *item, void *param)
+{
+	auto *g = static_cast<AimGroup *>(param);
+	aimItem(item, &g->parent, g->aim);
+	return true;
+}
+
+bool aimSceneCb(obs_scene_t *, obs_sceneitem_t *item, void *param)
+{
+	aimItem(item, nullptr, static_cast<AimCtx *>(param));
+	return true;
+}
+
+// Records the box transform (unit square → canvas) of the first visible goal
+// and alerts source; a group's children are composed with the group's own
+// draw transform (row vectors: child × parent).
+void aimItem(obs_sceneitem_t *item, const struct matrix4 *parent, AimCtx *c)
+{
+	if (!obs_sceneitem_visible(item))
+		return;
+	if (obs_sceneitem_is_group(item)) {
+		AimGroup g;
+		g.aim = c;
+		struct matrix4 own;
+		obs_sceneitem_get_draw_transform(item, &own);
+		if (parent)
+			matrix4_mul(&g.parent, &own, parent);
+		else
+			g.parent = own;
+		obs_sceneitem_group_enum_items(item, aimGroupCb, &g);
+		return;
+	}
+	const std::string w = widgetOf(obs_sceneitem_get_source(item), c->account);
+	const bool goal = w == "goal" || w.rfind("preset:gp_", 0) == 0;
+	const bool alerts = w == "alerts";
+	if ((!goal || c->goal) && (!alerts || c->alerts))
+		return; // not ours, or the first one of its kind already won
+	struct matrix4 m;
+	obs_sceneitem_get_box_transform(item, &m);
+	if (parent) {
+		struct matrix4 t;
+		matrix4_mul(&t, &m, parent);
+		m = t;
+	}
+	if (goal) {
+		c->goalM = m;
+		c->goal = true;
+	} else {
+		c->alertsM = m;
+		c->alerts = true;
+	}
+}
+
+// Canvas rectangle of a box transform — min/max of the four corners, so a
+// rotated or flipped source still gives the right area.
+void rectOf(const struct matrix4 *m, double *x0, double *y0, double *x1, double *y1)
+{
+	const float corners[4][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}, {1.0f, 1.0f}};
+	*x0 = *y0 = 1e12;
+	*x1 = *y1 = -1e12;
+	for (int i = 0; i < 4; ++i) {
+		struct vec3 v;
+		struct vec3 o;
+		vec3_set(&v, corners[i][0], corners[i][1], 0.0f);
+		vec3_transform(&o, &v, m);
+		*x0 = std::min(*x0, static_cast<double>(o.x));
+		*y0 = std::min(*y0, static_cast<double>(o.y));
+		*x1 = std::max(*x1, static_cast<double>(o.x));
+		*y1 = std::max(*y1, static_cast<double>(o.y));
+	}
+}
+
+} // namespace
+
+bool coinTarget(const QString &account, double *xPct, double *yPct, QString *sceneName)
+{
+	obs_source_t *scene = obs_frontend_get_current_scene(); // the scene on air (program)
+	if (!scene)
+		return false;
+	const std::string acc = account.toStdString();
+	AimCtx c;
+	c.account = acc.c_str();
+	if (obs_scene_t *s = obs_scene_from_source(scene))
+		obs_scene_enum_items(s, aimSceneCb, &c);
+	if (sceneName)
+		*sceneName = QString::fromUtf8(obs_source_get_name(scene));
+	obs_source_release(scene);
+	if (!c.goal || !c.alerts)
+		return false;
+	double gx0, gy0, gx1, gy1, ax0, ay0, ax1, ay1;
+	rectOf(&c.goalM, &gx0, &gy0, &gx1, &gy1);
+	rectOf(&c.alertsM, &ax0, &ay0, &ax1, &ay1);
+	const double aw = ax1 - ax0, ah = ay1 - ay0;
+	if (aw < 1.0 || ah < 1.0)
+		return false;
+	*xPct = ((gx0 + gx1) / 2.0 - ax0) / aw * 100.0;
+	*yPct = ((gy0 + gy1) / 2.0 - ay0) / ah * 100.0;
+	return true;
 }
 
 obs_sceneitem_t *findItem(obs_source_t *sceneSource, obs_source_t *source)
