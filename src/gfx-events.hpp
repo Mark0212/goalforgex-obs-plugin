@@ -45,6 +45,8 @@ public:
 	void setChannelPointsStatus(const QString &status);
 	// eventsStatus.shoutouts: needs_reconnect → a Reconnect bar (Twitch /shoutout needs a newer login).
 	void setShoutoutStatus(const QString &status);
+	// eventsStatus.hypeTrain: needs_reconnect → the same Reconnect bar (needs channel:read:hype_train).
+	void setHypeTrainStatus(const QString &status);
 	// Settings changed (which kinds are listed, look, colours).
 	void applySettings();
 	// The Reconnect bar's button: the dock fetches a one-time Twitch approve link for this account.
@@ -73,14 +75,15 @@ private:
 	Card describe(const gfx::FeedEvent &e) const;
 	QString cardHtml(const gfx::FeedEvent &e) const;
 	QTextBlockFormat cardFormat(const gfx::FeedEvent &e) const;
-	void appendCard(const gfx::FeedEvent &e);
+	void appendCard(const gfx::FeedEvent &e);  // at the bottom (rebuild walks newest → oldest)
+	void prependCard(const gfx::FeedEvent &e); // a new event, at the top
 	void showPlaceholder();
 	void renderTally();
 	void renderNotice();
 	void showMenu(const QPoint &pos);
 	const gfx::FeedEvent *eventBySeq(qint64 seq) const;
 	bool autoScrolling() const;
-	void scrollToBottom();
+	void scrollToNewest(); // newest events are at the top
 	void updateJump();
 
 	QList<gfx::FeedEvent> events_; // oldest → newest, capped
@@ -89,10 +92,12 @@ private:
 	QString filter_ = QStringLiteral("all");
 	QString cpStatus_;
 	QString soStatus_;
+	QString htStatus_;
 	qint64 nextSeq_ = 1;        // panel-local ids — a server that restarts its feed can reuse seq numbers
 	bool seenGiftBomb_ = false; // server sends gift-bomb cards → hide the duplicate "gift subs" alert card
 	bool placeholder_ = true;
-	bool follow_ = true;
+	bool follow_ = true; // pinned to the top (newest)
+	int fromBottom_ = 0; // scrolled away: distance from the bottom the view holds
 	int programmatic_ = 0;
 	int pendingNew_ = 0;
 

@@ -50,6 +50,10 @@ private:
 	void buildUi();
 	void tick();
 	void rebuildCounters();
+	void syncPresets();
+	void syncPresetBox(QComboBox *box, QPushButton *apply, const QList<gfx::PresetState> &list, QString &sig);
+	void refreshPresetApply(QComboBox *box, QPushButton *apply, const QList<gfx::PresetState> &list);
+	void applyPreset(bool follower);
 	void act(const QString &id, const QJsonValue &arg = QJsonValue());
 	QGroupBox *makeCard(const QString &title, QVBoxLayout **body);
 	QPushButton *lockLine(QWidget *parent, const QString &text);
@@ -106,6 +110,19 @@ private:
 
 	QGroupBox *countersCard_ = nullptr;
 	QVBoxLayout *countersBox_ = nullptr;
+
+	// Presets: switch the Sub Goal / Follower Goal look to a saved preset.
+	QGroupBox *presetsCard_ = nullptr;
+	QWidget *goalPresetRow_ = nullptr;
+	QComboBox *goalPresetBox_ = nullptr;
+	QPushButton *goalPresetApply_ = nullptr;
+	QWidget *folPresetRow_ = nullptr;
+	QComboBox *folPresetBox_ = nullptr;
+	QPushButton *folPresetApply_ = nullptr;
+	QLabel *presetsEmpty_ = nullptr;
+	QPushButton *presetsLock_ = nullptr;
+	QString goalPresetSig_; // ids|names|active the combo was last built from
+	QString folPresetSig_;
 
 	QGroupBox *alertsCard_ = nullptr;
 	QWidget *alertsCtl_ = nullptr;

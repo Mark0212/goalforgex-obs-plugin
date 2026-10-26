@@ -63,6 +63,26 @@ const Note k280[] = {
 	{"✏️", "One title, every platform",
 	 "Change your stream title and category on Twitch and Kick at once from the Multistream dock (Pro)."},
 };
+const Note k2100[] = {
+	{"🎨", "Switch presets from OBS",
+	 "New Presets card on the Live tab: pick one of your saved Sub Goal or Follower Goal looks and hit Apply — it "
+	 "changes on stream right away, and your goal numbers stay put. The one on screen now is marked ✓ (Pro)."},
+	{"📌", "A different look in every scene",
+	 "Hit 📌 next to a preset to add a goal that always shows that look to the scene you're on — e.g. a gold goal "
+	 "in Starting Soon and a neon one in Gameplay, both counting the same live subs. Pinned presets are in the "
+	 "Widgets tab too (Pro)."},
+	{"⬆️", "Newest events on top",
+	 "The Events dock now shows the latest event at the top. Scrolled down reading older ones? New events won't "
+	 "move your place — a “↑ new events” button takes you back up."},
+	{"🚂", "Hype Trains",
+	 "A live Hype Train card in Events — level, points to the next level, when it runs out, top contributors, your "
+	 "record — and MultiChat notices when it starts, levels up and ends (with the cooldown). Golden Kappa, "
+	 "Treasure and shared trains are labelled. Needs one Reconnect to approve the new Twitch permission."},
+	{"⬆", "Updates that actually arrive",
+	 "With auto-update on, GoalForgeX now checks every hour and again the moment your stream ends, retries a "
+	 "download that failed, and tells you if Windows' “allow changes” prompt was declined — so the next version "
+	 "installs when you close OBS after stream."},
+};
 const Note k291[] = {
 	{"📡", "Offline straight away",
 	 "When you stop streaming in OBS, GoalForgeX now marks you offline the same moment — even on a very short "
@@ -119,6 +139,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"2.10.0", "October 2026", k2100, static_cast<int>(std::size(k2100))},
 	{"2.9.1", "October 2026", k291, static_cast<int>(std::size(k291))},
 	{"2.9.0", "October 2026", k290, static_cast<int>(std::size(k290))},
 	{"2.8.2", "October 2026", k282, static_cast<int>(std::size(k282))},

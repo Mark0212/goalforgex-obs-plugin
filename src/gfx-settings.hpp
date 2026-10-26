@@ -43,6 +43,7 @@ struct Settings {
 	bool cardGoal = true;
 	bool cardWheel = true;
 	bool cardCounters = true;
+	bool cardPresets = true;
 	bool cardAlerts = true;
 	bool cardActivity = true;
 	// Chat tab: where messages go (remembered between sessions) + show times
@@ -92,6 +93,7 @@ struct Settings {
 	bool ncFollows = true;        // Twitch / Kick follows
 	bool ncTikTokFollows = false; // TikTok follows — can be a lot
 	bool ncShoutouts = true;      // ForgeBot !so and Twitch /shoutout, sent and received
+	bool ncHypeTrain = true;      // Hype Train started / new level / ended
 	bool ncStreaks = true;        // watch streaks
 	bool ncPoints = true;         // channel point redemptions
 	bool ncAnnouncements = true;  // Twitch /announce
@@ -112,6 +114,7 @@ struct Settings {
 	bool evYouTube = true;
 	bool evTimers = false;    // subathon / intro timer / wheel lines
 	bool evShoutouts = true;  // shoutouts sent (ForgeBot !so, Twitch /shoutout) and received
+	bool evHypeTrain = true;  // one live card per Hype Train
 	bool evAutoExpand = true; // gift bombs open with their recipient list showing
 	// Appearance (gfx-theme): palette preset, accent colour, text size, density
 	QString theme = QStringLiteral("graphite"); // graphite | midnight | oled | slate | warm
@@ -127,6 +130,9 @@ struct Settings {
 	bool autoInstallUpdates = true;
 	// The plugin version whose "What's new" popup was last shown (empty = never).
 	QString lastSeenVersion;
+	// Version whose install-on-exit was declined at Windows' "allow changes"
+	// prompt (or failed to start) — the next session says so in the update bar.
+	QString updateDeclined;
 
 	QList<Reaction> reactions;
 };

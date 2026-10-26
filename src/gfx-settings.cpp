@@ -85,6 +85,7 @@ static const BoolField kBools[] = {
 	{"ncFollows", &Settings::ncFollows},
 	{"ncTikTokFollows", &Settings::ncTikTokFollows},
 	{"ncShoutouts", &Settings::ncShoutouts},
+	{"ncHypeTrain", &Settings::ncHypeTrain},
 	{"ncStreaks", &Settings::ncStreaks},
 	{"ncPoints", &Settings::ncPoints},
 	{"ncAnnouncements", &Settings::ncAnnouncements},
@@ -100,6 +101,7 @@ static const BoolField kBools[] = {
 	{"evYouTube", &Settings::evYouTube},
 	{"evTimers", &Settings::evTimers},
 	{"evShoutouts", &Settings::evShoutouts},
+	{"evHypeTrain", &Settings::evHypeTrain},
 	{"evAutoExpand", &Settings::evAutoExpand},
 	{"compact", &Settings::compact},
 	{"cardStats", &Settings::cardStats},
@@ -108,6 +110,7 @@ static const BoolField kBools[] = {
 	{"cardGoal", &Settings::cardGoal},
 	{"cardWheel", &Settings::cardWheel},
 	{"cardCounters", &Settings::cardCounters},
+	{"cardPresets", &Settings::cardPresets},
 	{"cardAlerts", &Settings::cardAlerts},
 	{"cardActivity", &Settings::cardActivity},
 	{"autoStartTimer", &Settings::autoStartTimer},
@@ -164,6 +167,7 @@ void loadSettings()
 	if (ac.size() == 7 && ac.startsWith(QLatin1Char('#')) && QColor(ac).isValid())
 		g_settings.accent = ac.toLower();
 	g_settings.lastSeenVersion = o.value(QStringLiteral("lastSeenVersion")).toString().left(20);
+	g_settings.updateDeclined = o.value(QStringLiteral("updateDeclined")).toString().left(20);
 	const int ts = o.value(QStringLiteral("textScale")).toInt(100);
 	g_settings.textScale = qBound(80, ts, 140);
 	const QJsonArray rs = o.value(QStringLiteral("reactions")).toArray();
@@ -202,6 +206,7 @@ void saveSettings()
 	o.insert(QStringLiteral("accent"), g_settings.accent);
 	o.insert(QStringLiteral("textScale"), g_settings.textScale);
 	o.insert(QStringLiteral("lastSeenVersion"), g_settings.lastSeenVersion);
+	o.insert(QStringLiteral("updateDeclined"), g_settings.updateDeclined);
 	QJsonArray rs;
 	for (const Reaction &r : g_settings.reactions) {
 		QJsonObject ro;

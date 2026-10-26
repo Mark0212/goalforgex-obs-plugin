@@ -97,6 +97,29 @@ LiveState LiveState::fromJson(const QJsonObject &o)
 			s.counters.push_back(st);
 	}
 	s.countersLocked = o.value(QStringLiteral("countersLocked")).toBool(true);
+
+	const QJsonValue pv = o.value(QStringLiteral("presets"));
+	s.presetsKnown = pv.isObject();
+	s.presetsLocked = o.value(QStringLiteral("presetsLocked")).toBool(true);
+	if (s.presetsKnown) {
+		const QJsonObject po = pv.toObject();
+		const auto readList = [&po](const QString &key, QList<PresetState> &out) {
+			// Index loop, not range-for: Apple clang's -Wrange-loop-analysis
+			// errors on range-for over a QJsonArray (it binds to temporaries).
+			const QJsonArray arr = po.value(key).toArray();
+			for (qsizetype i = 0; i < arr.size(); ++i) {
+				const QJsonObject p = arr.at(i).toObject();
+				PresetState st;
+				st.id = p.value(QStringLiteral("id")).toString();
+				st.name = p.value(QStringLiteral("name")).toString();
+				st.active = p.value(QStringLiteral("active")).toBool();
+				if (!st.id.isEmpty())
+					out.push_back(st);
+			}
+		};
+		readList(QStringLiteral("goal"), s.goalPresets);
+		readList(QStringLiteral("follower"), s.followerPresets);
+	}
 	s.alertsLocked = o.value(QStringLiteral("alertsLocked")).toBool(true);
 	s.hasLastAlert = o.value(QStringLiteral("hasLastAlert")).toBool();
 
@@ -130,11 +153,17 @@ LiveState LiveState::fromJson(const QJsonObject &o)
 		ev.bombId = e.value(QStringLiteral("bombId")).toString().left(24);
 		ev.partial = e.value(QStringLiteral("partial")).toBool();
 		ev.update = e.value(QStringLiteral("update")).toBool() && !ev.bombId.isEmpty();
+		ev.progress = i64(e.value(QStringLiteral("progress")));
+		ev.goal = i64(e.value(QStringLiteral("goal")));
+		ev.total = i64(e.value(QStringLiteral("total")));
+		ev.trainType = e.value(QStringLiteral("trainType")).toString();
+		ev.expiresAt = i64(e.value(QStringLiteral("expiresAt")));
 		s.events.push_back(ev);
 	}
 	const QJsonObject es = o.value(QStringLiteral("eventsStatus")).toObject();
 	s.channelPoints = es.value(QStringLiteral("channelPoints")).toString();
 	s.shoutouts = es.value(QStringLiteral("shoutouts")).toString();
+	s.hypeTrain = es.value(QStringLiteral("hypeTrain")).toString();
 	return s;
 }
 
