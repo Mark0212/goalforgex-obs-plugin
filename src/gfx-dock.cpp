@@ -126,6 +126,12 @@ GfxDock::GfxDock(QWidget *parent) : QWidget(parent), reactions_(this)
 	// (only an actual move is sent — see reportCoinAim).
 	aimTimer_.setInterval(1000);
 	connect(&aimTimer_, &QTimer::timeout, this, [this] { reportCoinAim(); });
+	// Moving / resizing / showing / hiding a source in the on-air scene re-aims
+	// right away (once the drag settles), so an alert fired just after the move
+	// already flies to the new spot.
+	aimSoon_.setSingleShot(true);
+	aimSoon_.setInterval(150);
+	connect(&aimSoon_, &QTimer::timeout, this, [this] { reportCoinAim(); });
 	updateTimer_.setInterval(60 * 60 * 1000);
 	connect(&updateTimer_, &QTimer::timeout, this, [this] { checkForUpdate(); });
 	msgClear_.setSingleShot(true);
@@ -2447,6 +2453,46 @@ void GfxDock::reportCoinAim()
 		});
 }
 
+// Alert Coin Drop: the 1 s check catches every move, but an alert fired right
+// after the streamer drags the Alerts source (or the goal) somewhere else would
+// still fly to the old spot. Listening to the scene on air re-aims at once.
+static const char *const kAimSignals[] = {"item_transform", "item_add", "item_remove", "item_visible"};
+
+void GfxDock::onAimSceneChanged(void *data, calldata_t *)
+{
+	auto *self = static_cast<GfxDock *>(data);
+	// OBS can signal from any thread; the aim is worked out on the UI thread.
+	QMetaObject::invokeMethod(self, [self] { self->aimSoon_.start(); }, Qt::QueuedConnection);
+}
+
+void GfxDock::watchAimScene()
+{
+	obs_source_t *scene = obs_frontend_get_current_scene();
+	if (scene && scene == aimScene_) {
+		obs_source_release(scene); // already watching it
+		return;
+	}
+	unwatchAimScene();
+	if (!scene)
+		return;
+	aimScene_ = scene; // keeps the reference until unwatched
+	signal_handler_t *sh = obs_source_get_signal_handler(scene);
+	for (const char *sig : kAimSignals)
+		signal_handler_connect(sh, sig, onAimSceneChanged, this);
+}
+
+void GfxDock::unwatchAimScene()
+{
+	aimSoon_.stop();
+	if (!aimScene_)
+		return;
+	signal_handler_t *sh = obs_source_get_signal_handler(aimScene_);
+	for (const char *sig : kAimSignals)
+		signal_handler_disconnect(sh, sig, onAimSceneChanged, this);
+	obs_source_release(aimScene_);
+	aimScene_ = nullptr;
+}
+
 // One click: alerts + chat box (full canvas), goal top-left, timer top-right.
 void GfxDock::addStarterLayout()
 {
@@ -2674,13 +2720,16 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		if (obs_frontend_recording_active() && !recordStartMs_)
 			recordStartMs_ = QDateTime::currentMSecsSinceEpoch();
 		renderAirChip();
+		watchAimScene();
 		break;
 	case OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED:
 	case OBS_FRONTEND_EVENT_SCENE_CHANGED:
 		refreshScenes();
+		watchAimScene(); // follow the scene on air
 		reportCoinAim(); // a new scene can put the goal somewhere else — re-aim at once
 		break;
 	case OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED:
+		watchAimScene();
 		loaded_ = true;
 		sceneCombo_->clear();
 		refreshScenes();
@@ -2693,6 +2742,7 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 	case OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGING:
 	case OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP:
 		// Sources are being torn down — stop touching them until CHANGED.
+		unwatchAimScene(); // let go of the scene on air too
 		loaded_ = false;
 		sceneCombo_->blockSignals(true);
 		sceneCombo_->clear();
@@ -2733,6 +2783,7 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 			checkForUpdate();
 		break;
 	case OBS_FRONTEND_EVENT_EXIT:
+		unwatchAimScene();
 		if (msDock_)
 			msDock_->shutdown(); // stop every multistream output while OBS can still clean up
 		// Downloaded + verified update: install it now that OBS is closing

@@ -63,6 +63,12 @@ const Note k280[] = {
 	{"✏️", "One title, every platform",
 	 "Change your stream title and category on Twitch and Kick at once from the Multistream dock (Pro)."},
 };
+const Note k2113[] = {
+	{"🪙", "Coin Drop follows your alerts instantly",
+	 "Move or resize your Alerts or goal source in OBS and the very next alert's coins fly to the new spot — no "
+	 "waiting for the next check."},
+};
+
 const Note k2112[] = {
 	{"✨", "A brand-new Events feed",
 	 "Every event is now its own card: a coloured tile with the event and platform, the time on the right, what "
@@ -176,6 +182,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"2.11.3", "October 2026", k2113, static_cast<int>(std::size(k2113))},
 	{"2.11.2", "October 2026", k2112, static_cast<int>(std::size(k2112))},
 	{"2.11.1", "October 2026", k2111, static_cast<int>(std::size(k2111))},
 	{"2.11.0", "October 2026", k2110, static_cast<int>(std::size(k2110))},

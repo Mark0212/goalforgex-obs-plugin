@@ -182,7 +182,12 @@ private:
 	QTimer pollTimer_;
 	QTimer stateTimer_;
 	QTimer updateTimer_;
-	QTimer aimTimer_;     // Alert Coin Drop aim, every few seconds while connected
+	QTimer aimTimer_;                  // Alert Coin Drop aim, every second while connected
+	QTimer aimSoon_;                   // …and right after a source in the on-air scene moves
+	obs_source_t *aimScene_ = nullptr; // the on-air scene being watched (own reference)
+	void watchAimScene();
+	void unwatchAimScene();
+	static void onAimSceneChanged(void *data, calldata_t *cd);
 	QString lastAim_;     // what was last reported ("" = report next tick)
 	bool aimOff_ = false; // the site doesn't take aim reports (older server) — stop asking
 	QTimer msgClear_;
