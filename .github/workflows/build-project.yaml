@@ -62,6 +62,20 @@ jobs:
           done
           echo "commitHash=${GITHUB_SHA:0:9}" >> $GITHUB_OUTPUT
 
+          # A release tag must match the version in buildspec.json — that's the
+          # version baked into the installer's name and the plugin itself, and
+          # what GoalForgeX's update check reads. A tag on an un-bumped commit
+          # (2.11.4 pointing at the 2.11.3 commit) built 2.11.3 files, so no dock
+          # ever saw an update. Fail fast instead of shipping that.
+          if [[ "${GITHUB_EVENT_NAME}" == push && "${GITHUB_REF_TYPE}" == tag ]]; then
+            spec_version="$(jq -r '.version' buildspec.json)"
+            tag_version="${GITHUB_REF_NAME#v}"
+            if [[ "${tag_version}" != "${spec_version}" ]]; then
+              echo "::error::Tag ${GITHUB_REF_NAME} does not match buildspec.json version ${spec_version}. Bump buildspec.json (and add a changelog entry), commit, then tag that commit."
+              exit 1
+            fi
+          fi
+
           plugin_name="$(grep 'name' buildspec.json | sed -E -e 's/^.+"name":[^"]+"(.+)",?$/\1/g')"
           plugin_display_name="$(grep 'displayName' buildspec.json | sed -E -e 's/^.+"displayName":[^"]+"(.+)",?$/\1/g' || echo "")"
 

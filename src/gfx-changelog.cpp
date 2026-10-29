@@ -63,6 +63,15 @@ const Note k280[] = {
 	{"✏️", "One title, every platform",
 	 "Change your stream title and category on Twitch and Kick at once from the Multistream dock (Pro)."},
 };
+const Note k2114[] = {
+	{"📍", "Alerts you can place anywhere",
+	 "Turn on Place alerts in OBS on the GoalForgeX alerts page and Add → Alerts gives you a source the size of your "
+	 "alerts instead of a full-screen layer. Drag and resize it in each scene — every alert fires right there."},
+	{"🔊", "Alert sound in the Audio Mixer",
+	 "Alert sounds and video alerts with sound play through the Alerts source, so its slider in OBS's Audio Mixer "
+	 "sets how loud they are."},
+};
+
 const Note k2113[] = {
 	{"🪙", "Coin Drop follows your alerts instantly",
 	 "Move or resize your Alerts or goal source in OBS and the very next alert's coins fly to the new spot — no "
@@ -182,6 +191,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"2.11.4", "October 2026", k2114, static_cast<int>(std::size(k2114))},
 	{"2.11.3", "October 2026", k2113, static_cast<int>(std::size(k2113))},
 	{"2.11.2", "October 2026", k2112, static_cast<int>(std::size(k2112))},
 	{"2.11.1", "October 2026", k2111, static_cast<int>(std::size(k2111))},
