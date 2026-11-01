@@ -131,6 +131,7 @@ private:
 		QFrame *box = nullptr;
 		QLabel *head = nullptr; // ● 1,234 viewers / Offline / Not connected
 		QLabel *sub = nullptr;  // uptime · category (elided)
+		QLabel *icon = nullptr;
 	};
 	// One line in the feed: which message it shows and its alternating-row parity.
 	struct Shown {
@@ -141,8 +142,10 @@ private:
 	// Viewers / uptime / title per platform + chatters and messages per minute.
 	void renderStats();
 	void renderStatCard(StatCard &c);
-	// 1–4 cards per row (by width), only the platforms that are connected.
-	void layoutCards(const QStringList &visible);
+	// Big cards (two lines) or the slim one-row Online / Offline pills (Settings → chatStatsCards).
+	void setCardLook(StatCard &c, bool big);
+	// Up to maxCols cards per row, only the platforms that are connected.
+	void layoutCards(const QStringList &visible, int maxCols);
 	// Picks the layout for this width / height (narrow ↔ wide); no-op when unchanged.
 	void applyLayoutMode(bool force = false);
 	void fitChips();
@@ -245,6 +248,7 @@ private:
 	int mode_ = -1;
 	bool short_ = false;
 	int cardCols_ = 2;
+	bool bigCards_ = true; // how the stat cards are built right now (see setCardLook)
 	QBoxLayout *compLayout_ = nullptr;
 	QWidget *targetsBox_ = nullptr;
 	QWidget *chipsBox_ = nullptr;

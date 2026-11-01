@@ -24,6 +24,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QTimer>
 #include <QWidget>
 
+class GfxChatDock;
 class GfxChatPanel;
 class GfxEventsDock;
 class GfxMultistreamDock;
@@ -53,6 +54,9 @@ public:
 	// The separate "GoalForgeX Events" dock (plugin-main adds it to OBS). The
 	// Events panel moves there while Settings → Events → own dock is on.
 	void attachEventsDock(GfxEventsDock *dock);
+	// The "GoalForgeX MultiChat" dock (2.12): the MultiChat panel lives there
+	// instead of a tab; this dock keeps polling and sending for it.
+	void attachChatDock(GfxChatDock *dock);
 	// The "GoalForgeX Multistream" dock: gets OBS stream start/stop and appearance changes from here.
 	void attachMultistreamDock(GfxMultistreamDock *dock);
 
@@ -87,6 +91,10 @@ private:
 	void chatMod(const QString &platform, const QString &action, const QString &login, int seconds,
 		     const QString &messageId, const QString &displayName);
 	void updateChatTabTitle();
+	// The streamer can see the chat right now (its dock, or the fallback tab).
+	bool chatVisibleNow() const;
+	// Shows the MultiChat dock (beside this one when this one is docked).
+	void revealChatDock();
 
 	// Account linking (RFC 8628 device flow)
 	void startConnect();
@@ -158,6 +166,7 @@ private:
 	GfxChatPanel *chatPanel_ = nullptr;
 	GfxEventsPanel *eventsPanel_ = nullptr;
 	GfxEventsDock *eventsDock_ = nullptr;
+	GfxChatDock *chatDock_ = nullptr;      // owned by OBS (a dock)
 	GfxMultistreamDock *msDock_ = nullptr; // owned by OBS (a dock), lives as long as this one
 	QLabel *heroMark_ = nullptr;           // welcome card's big brand mark (re-drawn on accent change)
 	int eventsUnread_ = 0;

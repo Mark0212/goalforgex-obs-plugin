@@ -51,8 +51,10 @@ struct Settings {
 	bool chatToKick = true;
 	bool chatToYouTube = true;
 	bool chatTimestamps = true;
-	// Viewers / uptime / title per platform above the chat
+	// Online / offline (+ viewers) per platform above the chat
 	bool chatStats = true;
+	// …as the big cards (uptime, category, chatters line) instead of one slim row
+	bool chatStatsCards = false;
 	// Highlight lines that mention the streamer or a highlight word
 	bool chatHighlightMentions = true;
 	// One-click delete / 10-minute timeout links at the start of each line
@@ -107,6 +109,7 @@ struct Settings {
 	bool eventsOwnDock = true;
 	bool eventsDockIntroduced = false; // shown once automatically after updating to 2.7
 	bool msDockIntroduced = false;     // Multistream dock shown once after updating to 2.8
+	bool chatDockIntroduced = false;   // MultiChat dock shown once after updating to 2.12
 	// Multistream → game list: switching a game also switches to the alert
 	// preset labelled with it (only shown to accounts with alert presets)
 	bool msGameAlertPreset = true;

@@ -689,7 +689,7 @@ GfxChatPanel::GfxChatPanel(QWidget *parent) : QWidget(parent)
 void GfxChatPanel::buildUi()
 {
 	auto *outer = new QVBoxLayout(this);
-	outer->setContentsMargins(0, 4, 0, 0);
+	outer->setContentsMargins(0, 2, 0, 0);
 	outer->setSpacing(0);
 
 	// ── Pro lock ──
@@ -717,7 +717,7 @@ void GfxChatPanel::buildUi()
 	main_->setMinimumWidth(0);
 	auto *root = new QVBoxLayout(main_);
 	root->setContentsMargins(0, 0, 0, 0);
-	root->setSpacing(6);
+	root->setSpacing(4);
 	outer->addWidget(main_, 1);
 
 	// Header: filter chips that wrap onto a second line when the dock is narrow,
@@ -1187,6 +1187,7 @@ void GfxChatPanel::buildStatCard(StatCard &c, const QString &platform)
 	auto *icon = new QLabel(c.box);
 	icon->setPixmap(QPixmap::fromImage(platformIcon(platform, 18, devicePixelRatioF())));
 	icon->setFixedSize(18, 18);
+	c.icon = icon;
 	auto *text = new QVBoxLayout();
 	text->setContentsMargins(0, 0, 0, 0);
 	text->setSpacing(0);
@@ -1262,8 +1263,17 @@ void GfxChatPanel::renderStatCard(StatCard &c)
 			tip << QStringLiteral("Category: ") + category;
 		if (c.platform == QLatin1String("youtube"))
 			tip << QStringLiteral("(YouTube doesn't share viewer counts with chat apps)");
+		if (!bigCards_) {
+			// Slim pill: ● LIVE · 1,234 — uptime, title and category stay in the tooltip.
+			head = QStringLiteral(
+				"<span style='color:#ff3b4f'>●</span>&nbsp;<b style='color:#ffffff'>LIVE</b>");
+			if (hasViewers)
+				head += QStringLiteral("&nbsp;<span style='color:#c9ced8'>· %1</span>").arg(fmtCount(v));
+		}
 	} else {
-		head = QStringLiteral("<span style='color:#9aa1b0;font-weight:600'>Offline</span>");
+		head = bigCards_ ? QStringLiteral("<span style='color:#9aa1b0;font-weight:600'>Offline</span>")
+				 : QStringLiteral("<span style='color:#6b7280'>○</span>&nbsp;<span "
+						  "style='color:#9aa1b0;font-weight:600'>Offline</span>");
 		tip << QStringLiteral("%1 — offline").arg(name);
 		if (c.platform == QLatin1String("youtube") || c.platform == QLatin1String("tiktok"))
 			tip << QStringLiteral("Shows as live a few seconds after you go live there.");
@@ -1292,11 +1302,22 @@ void GfxChatPanel::renderStatCard(StatCard &c)
 	theme::setState(c.box, state.constData());
 }
 
-void GfxChatPanel::layoutCards(const QStringList &visible)
+void GfxChatPanel::setCardLook(StatCard &c, bool big)
+{
+	// Slim = one short line per platform, so the feed keeps the dock's height.
+	if (auto *l = c.box->layout())
+		l->setContentsMargins(big ? 8 : 7, big ? 5 : 2, 8, big ? 5 : 2);
+	const int px = big ? 18 : 14;
+	c.icon->setPixmap(QPixmap::fromImage(platformIcon(c.platform, px, devicePixelRatioF())));
+	c.icon->setFixedSize(px, px);
+	c.sub->setVisible(big);
+}
+
+void GfxChatPanel::layoutCards(const QStringList &visible, int maxCols)
 {
 	const int n = static_cast<int>(visible.size());
 	// Never more columns than cards; 3 cards in a 4-wide row look better as 3.
-	const int cols = qMax(1, qMin(cardCols_, n));
+	const int cols = qMax(1, qMin(maxCols, n));
 	const QString key = visible.join(QLatin1Char(',')) + QLatin1Char('/') + QString::number(cols);
 	if (key == cardsKey_)
 		return;
@@ -1326,12 +1347,20 @@ void GfxChatPanel::renderStats()
 	for (const QString &p : wantedPlatforms())
 		if (streams_.value(p).toObject().value(QStringLiteral("connected")).toBool())
 			visible << p;
-	// A short dock keeps its height for the chat itself.
-	const bool show = settings().chatStats && !visible.isEmpty() && !short_;
+	const bool big = settings().chatStatsCards;
+	if (big != bigCards_) {
+		bigCards_ = big;
+		for (StatCard *c : {&twCard_, &kkCard_, &ytCard_, &ttCard_})
+			setCardLook(*c, big);
+		cardsKey_.clear();
+	}
+	// A short dock keeps its height for the chat itself (the slim row only goes when really short).
+	const bool show = settings().chatStats && !visible.isEmpty() && (!short_ || (!big && height() >= 160));
 	stats_->setVisible(show);
 	if (!show)
 		return;
-	layoutCards(visible);
+	// Slim pills: every platform on one row unless the dock is very narrow.
+	layoutCards(visible, big ? cardCols_ : (width() < 260 ? 2 : 4));
 	for (StatCard *c : {&twCard_, &kkCard_, &ytCard_, &ttCard_})
 		if (visible.contains(c->platform))
 			renderStatCard(*c);
@@ -1370,8 +1399,8 @@ void GfxChatPanel::renderStats()
 		if (m.ts >= paceStart)
 			++paced;
 	}
-	// Nothing live and nobody chatting → just the cards.
-	summary_->setVisible(anyLive || !chatters.isEmpty());
+	// Nothing live and nobody chatting → just the cards. Slim row: the line moves into the tooltips.
+	summary_->setVisible(big && (anyLive || !chatters.isEmpty()));
 	const double minutes = qMax(1.0, (now - paceStart) / 60000.0);
 	const double pace = paced / minutes;
 	parts << QStringLiteral("<b style='color:#e8eaf0'>%1</b> chatter%2")
@@ -1380,6 +1409,17 @@ void GfxChatPanel::renderStats()
 	parts << QStringLiteral("<b style='color:#e8eaf0'>%1</b> msgs/min")
 			 .arg(pace < 10 ? QString::number(pace, 'f', 1) : QString::number(qRound(pace)));
 	summary_->setText(parts.join(QStringLiteral("&nbsp;&nbsp;·&nbsp;&nbsp;")));
+	if (!big) {
+		QString line = QStringLiteral("\n\n%1 chatter%2 · %3 msgs/min")
+				       .arg(chatters.size())
+				       .arg(chatters.size() == 1 ? QString() : QStringLiteral("s"))
+				       .arg(pace < 10 ? QString::number(pace, 'f', 1) : QString::number(qRound(pace)));
+		if (liveWithViewers >= 2)
+			line += QStringLiteral(" · %1 watching in total").arg(fmtCount(total));
+		for (StatCard *c : {&twCard_, &kkCard_, &ytCard_, &ttCard_})
+			if (visible.contains(c->platform))
+				c->box->setToolTip(c->box->toolTip() + line);
+	}
 }
 
 bool GfxChatPanel::eventFilter(QObject *watched, QEvent *event)
@@ -2137,7 +2177,8 @@ void GfxChatPanel::showOptionsMenu()
 	toggle(QStringLiteral("Show the time on each message"), &s.chatTimestamps);
 	toggle(QStringLiteral("Shade every other message"), &s.chatAltRows);
 	toggle(QStringLiteral("Pause while my mouse is over the chat"), &s.chatPauseOnHover);
-	toggle(QStringLiteral("Viewers, uptime and stream info"), &s.chatStats);
+	toggle(QStringLiteral("Online / offline and viewers per platform"), &s.chatStats);
+	toggle(QStringLiteral("…as big cards (uptime, category, chat pace)"), &s.chatStatsCards);
 	toggle(QStringLiteral("Platform icon on each message"), &s.chatIcons);
 	toggle(QStringLiteral("HOST / MOD / VIP / SUB badges"), &s.chatBadges);
 	toggle(QStringLiteral("Chatters' own name colours"), &s.chatNameColors);

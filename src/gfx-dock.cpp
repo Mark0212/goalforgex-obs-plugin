@@ -11,6 +11,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-api.hpp"
 #include "gfx-auth.hpp"
 #include "gfx-changelog.hpp"
+#include "gfx-chat-dock.hpp"
 #include "gfx-chat.hpp"
 #include "gfx-events-dock.hpp"
 #include "gfx-events.hpp"
@@ -199,6 +200,8 @@ void GfxDock::buildUi()
 	menu->addSection(QStringLiteral("Docks"));
 	connect(menu->addAction(QStringLiteral("📋   Events")), &QAction::triggered, this,
 		[this] { revealEventsDock(true); });
+	connect(menu->addAction(QStringLiteral("💬   MultiChat")), &QAction::triggered, this,
+		[this] { revealChatDock(); });
 	connect(menu->addAction(QStringLiteral("📡   Multistream")), &QAction::triggered, this, [this] {
 		QDockWidget *frame = nullptr;
 		for (QWidget *w = msDock_ ? msDock_->parentWidget() : nullptr; w && !frame; w = w->parentWidget())
@@ -590,8 +593,13 @@ void GfxDock::rebuildTabs()
 		eventsDock_->setPanel(eventsPanel_);
 	else if (!s.tabEvents)
 		eventsPanel_->hide();
-	if (s.tabChat)
+	// MultiChat: always its own OBS dock; a tab here only if OBS couldn't add that dock.
+	if (chatDock_)
+		chatDock_->setPanel(s.tabChat ? chatPanel_ : nullptr);
+	else if (s.tabChat)
 		tabs_->addTab(chatPanel_, QStringLiteral("MultiChat"));
+	if (!s.tabChat)
+		chatPanel_->hide();
 	if (s.tabWidgets)
 		tabs_->addTab(widgetsPage_, QStringLiteral("Widgets"));
 	if (s.tabReactions)
@@ -671,7 +679,6 @@ void GfxDock::openSettings(const QString &startPage)
 	      {{QStringLiteral("Live"), &s.tabLive},
 	       {QStringLiteral("Events tab (only when Events aren't in their own dock — see the Events page)"),
 		&s.tabEvents},
-	       {QStringLiteral("MultiChat (Twitch, Kick, YouTube, TikTok)"), &s.tabChat},
 	       {QStringLiteral("Widgets"), &s.tabWidgets},
 	       {QStringLiteral("Reactions"), &s.tabReactions},
 	       {QStringLiteral("Health"), &s.tabHealth}});
@@ -712,6 +719,12 @@ void GfxDock::openSettings(const QString &startPage)
 
 	// ── MultiChat ──
 	QVBoxLayout *mc = page(QStringLiteral("MultiChat"));
+	group(mc, QStringLiteral("Dock"),
+	      {{QStringLiteral("MultiChat on (its own “GoalForgeX MultiChat” dock)"), &s.tabChat},
+	       {QStringLiteral("Online / offline and viewers for each platform above the chat"), &s.chatStats},
+	       {QStringLiteral("…as big cards with uptime, category and chat pace (takes chat room)"),
+		&s.chatStatsCards}});
+	note(mc, QStringLiteral("Docks menu → GoalForgeX MultiChat shows the dock if you closed it."));
 	group(mc, QStringLiteral("Platforms"),
 	      {{QStringLiteral("YouTube chat (read + reply)"), &s.chatYouTube},
 	       {QStringLiteral("TikTok LIVE chat (read-only)"), &s.chatTikTok}});
@@ -724,8 +737,7 @@ void GfxDock::openSettings(const QString &startPage)
 	       {QStringLiteral("Chatters' own name colours"), &s.chatNameColors},
 	       {QStringLiteral("Show the time next to each message"), &s.chatTimestamps},
 	       {QStringLiteral("Compact lines"), &s.chatCompact},
-	       {QStringLiteral("Shade every other message"), &s.chatAltRows},
-	       {QStringLiteral("Viewers, uptime and stream info per platform"), &s.chatStats}});
+	       {QStringLiteral("Shade every other message"), &s.chatAltRows}});
 	group(mc, QStringLiteral("Behaviour"),
 	      {{QStringLiteral("Highlight messages that mention me or my highlight words"), &s.chatHighlightMentions},
 	       {QStringLiteral("Quick moderation buttons on each message (delete / 10 min timeout)"), &s.chatQuickMod},
@@ -997,6 +1009,8 @@ void GfxDock::applyAppearance()
 	chatPanel_->refresh();
 	if (eventsDock_)
 		eventsDock_->applyAppearance();
+	if (chatDock_)
+		chatDock_->applyAppearance();
 	if (msDock_)
 		msDock_->applyAppearance();
 	// Rich-text labels that carry the accent colour.
@@ -1024,6 +1038,50 @@ void GfxDock::attachEventsDock(GfxEventsDock *dock)
 	};
 	dock->setConnected(state_ == State::Connected || state_ == State::NeedsReconnect);
 	rebuildTabs();
+}
+
+void GfxDock::attachChatDock(GfxChatDock *dock)
+{
+	chatDock_ = dock;
+	if (!dock)
+		return;
+	dock->onShown = [this] {
+		if (chatDock_ && chatDock_->panel()) {
+			chatUnread_ = 0;
+			updateChatTabTitle();
+			scheduleChat(0); // the fast cadence right away
+		}
+	};
+	dock->setConnected(state_ == State::Connected || state_ == State::NeedsReconnect);
+	rebuildTabs();
+}
+
+bool GfxDock::chatVisibleNow() const
+{
+	if (chatDock_)
+		return chatDock_->showingChat();
+	return isVisible() && tabs_->currentWidget() == chatPanel_;
+}
+
+void GfxDock::revealChatDock()
+{
+	QDockWidget *chat = chatDock_ ? chatDock_->dockFrame() : nullptr;
+	if (!chat)
+		return;
+	if (!chat->isVisible()) {
+		// Beside this dock (full height for the chat) when this one is docked; otherwise OBS decides.
+		QDockWidget *mine = nullptr;
+		for (QWidget *w = parentWidget(); w && !mine; w = w->parentWidget())
+			mine = qobject_cast<QDockWidget *>(w);
+		auto *mainWin = static_cast<QMainWindow *>(obs_frontend_get_main_window());
+		if (mainWin && mine && mine->isVisible() && !mine->isFloating() &&
+		    mainWin->dockWidgetArea(mine) != Qt::NoDockWidgetArea) {
+			chat->setFloating(false);
+			mainWin->splitDockWidget(mine, chat, Qt::Horizontal);
+		}
+		chat->show();
+	}
+	chat->raise();
 }
 
 bool GfxDock::eventsVisibleNow() const
@@ -1135,6 +1193,8 @@ void GfxDock::setState(State s, const QString &message, bool isError)
 	requiredPanel_->setVisible(updateRequired_ && s != State::Linking);
 	if (eventsDock_)
 		eventsDock_->setConnected((s == State::Connected || s == State::NeedsReconnect) && !updateRequired_);
+	if (chatDock_)
+		chatDock_->setConnected((s == State::Connected || s == State::NeedsReconnect) && !updateRequired_);
 	if (s == State::Connected) {
 		statusTimer_.start();
 		stateTimer_.start();
@@ -1823,7 +1883,7 @@ void GfxDock::pollChat()
 		this, [path] { return apiGet(path); },
 		[this](const ApiResult &r) {
 			chatInFlight_ = false;
-			const bool onTab = isVisible() && tabs_->currentWidget() == chatPanel_;
+			const bool onTab = chatVisibleNow();
 			if (r.token == TokenStatus::NeedsReconnect)
 				return; // the state poll shows Reconnect
 			if (handleUpdateRequired(r.http.status, r.http.serverMessage()))
@@ -1949,6 +2009,8 @@ void GfxDock::chatMod(const QString &platform, const QString &action, const QStr
 
 void GfxDock::updateChatTabTitle()
 {
+	if (chatDock_)
+		chatDock_->setUnread(chatDock_->panel() ? chatUnread_ : 0);
 	const int i = chatPanel_ ? tabs_->indexOf(chatPanel_) : -1;
 	if (i < 0)
 		return;
@@ -2683,6 +2745,13 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 			settings().eventsDockIntroduced = true;
 			saveSettings();
 			QTimer::singleShot(0, this, [this] { revealEventsDock(false); });
+		}
+		// 2.12 moved MultiChat out of this dock into its own: show it once so nobody loses their chat.
+		if (!settings().chatDockIntroduced && chatDock_) {
+			settings().chatDockIntroduced = true;
+			saveSettings();
+			if (settings().tabChat)
+				QTimer::singleShot(150, this, [this] { revealChatDock(); });
 		}
 		// 2.8 added the Multistream dock: show it once, tabbed with the Events dock when that's docked.
 		if (!settings().msDockIntroduced && msDock_) {
