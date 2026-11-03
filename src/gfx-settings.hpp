@@ -50,6 +50,7 @@ struct Settings {
 	bool chatToTwitch = true;
 	bool chatToKick = true;
 	bool chatToYouTube = true;
+	bool chatToXive = true;
 	bool chatTimestamps = true;
 	// Online / offline (+ viewers) per platform above the chat
 	bool chatStats = true;
@@ -76,8 +77,10 @@ struct Settings {
 	// Which connected platforms MultiChat reads (Twitch + Kick are always on).
 	// YouTube polls Google's API and TikTok opens a live connection — only
 	// while these are on and the account has them connected on the website.
+	// Xive chat comes from the GoalForgeX bot added to the Xive channel.
 	bool chatYouTube = true;
 	bool chatTikTok = true;
+	bool chatXive = true;
 	// MultiChat look
 	bool chatIcons = true;      // platform icon at the start of each line
 	bool chatBadges = true;     // HOST / MOD / VIP / SUB tags

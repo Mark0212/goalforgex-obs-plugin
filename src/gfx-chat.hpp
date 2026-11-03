@@ -42,10 +42,10 @@ struct ChatPart {
 	QString image; // empty = plain text
 };
 
-// One chat line from GET /api/obs/chat (Twitch, Kick, YouTube or TikTok).
+// One chat line from GET /api/obs/chat (Twitch, Kick, YouTube, TikTok or Xive).
 struct ChatMessage {
 	QString id;
-	QString platform; // twitch | kick | youtube | tiktok
+	QString platform; // twitch | kick | youtube | tiktok | xive
 	QString user;     // display name
 	QString login;
 	QString color;
@@ -82,9 +82,10 @@ struct ChatMessage {
 
 } // namespace gfx
 
-// The "MultiChat" tab: Twitch, Kick, YouTube and TikTok chat in one feed (or
+// The "MultiChat" tab: Twitch, Kick, YouTube, TikTok and Xive chat in one feed (or
 // filtered to one, to mentions, to one chatter or to a search), and a composer
-// that sends as the streamer to Twitch, Kick and/or YouTube (TikTok is read-only). The dock owns the polling and the network
+// that sends as the streamer to Twitch, Kick and/or YouTube, and to Xive as the
+// GoalForgeX bot (TikTok is read-only). The dock owns the polling and the network
 // calls; this panel only renders and collects input.
 class GfxChatPanel : public QWidget {
 public:
@@ -99,7 +100,7 @@ public:
 	explicit GfxChatPanel(QWidget *parent = nullptr);
 
 	// Platforms the dock asks the server for (Settings → MultiChat): Twitch and
-	// Kick always, YouTube / TikTok when switched on.
+	// Kick always, YouTube / TikTok / Xive when switched on.
 	static QStringList wantedPlatforms();
 	// Other channels to show, read-only (Settings → chatWatch), for ?watch=.
 	static QStringList watchList();
@@ -192,6 +193,8 @@ private:
 	void updateFilters();
 	void updateTargets();
 	QList<QPushButton *> targetButtons() const;
+	bool canSendTo(const QString &p) const; // connected, and (Xive) allowed to post
+	QList<StatCard *> statCards();
 	void updateSendState();
 	void setFilter(const QString &f);
 	void setUserFilter(const QString &platform, const QString &login, const QString &shown);
@@ -221,7 +224,7 @@ private:
 	QJsonObject status_;
 	QJsonObject streams_;                    // "streams" from the poll; empty = older server, strip hidden
 	qint64 clockSkew_ = 0;                   // server clock − ours, so uptime matches the server's start times
-	QString filter_ = QStringLiteral("all"); // all | twitch | kick | youtube | tiktok | watched | mentions
+	QString filter_ = QStringLiteral("all"); // all | twitch | kick | youtube | tiktok | xive | watched | mentions
 	QString search_;
 	QString userFilterPlatform_, userFilterLogin_;
 	QRegularExpression highlightRe_;
@@ -268,6 +271,7 @@ private:
 	StatCard kkCard_;
 	StatCard ytCard_;
 	StatCard ttCard_;
+	StatCard xvCard_;
 	QLabel *summary_ = nullptr;
 	QTimer *tick_ = nullptr; // 1 s: uptime + chat pace
 	QTimer *searchDelay_ = nullptr;
@@ -276,6 +280,7 @@ private:
 	QPushButton *fKick_ = nullptr;
 	QPushButton *fYouTube_ = nullptr;
 	QPushButton *fTikTok_ = nullptr;
+	QPushButton *fXive_ = nullptr;
 	QPushButton *fMentions_ = nullptr;
 	QPushButton *searchBtn_ = nullptr;
 	QPushButton *pauseBtn_ = nullptr;
@@ -288,7 +293,8 @@ private:
 	QPushButton *toTwitch_ = nullptr;
 	QPushButton *toKick_ = nullptr;
 	QPushButton *toYouTube_ = nullptr;
-	QLabel *readOnlyLbl_ = nullptr; // only TikTok connected → can't send
+	QPushButton *toXive_ = nullptr; // posts as the GoalForgeX bot (Xive's API can't post as the creator)
+	QLabel *readOnlyLbl_ = nullptr; // only TikTok (or a read-only Xive) connected → can't send
 	QLineEdit *input_ = nullptr;
 	QPushButton *sendBtn_ = nullptr;
 	QLabel *countLbl_ = nullptr;

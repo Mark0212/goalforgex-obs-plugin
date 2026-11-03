@@ -327,7 +327,7 @@ void GfxDock::buildUi()
 			"<table cellspacing='0' cellpadding='3'>"
 			"<tr><td style='color:%1'>▸</td><td>Widgets added to your scenes, already sized and placed</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>Live controls and OBS hotkeys for timers, goals and alerts</td></tr>"
-			"<tr><td style='color:%1'>▸</td><td>Twitch, Kick, YouTube and TikTok chat in one MultiChat feed</td></tr>"
+			"<tr><td style='color:%1'>▸</td><td>Twitch, Kick, YouTube, TikTok and Xive chat in one MultiChat feed</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>Go live on several platforms at once with the Multistream dock</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>Gift bombs with every recipient, channel points and watch streaks</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>Reactions that switch scenes when alerts fire</td></tr>"
@@ -727,9 +727,12 @@ void GfxDock::openSettings(const QString &startPage)
 	note(mc, QStringLiteral("Docks menu → GoalForgeX MultiChat shows the dock if you closed it."));
 	group(mc, QStringLiteral("Platforms"),
 	      {{QStringLiteral("YouTube chat (read + reply)"), &s.chatYouTube},
-	       {QStringLiteral("TikTok LIVE chat (read-only)"), &s.chatTikTok}});
+	       {QStringLiteral("TikTok LIVE chat (read-only)"), &s.chatTikTok},
+	       {QStringLiteral("Xive chat (read + reply as the GoalForgeX bot)"), &s.chatXive}});
 	note(mc, QStringLiteral("Twitch and Kick are always included. Each platform shows up once it's connected on "
-				"goalforgex.com → Account. YouTube and TikTok chat appear while you're live there."));
+				"goalforgex.com → Account. YouTube and TikTok chat appear while you're live there. "
+				"Xive chat needs the GoalForgeX bot added to your Xive channel (Xive dashboard → "
+				"GoalForgeX Bot)."));
 	group(mc, QStringLiteral("Look"),
 	      {{QStringLiteral("Platform icon on each message"), &s.chatIcons},
 	       {QStringLiteral("HOST / MOD / VIP / SUB badges"), &s.chatBadges},
@@ -789,8 +792,9 @@ void GfxDock::openSettings(const QString &startPage)
 			     QStringLiteral("minimal"));
 	noticeStyle->setCurrentIndex(qMax(0, noticeStyle->findData(s.noticeStyle)));
 	auto *noticeTint = new QComboBox(mc->parentWidget());
-	noticeTint->addItem(QStringLiteral("Platform colour — Twitch purple, Kick green, YouTube red, TikTok pink"),
-			    QStringLiteral("platform"));
+	noticeTint->addItem(
+		QStringLiteral("Platform colour — Twitch purple, Kick green, YouTube red, TikTok pink, Xive violet"),
+		QStringLiteral("platform"));
 	noticeTint->addItem(QStringLiteral("Event colour — gifts pink, raids red, streaks orange…"),
 			    QStringLiteral("event"));
 	noticeTint->addItem(QStringLiteral("My accent colour (Appearance)"), QStringLiteral("accent"));
@@ -926,9 +930,10 @@ void GfxDock::openSettings(const QString &startPage)
 	auto *resetBtn = new QPushButton(QStringLiteral("Reset appearance"), apParent);
 	theme::setRole(resetBtn, "ghost");
 	ap->addWidget(resetBtn, 0, Qt::AlignLeft);
-	note(ap, QStringLiteral(
-			 "Changes show on the dock right away; Cancel puts everything back. Live / ON-AIR red and "
-			 "the Twitch, Kick, YouTube and TikTok colours always stay the same so they're easy to spot."));
+	note(ap,
+	     QStringLiteral(
+		     "Changes show on the dock right away; Cancel puts everything back. Live / ON-AIR red and "
+		     "the Twitch, Kick, YouTube, TikTok and Xive colours always stay the same so they're easy to spot."));
 	ap->addStretch(1);
 
 	// Live preview: write straight into the settings, restyle; Cancel restores `before`.
@@ -1864,7 +1869,7 @@ void GfxDock::pollChat()
 		return;
 	chatInFlight_ = true;
 	// The platforms list also tells the server which chats to keep connected
-	// (YouTube / TikTok only while switched on here).
+	// (YouTube / TikTok / Xive only while switched on here).
 	// watch= lists other people's channels to show (empty releases them).
 	// notices=1: subs / gifts / raids / shoutouts… as lines in the feed (2.7+ server; older ones ignore it).
 	QString path = QStringLiteral("/api/obs/chat?feed=%1&since=%2&platforms=%3&watch=%4&wait=12&notices=1")

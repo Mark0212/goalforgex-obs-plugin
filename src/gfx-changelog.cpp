@@ -68,8 +68,12 @@ const Note k2120[] = {
 	 "MultiChat moved out of the GoalForgeX dock into its own GoalForgeX MultiChat dock (Docks menu), so you can "
 	 "put it anywhere and give it the full height — no more sharing room with the Live tab."},
 	{"🟢", "Online / offline at a glance",
-	 "A slim row on top of the chat shows whether you're live or offline on Twitch, Kick, YouTube and TikTok, with "
-	 "viewers. Hover for uptime, title and category; ⋯ → big cards brings the old cards back."},
+	 "A slim row on top of the chat shows whether you're live or offline on Twitch, Kick, YouTube, TikTok and Xive, "
+	 "with viewers. Hover for uptime, title and category; ⋯ → big cards brings the old cards back."},
+	{"🐝", "Xive chat in MultiChat",
+	 "Your Xive chat now shows up in MultiChat next to Twitch, Kick, YouTube and TikTok, with its own filter chip, "
+	 "live status and Xive button to reply (posted by the GoalForgeX bot). Needs the GoalForgeX bot added to your "
+	 "Xive channel; ⚙ Settings → MultiChat turns it off."},
 	{"📏", "More room for chat",
 	 "Thinner edges and spacing and the slim status row leave far more of the dock for messages."},
 };

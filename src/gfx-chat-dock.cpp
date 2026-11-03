@@ -115,9 +115,10 @@ void GfxChatDock::render()
 		panel_->setVisible(chat);
 	note_->setVisible(!chat);
 	if (!connected_)
-		note_->setText(QStringLiteral("Connect your GoalForgeX account in the GoalForgeX dock and your Twitch, "
-					      "Kick, YouTube and TikTok chat shows up here in one feed — with each "
-					      "platform's online / offline status on top."));
+		note_->setText(
+			QStringLiteral("Connect your GoalForgeX account in the GoalForgeX dock and your Twitch, "
+				       "Kick, YouTube, TikTok and Xive chat shows up here in one feed — with each "
+				       "platform's online / offline status on top."));
 	else if (!panel_)
 		note_->setText(QStringLiteral("MultiChat is switched off.\n\n"
 					      "GoalForgeX dock → ⚙ Settings → MultiChat turns it back on."));

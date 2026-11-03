@@ -1,8 +1,9 @@
-// Shrinks the full-size Twitch / Kick artwork into the small icons the dock's
-// Chat tab uses (src/resources/). Pure Node: decodes the PNG, trims the
+// Shrinks the full-size Twitch / Kick / Xive artwork into the small icons the
+// dock's Chat tab uses (src/resources/). Pure Node: decodes the PNG, trims the
 // transparent margin, area-averages down (premultiplied alpha, so edges don't
 // get dark fringes) and re-encodes.
 //   node tools/make-chat-icons.js <twitch.png> <kick.png> [size=64]
+//   node tools/make-chat-icons.js xive=<xive.png> [size=64]     (any name=file pairs)
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -84,11 +85,17 @@ function resample(img, box, n) {
   return { w: n, h: n, px: out };
 }
 
-const [twitch, kick, sizeArg] = process.argv.slice(2);
+// name=file pairs, or the original two positional files (Twitch, Kick); a bare number = size.
+const args = process.argv.slice(2);
+const sizeArg = args.find(a => /^\d+$/.test(a));
 const n = parseInt(sizeArg, 10) || 64;
+const files = args.filter(a => a !== sizeArg);
+const named = files.filter(a => /^[a-z]+=/.test(a));
+const jobs = named.length ? named.map(a => [a.slice(0, a.indexOf('=')), a.slice(a.indexOf('=') + 1)])
+  : [['twitch', files[0]], ['kick', files[1]]];
 const outDir = path.join(__dirname, '..', 'src', 'resources');
 fs.mkdirSync(outDir, { recursive: true });
-for (const [name, file] of [['twitch', twitch], ['kick', kick]]) {
+for (const [name, file] of jobs) {
   const img = decodePng(fs.readFileSync(file));
   const box = trim(img);
   const png = encodePng(resample(img, box, n));

@@ -519,6 +519,7 @@ QFrame#gfxStatCard[gfxState="twitch"] { background: #1a1528; border-color: #4b2f
 QFrame#gfxStatCard[gfxState="kick"] { background: #12200c; border-color: #2c6b12; }
 QFrame#gfxStatCard[gfxState="youtube"] { background: #261012; border-color: #8f2430; }
 QFrame#gfxStatCard[gfxState="tiktok"] { background: #0b1f24; border-color: #1d7480; }
+QFrame#gfxStatCard[gfxState="xive"] { background: #1f1230; border-color: #6d2fa3; }
 QLabel#gfxStatSub, QLabel#gfxStatSummary { color: #8b93a3; font-size: 8pt; }
 
 QTextBrowser#gfxChatView {
@@ -534,6 +535,7 @@ QPushButton#gfxTarget:hover { color: #c9ced8; border-color: #3d4452; }
 QPushButton#gfxTarget[gfxState="twitch"]:checked { color: #ffffff; background: #2a1f4d; border-color: #9146ff; }
 QPushButton#gfxTarget[gfxState="kick"]:checked { color: #d9ffc7; background: #16300a; border-color: #53fc18; }
 QPushButton#gfxTarget[gfxState="youtube"]:checked { color: #ffffff; background: #3a1216; border-color: #ff3048; }
+QPushButton#gfxTarget[gfxState="xive"]:checked { color: #ffffff; background: #2b1645; border-color: #a855f7; }
 QPushButton#gfxTarget:disabled { color: #3f4552; background: #15171c; border-color: #22262d; }
 
 QLineEdit#gfxChatInput { padding: 6px 10px; border-radius: 8px; background: #0f1115; }
