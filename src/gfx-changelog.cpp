@@ -63,17 +63,19 @@ const Note k280[] = {
 	{"✏️", "One title, every platform",
 	 "Change your stream title and category on Twitch and Kick at once from the Multistream dock (Pro)."},
 };
+const Note k2121[] = {
+	{"🐝", "Xive chat in MultiChat",
+	 "Your Xive chat now shows up in MultiChat next to Twitch, Kick, YouTube and TikTok, with its own filter chip, "
+	 "live / offline status and a Xive button to reply (posted by the GoalForgeX bot). Needs the GoalForgeX bot "
+	 "added to your Xive channel; ⚙ Settings → MultiChat turns it off."},
+};
 const Note k2120[] = {
 	{"💬", "MultiChat has its own dock",
 	 "MultiChat moved out of the GoalForgeX dock into its own GoalForgeX MultiChat dock (Docks menu), so you can "
 	 "put it anywhere and give it the full height — no more sharing room with the Live tab."},
 	{"🟢", "Online / offline at a glance",
-	 "A slim row on top of the chat shows whether you're live or offline on Twitch, Kick, YouTube, TikTok and Xive, "
-	 "with viewers. Hover for uptime, title and category; ⋯ → big cards brings the old cards back."},
-	{"🐝", "Xive chat in MultiChat",
-	 "Your Xive chat now shows up in MultiChat next to Twitch, Kick, YouTube and TikTok, with its own filter chip, "
-	 "live status and Xive button to reply (posted by the GoalForgeX bot). Needs the GoalForgeX bot added to your "
-	 "Xive channel; ⚙ Settings → MultiChat turns it off."},
+	 "A slim row on top of the chat shows whether you're live or offline on Twitch, Kick, YouTube and TikTok, with "
+	 "viewers. Hover for uptime, title and category; ⋯ → big cards brings the old cards back."},
 	{"📏", "More room for chat",
 	 "Thinner edges and spacing and the slim status row leave far more of the dock for messages."},
 };
@@ -205,6 +207,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"2.12.1", "November 2026", k2121, static_cast<int>(std::size(k2121))},
 	{"2.12.0", "November 2026", k2120, static_cast<int>(std::size(k2120))},
 	{"2.11.4", "October 2026", k2114, static_cast<int>(std::size(k2114))},
 	{"2.11.3", "October 2026", k2113, static_cast<int>(std::size(k2113))},
