@@ -608,6 +608,14 @@ void GfxDock::rebuildTabs()
 		tabs_->addTab(healthPanel_, QStringLiteral("Health"));
 	if (tabs_->count() == 0)
 		tabs_->addTab(widgetsPage_, QStringLiteral("Widgets")); // never leave the dock empty
+	// The pages are children of tabs_ itself until addTab() adopts them. One that
+	// was never a tab (switched off in Layout → Tabs before OBS started) would
+	// otherwise show as a stray child at tabs_'s top-left — on top of the tab bar
+	// and the open tab. Events / MultiChat are hidden above for the same reason.
+	for (QWidget *p : {static_cast<QWidget *>(livePanel_), widgetsPage_, static_cast<QWidget *>(reactionsPanel_),
+			   static_cast<QWidget *>(healthPanel_)})
+		if (tabs_->indexOf(p) < 0)
+			p->hide();
 	const int i = tabs_->indexOf(current);
 	if (i >= 0)
 		tabs_->setCurrentIndex(i);
@@ -1955,6 +1963,7 @@ void GfxDock::sendChat(const QStringList &platforms, const QString &text)
 					failed << QStringLiteral("%1: %2").arg(
 						it.key() == QLatin1String("kick")      ? QStringLiteral("Kick")
 						: it.key() == QLatin1String("youtube") ? QStringLiteral("YouTube")
+						: it.key() == QLatin1String("xive")    ? QStringLiteral("Xive")
 										       : QStringLiteral("Twitch"),
 						one.value(QStringLiteral("error")).toString());
 			}

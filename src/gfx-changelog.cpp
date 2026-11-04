@@ -63,6 +63,12 @@ const Note k280[] = {
 	{"✏️", "One title, every platform",
 	 "Change your stream title and category on Twitch and Kick at once from the Multistream dock (Pro)."},
 };
+const Note k2122[] = {
+	{"🧩", "Dock no longer jumbled",
+	 "With a tab switched off in Layout → Tabs, that page could pile up on top of the others at the top of the "
+	 "GoalForgeX dock, covering the tabs. Pages you've switched off now stay out of sight."},
+	{"🐝", "Clearer Xive send errors", "A message that couldn't be sent to Xive now says Xive instead of Twitch."},
+};
 const Note k2121[] = {
 	{"🐝", "Xive chat in MultiChat",
 	 "Your Xive chat now shows up in MultiChat next to Twitch, Kick, YouTube and TikTok, with its own filter chip, "
@@ -207,6 +213,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"2.12.2", "November 2026", k2122, static_cast<int>(std::size(k2122))},
 	{"2.12.1", "November 2026", k2121, static_cast<int>(std::size(k2121))},
 	{"2.12.0", "November 2026", k2120, static_cast<int>(std::size(k2120))},
 	{"2.11.4", "October 2026", k2114, static_cast<int>(std::size(k2114))},
