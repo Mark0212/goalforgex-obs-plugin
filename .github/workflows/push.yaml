@@ -26,34 +26,44 @@ jobs:
       contents: read
 
   create-release:
-    name: Create Release 🛫
-    if: github.ref_type == 'tag'
+    name: Publish Release 🛫
+    # A release tag, or ANY push to a release/** branch, publishes the version in
+    # buildspec.json — but only after every platform built. The first build of a
+    # version creates its release; later pushes replace its files with the new
+    # build and move the tag to that commit. Same version, higher build number →
+    # docks install it as a fix, so a fix needs no version bump and no tagging.
+    if: github.ref_type == 'tag' || startsWith(github.ref_name, 'release/')
     runs-on: ubuntu-24.04
     needs: build-project
     defaults:
       run:
         shell: bash
     steps:
-      - name: Check Release Tag ☑️
+      - name: Check Release Version ☑️
         id: check
+        env:
+          SPEC_VERSION: ${{ needs.build-project.outputs.pluginVersion }}
         run: |
-          : Check Release Tag ☑️
+          : Check Release Version ☑️
           if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
           shopt -s extglob
 
-          case "${GITHUB_REF_NAME}" in
+          # Tag push: the tag (build-project already checked it matches buildspec.json).
+          # Branch push: buildspec.json's version.
+          if [[ "${GITHUB_REF_TYPE}" == tag ]]; then version="${GITHUB_REF_NAME}"; else version="${SPEC_VERSION}"; fi
+
+          case "${version}" in
             +([0-9]).+([0-9]).+([0-9]) )
               echo 'validTag=true' >> $GITHUB_OUTPUT
               echo 'prerelease=false' >> $GITHUB_OUTPUT
-              echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
               ;;
             +([0-9]).+([0-9]).+([0-9])-@(beta|rc)*([0-9]) )
               echo 'validTag=true' >> $GITHUB_OUTPUT
               echo 'prerelease=true' >> $GITHUB_OUTPUT
-              echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
               ;;
             *) echo 'validTag=false' >> $GITHUB_OUTPUT ;;
           esac
+          echo "version=${version}" >> $GITHUB_OUTPUT
 
       - name: Download Build Artifacts 📥
         uses: actions/download-artifact@v4
@@ -88,32 +98,62 @@ jobs:
             done
           done
 
-      - name: Generate Checksums 🪪
+      - name: Generate Release Notes 🪪
         if: fromJSON(steps.check.outputs.validTag)
+        env:
+          BUILD_NUMBER: ${{ needs.build-project.outputs.buildNumber }}
         run: |
-          : Generate Checksums 🪪
+          : Generate Release Notes 🪪
           if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
           shopt -s extglob
 
-          echo "### Checksums" > ${{ github.workspace }}/CHECKSUMS.txt
-          for file in ${{ github.workspace }}/@(*.exe|*.deb|*.ddeb|*.pkg|*.tar.xz|*.zip); do
-            echo "    ${file##*/}: $(sha256sum "${file}" | cut -d " " -f 1)" >> ${{ github.workspace }}/CHECKSUMS.txt
-          done
+          # goalforgex.com reads both of these: the "file: sha256" lines (the
+          # installer's checksum) and "build: N" (same version, higher build =
+          # an update for the docks).
+          {
+            echo "### Checksums"
+            for file in ${{ github.workspace }}/@(*.exe|*.deb|*.ddeb|*.pkg|*.tar.xz|*.zip); do
+              echo "    ${file##*/}: $(sha256sum "${file}" | cut -d " " -f 1)"
+            done
+            echo ""
+            echo "build: ${BUILD_NUMBER}"
+            echo "commit: ${GITHUB_SHA}"
+          } > ${{ github.workspace }}/CHECKSUMS.txt
 
-      - name: Create Release 🛫
+      - name: Publish Release 🛫
         if: fromJSON(steps.check.outputs.validTag)
-        id: create_release
-        uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564
-        with:
-          draft: true
-          prerelease: ${{ fromJSON(steps.check.outputs.prerelease) }}
-          tag_name: ${{ steps.check.outputs.version }}
-          name: ${{ needs.build-project.outputs.pluginName }} ${{ steps.check.outputs.version }}
-          body_path: ${{ github.workspace }}/CHECKSUMS.txt
-          files: |
-            ${{ github.workspace }}/*.exe
-            ${{ github.workspace }}/*.zip
-            ${{ github.workspace }}/*.pkg
-            ${{ github.workspace }}/*.deb
-            ${{ github.workspace }}/*.ddeb
-            ${{ github.workspace }}/*.tar.xz
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.check.outputs.version }}
+          TITLE: ${{ needs.build-project.outputs.pluginName }} ${{ steps.check.outputs.version }}
+          PRERELEASE: ${{ steps.check.outputs.prerelease }}
+        run: |
+          : Publish Release 🛫
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+          shopt -s extglob
+          shopt -s nullglob
+
+          files=( ${{ github.workspace }}/@(*.exe|*.zip|*.pkg|*.deb|*.ddeb|*.tar.xz) )
+          if (( ${#files[@]} == 0 )); then echo "::error::No build files to publish."; exit 1; fi
+
+          # The tag follows the build: moved to this commit (or made). Refs written
+          # with the workflow's own token never start another run — no loop.
+          if gh api "repos/${GH_REPO}/git/refs/tags/${TAG}" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/${GH_REPO}/git/refs/tags/${TAG}" -f sha="${GITHUB_SHA}" -F force=true > /dev/null
+          else
+            gh api -X POST "repos/${GH_REPO}/git/refs" -f ref="refs/tags/${TAG}" -f sha="${GITHUB_SHA}" > /dev/null
+          fi
+
+          if [[ "${PRERELEASE}" == true ]]; then flags=(--prerelease); else flags=(--latest); fi
+
+          if gh release view "${TAG}" > /dev/null 2>&1; then
+            # Files first, notes (with the new build number) last: a dock only sees
+            # the higher build once the new installer is already there to download.
+            gh release upload "${TAG}" "${files[@]}" --clobber
+            gh release edit "${TAG}" --title "${TITLE}" --notes-file ${{ github.workspace }}/CHECKSUMS.txt --draft=false "${flags[@]}"
+            echo "Updated release ${TAG} with build ${GITHUB_SHA:0:9}"
+          else
+            gh release create "${TAG}" "${files[@]}" --verify-tag --title "${TITLE}" --notes-file ${{ github.workspace }}/CHECKSUMS.txt "${flags[@]}"
+            echo "Created release ${TAG}"
+          fi

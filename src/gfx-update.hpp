@@ -20,16 +20,25 @@ struct UpdateInfo {
 	QString installerUrl; // GitHub release asset
 	QString sha256;       // expected SHA-256 of the installer (lowercase hex)
 	QString minVersion;   // oldest version still allowed to use the dock
+	int build = 0;        // CI build number of that release (0 = server doesn't say)
 
 	static UpdateInfo fromJson(const QJsonObject &o);
-	// Newer than this build, with a GitHub installer link and a checksum —
+	// A newer version than this build — or the same version, rebuilt with a fix
+	// (higher build number). Fixes ship without a version bump.
+	bool newer() const;
+	// newer(), with a GitHub installer link and a checksum —
 	// i.e. something we're willing to download and run automatically.
 	bool installable() const;
 	// This build is below the minimum → the dock must be updated to be used.
 	bool required() const;
+	// Tells two releases of the same version apart ("2.12.2-b57"); file-name safe.
+	QString key() const;
+	// For people: "2.12.3", or "2.12.2 (fix, build 57)" for a rebuild of this version.
+	QString label() const;
 };
 
 bool versionNewer(const QString &a, const QString &b); // a > b ?
+int thisBuild();                                       // this plugin's build number (0 = local build)
 
 // Where the verified installer for `version` is saved (the temp folder).
 QString installerPath(const QString &version);

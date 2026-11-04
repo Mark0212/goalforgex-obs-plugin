@@ -68,6 +68,9 @@ const Note k2122[] = {
 	 "With a tab switched off in Layout → Tabs, that page could pile up on top of the others at the top of the "
 	 "GoalForgeX dock, covering the tabs. Pages you've switched off now stay out of sight."},
 	{"🐝", "Clearer Xive send errors", "A message that couldn't be sent to Xive now says Xive instead of Twitch."},
+	{"⚡", "Quick fixes, delivered automatically",
+	 "Small fixes can now arrive as a new build of the same version — the dock shows it as “2.12.2 (fix, build "
+	 "N)” and updates like any other release. Your build number is next to the version at the bottom of the dock."},
 };
 const Note k2121[] = {
 	{"🐝", "Xive chat in MultiChat",

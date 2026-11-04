@@ -92,7 +92,7 @@ bool obs_module_load(void)
 		if (g_dock)
 			g_dock->performAction(id, arg);
 	});
-	obs_log(LOG_INFO, "GoalForgeX loaded (version %s, server %s)", PLUGIN_VERSION,
+	obs_log(LOG_INFO, "GoalForgeX loaded (version %s build %s, server %s)", PLUGIN_VERSION, PLUGIN_BUILD,
 		gfx::baseUrl().toUtf8().constData());
 	return true;
 }

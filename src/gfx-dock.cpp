@@ -1771,18 +1771,17 @@ void GfxDock::checkForUpdate()
 			}
 			verCheck_ = VerCheck::Done;
 			const UpdateInfo info = UpdateInfo::fromJson(r.json());
-			if (info.version != update_.version)
-				upd_ = Upd::None; // a newer release replaced the one we knew about
+			if (info.key() != update_.key())
+				upd_ = Upd::None; // a newer release (or a fix build) replaced the one we knew about
 			update_ = info;
-			const bool newer = !info.version.isEmpty() &&
-					   versionNewer(info.version, QString::fromUtf8(PLUGIN_VERSION));
-			latestVersion_ = newer ? info.version : QString();
+			const bool newer = info.newer(); // newer version, or this version with a fix
+			latestVersion_ = newer ? info.label() : QString();
 			if (info.required() && !updateRequired_)
 				enterUpdateRequired(QString());
 			const bool autoOn = info.installable() && (settings().autoInstallUpdates || updateRequired_);
 			if (newer && upd_ == Upd::None) {
 				upd_ = Upd::Available;
-				updatePath_ = installerPath(info.version);
+				updatePath_ = installerPath(info.key());
 				// Background download so it's ready to install on exit.
 				if (autoOn)
 					startUpdateDownload();
@@ -1800,7 +1799,11 @@ void GfxDock::checkForUpdate()
 
 void GfxDock::renderVersion()
 {
-	const QString current = QStringLiteral("v%1").arg(QString::fromUtf8(PLUGIN_VERSION));
+	// Build number too: fixes ship under the same version, so it's what tells them apart.
+	const QString current =
+		thisBuild() > 0
+			? QStringLiteral("v%1 (build %2)").arg(QString::fromUtf8(PLUGIN_VERSION)).arg(thisBuild())
+			: QStringLiteral("v%1").arg(QString::fromUtf8(PLUGIN_VERSION));
 	QString status;
 	const char *tone = "muted";
 	switch (verCheck_) {
@@ -2038,7 +2041,7 @@ void GfxDock::renderUpdate()
 {
 	const bool show = upd_ != Upd::None && (settings().checkUpdates || updateRequired_ || upd_ == Upd::Ready);
 	updateRow_->setVisible(show && !updateRequired_);
-	const QString v = update_.version.toHtmlEscaped();
+	const QString v = update_.label().toHtmlEscaped();
 	updateBtn_->setEnabled(upd_ != Upd::Downloading);
 	switch (upd_) {
 	case Upd::None:
@@ -2054,7 +2057,7 @@ void GfxDock::renderUpdate()
 	case Upd::Ready:
 		updateLbl_->setText(
 			!settings().autoInstallUpdates ? QStringLiteral("✅ Version %1 is ready to install.").arg(v)
-			: settings().updateDeclined == update_.version
+			: settings().updateDeclined == update_.key()
 				? QStringLiteral(
 					  "⚠ Version %1 didn't install last time — Windows asked to allow it and it "
 					  "wasn't approved. Close OBS and click Yes, or Restart now.")
@@ -2094,7 +2097,7 @@ void GfxDock::startUpdateDownload()
 	runAsync(
 		this, [info, path] { return downloadAndVerify(info, path); },
 		[this, info](const QString &err) {
-			if (info.version != update_.version)
+			if (info.key() != update_.key())
 				return; // superseded while downloading
 			if (err.isEmpty()) {
 				upd_ = Upd::Ready;
@@ -2122,7 +2125,7 @@ void GfxDock::restartAndUpdate()
 		    this, QStringLiteral("Update GoalForgeX"),
 		    QStringLiteral(
 			    "OBS will close, update GoalForgeX to version %1 and open again.\n\nWindows will ask to allow the installer — click Yes.")
-			    .arg(update_.version)) != QMessageBox::Yes)
+			    .arg(update_.label())) != QMessageBox::Yes)
 		return;
 	QString err;
 	if (!launchInstaller(updatePath_, true, &err)) {
@@ -2877,7 +2880,7 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 			installerLaunched_ = launchInstaller(updatePath_, false, &err);
 			// Declined at Windows' prompt (or couldn't start): say so next time,
 			// it'll ask again on the next close. Launched: nothing to remember.
-			settings().updateDeclined = installerLaunched_ ? QString() : update_.version;
+			settings().updateDeclined = installerLaunched_ ? QString() : update_.key();
 			saveSettings();
 		}
 		loaded_ = false;
