@@ -782,8 +782,9 @@ void GfxChatPanel::buildUi()
 	searchBtn_ = iconBtn(QStringLiteral("🔍"), QStringLiteral("Search chat by message or name"), true);
 	pauseBtn_ = iconBtn(QStringLiteral("⏸"),
 			    QStringLiteral("Pause the chat so it stops moving (new messages still come in)"), true);
-	viewersBtn_ = iconBtn(QStringLiteral("👥"),
-			      QStringLiteral("Show or hide Who's here beside the chat (needs a dock at least 460 px wide)"), true);
+	viewersBtn_ = iconBtn(
+		QStringLiteral("👥"),
+		QStringLiteral("Show or hide Who's here beside the chat (needs a dock at least 460 px wide)"), true);
 	viewersBtn_->setChecked(settings().chatViewers);
 	moreBtn_ = iconBtn(QStringLiteral("⋯"), QStringLiteral("Chat options"), false);
 	statusLbl_ = new QLabel(main_);
