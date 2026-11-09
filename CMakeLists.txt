@@ -58,6 +58,8 @@ target_sources(
     src/gfx-auth.hpp
     src/gfx-changelog.cpp
     src/gfx-changelog.hpp
+    src/gfx-viewers.cpp
+    src/gfx-viewers.hpp
     src/gfx-chat-dock.cpp
     src/gfx-chat-dock.hpp
     src/gfx-chat.cpp

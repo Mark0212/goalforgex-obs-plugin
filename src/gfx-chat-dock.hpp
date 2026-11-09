@@ -16,7 +16,11 @@ the Free Software Foundation; either version 2 of the License, or
 class QDockWidget;
 class QLabel;
 class QShowEvent;
+class QResizeEvent;
+class QSplitter;
+class QTimer;
 class QVBoxLayout;
+class GfxViewerPanel;
 
 // "GoalForgeX MultiChat" — its own OBS dock (Docks menu) since 2.12, so the
 // chat gets the full height of a dock instead of sharing one with the Live
@@ -30,6 +34,12 @@ public:
 	// nullptr = MultiChat is switched off (Settings → MultiChat).
 	void setPanel(QWidget *panel);
 	QWidget *panel() const { return panel_; }
+	// "Who's here", beside the chat. The main dock owns its polling and data.
+	void setViewers(GfxViewerPanel *viewers);
+	// Whether the list is on screen, so the main dock only polls for it then.
+	bool showingViewers() const;
+	// The on / off switch or the side changed.
+	void applyViewers();
 	// Not connected (or an update is required): a short note instead of the chat.
 	void setConnected(bool connected);
 	// New messages while this dock is hidden or behind another dock's tab.
@@ -42,14 +52,20 @@ public:
 	QDockWidget *dockFrame() const;
 
 	std::function<void()> onShown; // became visible → the main dock clears the unread count
+	std::function<void()> onViewersShown; // the list just appeared → fetch it now
 
 protected:
 	void showEvent(QShowEvent *event) override;
+	void resizeEvent(QResizeEvent *event) override;
 
 private:
 	void render();
 
 	QVBoxLayout *body_ = nullptr;
+	QSplitter *split_ = nullptr;
+	QTimer *widthSave_ = nullptr;
+	GfxViewerPanel *viewers_ = nullptr;
+	bool viewersOn_ = false;
 	QLabel *note_ = nullptr;
 	QWidget *panel_ = nullptr;
 	bool connected_ = false;

@@ -26,6 +26,7 @@ the Free Software Foundation; either version 2 of the License, or
 
 class GfxChatDock;
 class GfxChatPanel;
+class GfxViewerPanel;
 class GfxEventsDock;
 class GfxMultistreamDock;
 class GfxEventsPanel;
@@ -87,6 +88,7 @@ private:
 	// MultiChat tab (Twitch / Kick / YouTube / TikTok): adaptive poll of /api/obs/chat, send as the streamer
 	void scheduleChat(int ms);
 	void pollChat();
+	void pollViewers();
 	void sendChat(const QStringList &platforms, const QString &text);
 	void chatMod(const QString &platform, const QString &action, const QString &login, int seconds,
 		     const QString &messageId, const QString &displayName);
@@ -164,6 +166,8 @@ private:
 	GfxReactionsPanel *reactionsPanel_ = nullptr;
 	GfxHealthPanel *healthPanel_ = nullptr;
 	GfxChatPanel *chatPanel_ = nullptr;
+	GfxViewerPanel *viewersPanel_ = nullptr;
+	bool viewersInFlight_ = false;
 	GfxEventsPanel *eventsPanel_ = nullptr;
 	GfxEventsDock *eventsDock_ = nullptr;
 	GfxChatDock *chatDock_ = nullptr;      // owned by OBS (a dock)
@@ -204,6 +208,7 @@ private:
 	qint64 streamStartMs_ = 0;
 	qint64 recordStartMs_ = 0;
 	QTimer chatTimer_; // single-shot; re-armed after every poll
+	QTimer viewersTimer_; // 30 s; polls only while the list is on screen
 	QString chatFeed_;
 	qint64 chatSeq_ = 0;
 	bool chatInFlight_ = false;

@@ -436,6 +436,7 @@ QLabel#gfxEvHead { color: #d6d9e0; }
 QLabel#gfxEvMsg { color: #9aa1b0; }
 QLabel#gfxEvNames { color: #8a91a0; font-size: 8pt; }
 QListWidget#gfxGameResults::item { padding: 3px 6px; }
+QListWidget#gfxViewerList { background: transparent; border: 0; padding: 0; }
 QListWidget#gfxGameResults::item:hover { background: #20242d; }
 
 QTreeWidget#gfxEvents {

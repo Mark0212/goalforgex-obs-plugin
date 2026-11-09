@@ -782,6 +782,9 @@ void GfxChatPanel::buildUi()
 	searchBtn_ = iconBtn(QStringLiteral("🔍"), QStringLiteral("Search chat by message or name"), true);
 	pauseBtn_ = iconBtn(QStringLiteral("⏸"),
 			    QStringLiteral("Pause the chat so it stops moving (new messages still come in)"), true);
+	viewersBtn_ = iconBtn(QStringLiteral("👥"),
+			      QStringLiteral("Show or hide Who's here beside the chat (needs a dock at least 460 px wide)"), true);
+	viewersBtn_->setChecked(settings().chatViewers);
 	moreBtn_ = iconBtn(QStringLiteral("⋯"), QStringLiteral("Chat options"), false);
 	statusLbl_ = new QLabel(main_);
 	statusLbl_->setObjectName(QStringLiteral("gfxChatStatus"));
@@ -790,6 +793,7 @@ void GfxChatPanel::buildUi()
 	tools->setSpacing(1);
 	tools->addWidget(searchBtn_);
 	tools->addWidget(pauseBtn_);
+	tools->addWidget(viewersBtn_);
 	tools->addWidget(moreBtn_);
 	tools->addSpacing(3);
 	tools->addWidget(statusLbl_);
@@ -799,6 +803,12 @@ void GfxChatPanel::buildUi()
 	root->addLayout(top);
 	connect(pauseBtn_, &QPushButton::clicked, this, [this](bool on) { setPaused(on); });
 	connect(moreBtn_, &QPushButton::clicked, this, [this] { showOptionsMenu(); });
+	connect(viewersBtn_, &QPushButton::clicked, this, [this](bool on) {
+		settings().chatViewers = on;
+		saveSettings();
+		if (onViewersToggled)
+			onViewersToggled();
+	});
 
 	// Search row: [ search…               ] [Only name ✕]
 	searchRow_ = new QWidget(main_);
@@ -3414,8 +3424,19 @@ void GfxChatPanel::clearChat()
 	rebuild();
 }
 
+void GfxChatPanel::openChatter(const QString &platform, const QString &login)
+{
+	showChatterCard(platform, login, QString(), QString());
+}
+
+void GfxChatPanel::openChatterMenu(const QString &platform, const QString &login)
+{
+	showUserMenu(platform, login, QString(), QString());
+}
+
 void GfxChatPanel::refresh()
 {
+	viewersBtn_->setChecked(settings().chatViewers);
 	if (!settings().chatPauseOnHover && hoverPaused_)
 		hoverPaused_ = false;
 	// Watched channels removed in the dialog disappear now, not at the next poll.

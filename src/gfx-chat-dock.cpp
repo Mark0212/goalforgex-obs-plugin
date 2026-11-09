@@ -8,14 +8,23 @@ the Free Software Foundation; either version 2 of the License, or
 (at your option) any later version.
 */
 #include "gfx-chat-dock.hpp"
+#include "gfx-settings.hpp"
 #include "gfx-theme.hpp"
+#include "gfx-viewers.hpp"
 
 #include <QDockWidget>
 #include <QLabel>
+#include <QList>
+#include <QResizeEvent>
 #include <QShowEvent>
+#include <QSplitter>
+#include <QTimer>
 #include <QVBoxLayout>
 
 using namespace gfx;
+
+// Below this the chat needs the room, so the list stays out of the way.
+static constexpr int kViewersMinDockWidth = 460;
 
 GfxChatDock::GfxChatDock(QWidget *parent) : QWidget(parent)
 {
@@ -39,6 +48,20 @@ GfxChatDock::GfxChatDock(QWidget *parent) : QWidget(parent)
 	body_ = new QVBoxLayout();
 	body_->setContentsMargins(0, 0, 0, 0);
 	root->addLayout(body_, 1);
+	split_ = new QSplitter(Qt::Horizontal, this);
+	split_->setChildrenCollapsible(false);
+	split_->setHandleWidth(5);
+	body_->addWidget(split_);
+	widthSave_ = new QTimer(this);
+	widthSave_->setSingleShot(true);
+	widthSave_->setInterval(600);
+	connect(widthSave_, &QTimer::timeout, this, [] { saveSettings(); });
+	connect(split_, &QSplitter::splitterMoved, this, [this] {
+		if (viewers_ && viewers_->isVisible()) {
+			settings().vwWidth = viewers_->width();
+			widthSave_->start();
+		}
+	});
 
 	theme::applyTo(this);
 	render();
@@ -56,16 +79,60 @@ void GfxChatDock::setPanel(QWidget *panel)
 {
 	if (panel == panel_)
 		return;
-	if (panel_ && panel_->parentWidget() == this) {
-		body_->removeWidget(panel_);
-		panel_->hide(); // stays our child until it's handed back
+	if (panel_ && panel_->parentWidget() == split_) {
+		panel_->hide();
+		panel_->setParent(this); // stays our child until it's handed back
 	}
 	panel_ = panel;
 	if (panel_) {
-		body_->addWidget(panel_, 1);
+		split_->addWidget(panel_);
 		panel_->show();
 	}
+	applyViewers();
 	render();
+}
+
+void GfxChatDock::setViewers(GfxViewerPanel *viewers)
+{
+	viewers_ = viewers;
+	if (viewers_) {
+		split_->addWidget(viewers_);
+		viewers_->hide();
+	}
+	applyViewers();
+}
+
+bool GfxChatDock::showingViewers() const
+{
+	return viewers_ && viewersOn_ && showingChat() && viewers_->isVisible() && !viewers_->visibleRegion().isEmpty();
+}
+
+void GfxChatDock::applyViewers()
+{
+	if (!viewers_)
+		return;
+	const bool wasOn = viewersOn_;
+	viewersOn_ = settings().chatViewers && panel_ && connected_ && width() >= kViewersMinDockWidth;
+	viewers_->setVisible(viewersOn_);
+	if (!viewersOn_ || !panel_)
+		return;
+	const Settings &s = settings();
+	split_->insertWidget(s.vwLeft ? 0 : 1, viewers_);
+	split_->setStretchFactor(split_->indexOf(panel_), 1);
+	split_->setStretchFactor(split_->indexOf(viewers_), 0);
+	const int total = qMax(width() - 12, split_->width());
+	const int vw = qBound(170, s.vwWidth, qMax(170, total - 250));
+	split_->setSizes(s.vwLeft ? QList<int>{vw, total - vw} : QList<int>{total - vw, vw});
+	if (!wasOn && onViewersShown)
+		onViewersShown();
+}
+
+void GfxChatDock::resizeEvent(QResizeEvent *event)
+{
+	QWidget::resizeEvent(event);
+	// Only when the width crosses the line; dragging the splitter must keep working.
+	if (viewers_ && settings().chatViewers && viewersOn_ != (panel_ && connected_ && width() >= kViewersMinDockWidth))
+		applyViewers();
 }
 
 void GfxChatDock::setConnected(bool connected)
@@ -73,6 +140,7 @@ void GfxChatDock::setConnected(bool connected)
 	if (connected == connected_)
 		return;
 	connected_ = connected;
+	applyViewers();
 	render();
 }
 
@@ -92,6 +160,8 @@ bool GfxChatDock::showingChat() const
 void GfxChatDock::applyAppearance()
 {
 	theme::applyTo(this);
+	if (viewers_)
+		viewers_->refresh();
 	render();
 }
 

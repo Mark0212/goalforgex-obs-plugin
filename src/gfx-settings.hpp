@@ -112,6 +112,20 @@ struct Settings {
 	bool eventsOwnDock = true;
 	bool eventsDockIntroduced = false; // shown once automatically after updating to 2.7
 	bool msDockIntroduced = false;     // Multistream dock shown once after updating to 2.8
+	// "Who's here", the list beside MultiChat
+	bool chatViewers = true;
+	bool vwLeft = false;          // left of the chat instead of right
+	bool vwLurkers = true;        // people who aren't chatting
+	bool vwHideBots = true;       // StreamElements, Nightbot, ForgeXBot…
+	bool vwNewestFirst = false;   // off = A to Z
+	bool vwArrivals = true;       // tint people who just arrived
+	bool vwPlatformIcons = true;
+	bool vwRoleBadges = true;
+	bool vwActivity = true;       // chatting / lurking / just arrived
+	bool vwNameColors = true;
+	bool vwCompact = false;
+	int vwWidth = 230;
+	QStringList vwHidden;         // logins the streamer hid from the list
 	bool chatDockIntroduced = false;   // MultiChat dock shown once after updating to 2.12
 	// Multistream → game list: switching a game also switches to the alert
 	// preset labelled with it (only shown to accounts with alert presets)

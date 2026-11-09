@@ -96,6 +96,17 @@ static const BoolField kBools[] = {
 	{"eventsOwnDock", &Settings::eventsOwnDock},
 	{"eventsDockIntroduced", &Settings::eventsDockIntroduced},
 	{"chatDockIntroduced", &Settings::chatDockIntroduced},
+	{"chatViewers", &Settings::chatViewers},
+	{"vwLeft", &Settings::vwLeft},
+	{"vwLurkers", &Settings::vwLurkers},
+	{"vwHideBots", &Settings::vwHideBots},
+	{"vwNewestFirst", &Settings::vwNewestFirst},
+	{"vwArrivals", &Settings::vwArrivals},
+	{"vwPlatformIcons", &Settings::vwPlatformIcons},
+	{"vwRoleBadges", &Settings::vwRoleBadges},
+	{"vwActivity", &Settings::vwActivity},
+	{"vwNameColors", &Settings::vwNameColors},
+	{"vwCompact", &Settings::vwCompact},
 	{"msDockIntroduced", &Settings::msDockIntroduced},
 	{"msGameAlertPreset", &Settings::msGameAlertPreset},
 	{"evGiftBombs", &Settings::evGiftBombs},
@@ -139,6 +150,13 @@ void loadSettings()
 			g_settings.*(b.member) = v.toBool();
 	}
 	g_settings.chatFontSize = qBound(0, o.value(QStringLiteral("chatFontSize")).toInt(0), 24);
+	g_settings.vwWidth = qBound(170, o.value(QStringLiteral("vwWidth")).toInt(230), 600);
+	const QJsonArray vh = o.value(QStringLiteral("vwHidden")).toArray();
+	for (qsizetype i = 0; i < vh.size() && g_settings.vwHidden.size() < 200; ++i) {
+		const QString w = vh.at(i).toString().trimmed().left(60);
+		if (!w.isEmpty() && !g_settings.vwHidden.contains(w, Qt::CaseInsensitive))
+			g_settings.vwHidden << w;
+	}
 	g_settings.ncTikTokMinCoins = qBound(0, o.value(QStringLiteral("ncTikTokMinCoins")).toInt(0), 100000);
 	static const QStringList kStyles = {QStringLiteral("card"), QStringLiteral("strip"), QStringLiteral("minimal")};
 	static const QStringList kTints = {QStringLiteral("platform"), QStringLiteral("event"),
@@ -208,6 +226,8 @@ void saveSettings()
 	for (const BoolField &b : kBools)
 		o.insert(QLatin1String(b.key), g_settings.*(b.member));
 	o.insert(QStringLiteral("chatFontSize"), g_settings.chatFontSize);
+	o.insert(QStringLiteral("vwWidth"), g_settings.vwWidth);
+	o.insert(QStringLiteral("vwHidden"), QJsonArray::fromStringList(g_settings.vwHidden));
 	o.insert(QStringLiteral("ncTikTokMinCoins"), g_settings.ncTikTokMinCoins);
 	o.insert(QStringLiteral("noticeStyle"), g_settings.noticeStyle);
 	o.insert(QStringLiteral("noticeTint"), g_settings.noticeTint);

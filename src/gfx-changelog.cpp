@@ -63,6 +63,14 @@ const Note k280[] = {
 	{"✏️", "One title, every platform",
 	 "Change your stream title and category on Twitch and Kick at once from the Multistream dock (Pro)."},
 };
+const Note k2130[] = {
+	{"👥", "Who's here, right beside your chat",
+	 "MultiChat now has a live viewer list: broadcaster, mods, VIPs, chatters and Twitch lurkers, with search, "
+	 "filters and who just arrived. Click anyone for their card. The 👥 button shows or hides it."},
+	{"🎨", "Make it yours",
+	 "Pick the side, sort order, icons, badges, labels and name colours, hide bots or specific people, and "
+	 "drag it to the width you like. It's all in the list's ⋯ menu."},
+};
 const Note k2122[] = {
 	{"🧩", "Dock no longer jumbled",
 	 "With a tab switched off in Layout → Tabs, that page could pile up on top of the others at the top of the "
@@ -216,6 +224,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"2.13.0", "November 2026", k2130, static_cast<int>(std::size(k2130))},
 	{"2.12.2", "November 2026", k2122, static_cast<int>(std::size(k2122))},
 	{"2.12.1", "November 2026", k2121, static_cast<int>(std::size(k2121))},
 	{"2.12.0", "November 2026", k2120, static_cast<int>(std::size(k2120))},

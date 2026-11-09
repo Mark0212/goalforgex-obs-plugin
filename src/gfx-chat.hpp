@@ -118,6 +118,10 @@ public:
 	void clearChat();
 	// Settings changed (⚙ dialog): re-read them and redraw the feed.
 	void refresh();
+	// From the "Who's here" list.
+	void openChatter(const QString &platform, const QString &login);
+	void openChatterMenu(const QString &platform, const QString &login);
+	std::function<void()> onViewersToggled; // the 👥 button was pressed
 
 protected:
 	// Stats card clicks, feed hover / Ctrl+wheel, composer keys.
@@ -284,6 +288,7 @@ private:
 	QPushButton *fMentions_ = nullptr;
 	QPushButton *searchBtn_ = nullptr;
 	QPushButton *pauseBtn_ = nullptr;
+	QPushButton *viewersBtn_ = nullptr;
 	QPushButton *moreBtn_ = nullptr;
 	QWidget *searchRow_ = nullptr;
 	QLineEdit *searchEdit_ = nullptr;

@@ -21,6 +21,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-live.hpp"
 #include "gfx-settings.hpp"
 #include "gfx-theme.hpp"
+#include "gfx-viewers.hpp"
 
 #include <obs-module.h>
 #include <plugin-support.h>
@@ -148,6 +149,8 @@ GfxDock::GfxDock(QWidget *parent) : QWidget(parent), reactions_(this)
 	clockTimer_.start();
 	chatTimer_.setSingleShot(true);
 	connect(&chatTimer_, &QTimer::timeout, this, [this] { pollChat(); });
+	connect(&viewersTimer_, &QTimer::timeout, this, [this] { pollViewers(); });
+	viewersTimer_.start(30000);
 
 	Auth::instance().load();
 	if (Auth::instance().connected())
@@ -425,6 +428,19 @@ void GfxDock::buildUi()
 		reconnectTwitch();
 	};
 	chatPanel_ = new GfxChatPanel(tabs_);
+	viewersPanel_ = new GfxViewerPanel(this);
+	viewersPanel_->hide(); // the MultiChat dock adopts it (attachChatDock)
+	viewersPanel_->setOpenHandler(
+		[this](const QString &platform, const QString &login) { chatPanel_->openChatter(platform, login); });
+	viewersPanel_->setModHandler(
+		[this](const QString &platform, const QString &login) { chatPanel_->openChatterMenu(platform, login); });
+	const auto viewersChanged = [this] {
+		if (chatDock_)
+			chatDock_->applyViewers();
+		chatPanel_->refresh();
+	};
+	viewersPanel_->onLayoutChanged = viewersChanged;
+	chatPanel_->onViewersToggled = viewersChanged;
 	chatPanel_->setSendHandler(
 		[this](const QStringList &platforms, const QString &text) { sendChat(platforms, text); });
 	chatPanel_->setModHandler([this](const QString &platform, const QString &action, const QString &login,
@@ -622,6 +638,9 @@ void GfxDock::rebuildTabs()
 	livePanel_->applySettings();
 	eventsPanel_->applySettings();
 	chatPanel_->refresh();
+	viewersPanel_->refresh();
+	if (chatDock_)
+		chatDock_->applyViewers();
 	updateChatTabTitle();
 	updateEventsTabTitle();
 }
@@ -733,6 +752,21 @@ void GfxDock::openSettings(const QString &startPage)
 	       {QStringLiteral("…as big cards with uptime, category and chat pace (takes chat room)"),
 		&s.chatStatsCards}});
 	note(mc, QStringLiteral("Docks menu → GoalForgeX MultiChat shows the dock if you closed it."));
+	group(mc, QStringLiteral("Who's here (the list beside the chat)"),
+	      {{QStringLiteral("Show Who's here"), &s.chatViewers},
+	       {QStringLiteral("On the left of the chat instead of the right"), &s.vwLeft},
+	       {QStringLiteral("Include lurkers"), &s.vwLurkers},
+	       {QStringLiteral("Hide bots"), &s.vwHideBots},
+	       {QStringLiteral("Newest arrivals first (off = A to Z)"), &s.vwNewestFirst},
+	       {QStringLiteral("Highlight people who just arrived"), &s.vwArrivals},
+	       {QStringLiteral("Platform icons"), &s.vwPlatformIcons},
+	       {QStringLiteral("Role badges"), &s.vwRoleBadges},
+	       {QStringLiteral("Chatting / lurking labels"), &s.vwActivity},
+	       {QStringLiteral("Chatters' own name colours"), &s.vwNameColors},
+	       {QStringLiteral("Compact rows"), &s.vwCompact}});
+	note(mc, QStringLiteral("Twitch lists everyone in your chat. Kick, YouTube, TikTok and Xive don't share a viewer "
+				"list, so people there appear once they chat. The list hides itself when the dock is "
+				"narrower than 460 px."));
 	group(mc, QStringLiteral("Platforms"),
 	      {{QStringLiteral("YouTube chat (read + reply)"), &s.chatYouTube},
 	       {QStringLiteral("TikTok LIVE chat (read-only)"), &s.chatTikTok},
@@ -1058,6 +1092,8 @@ void GfxDock::attachChatDock(GfxChatDock *dock)
 	chatDock_ = dock;
 	if (!dock)
 		return;
+	dock->onViewersShown = [this] { QTimer::singleShot(300, this, [this] { pollViewers(); }); };
+	dock->setViewers(viewersPanel_);
 	dock->onShown = [this] {
 		if (chatDock_ && chatDock_->panel()) {
 			chatUnread_ = 0;
@@ -1859,6 +1895,38 @@ void GfxDock::renderAirChip()
 }
 
 // ── Chat tab ─────────────────────────────────────────────────────
+
+// Runs only while the list is on screen: the server asks Twitch for every
+// chatter, which is real work on a big channel.
+void GfxDock::pollViewers()
+{
+	if (state_ != State::Connected || updateRequired_ || viewersInFlight_ || !chatDock_ ||
+	    !chatDock_->showingViewers())
+		return;
+	viewersInFlight_ = true;
+	const QString path = QStringLiteral("/api/obs/chat/viewers?platforms=%1")
+				     .arg(GfxChatPanel::wantedPlatforms().join(QLatin1Char(',')));
+	runAsync(
+		this, [path] { return apiGet(path); },
+		[this](const ApiResult &r) {
+			viewersInFlight_ = false;
+			if (r.token == TokenStatus::NeedsReconnect)
+				return;
+			if (r.http.status == 403 && r.http.errorCode() == QLatin1String("pro_required")) {
+				viewersPanel_->setNote(r.http.serverMessage());
+				return;
+			}
+			if (r.http.status == 404 && r.http.errorCode().isEmpty()) {
+				viewersPanel_->setNote(QStringLiteral("Who's here needs a newer GoalForgeX site."));
+				return;
+			}
+			if (!r.ok()) {
+				viewersPanel_->setNote(QStringLiteral("Couldn't refresh the list. Trying again shortly."));
+				return;
+			}
+			viewersPanel_->applyPoll(r.http.json());
+		});
+}
 
 void GfxDock::scheduleChat(int ms)
 {
