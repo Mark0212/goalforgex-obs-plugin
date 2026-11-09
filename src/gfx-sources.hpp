@@ -98,9 +98,12 @@ bool reload(obs_source_t *source);
 // Alert Coin Drop aim (2.10): where this account's Sub Goal (the goal widget or
 // a source pinned to a Sub Goal preset) sits inside its Alerts source in the
 // scene on air — the goal's centre as % of the Alerts source, so the overlay
-// throws its coins dead on. Looks inside groups. False when either isn't
-// visibly in that scene. sceneName is set either way.
-bool coinTarget(const QString &account, double *xPct, double *yPct, QString *sceneName);
+// throws its coins dead on. Also its size (wPct / hPct, % of the Alerts source)
+// and which goal it is (widgetId: "goal" or "preset:<id>"), so the site can aim
+// at the number inside it (2.10.2). Looks inside groups and nested scenes.
+// False when either isn't visibly in that scene. sceneName is set either way.
+bool coinTarget(const QString &account, double *xPct, double *yPct, QString *sceneName, double *wPct = nullptr,
+		double *hPct = nullptr, QString *widgetId = nullptr);
 
 } // namespace sources
 } // namespace gfx

@@ -11,6 +11,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-api.hpp"
 #include "gfx-auth.hpp"
 #include "gfx-changelog.hpp"
+#include "gfx-chat-dock.hpp"
 #include "gfx-chat.hpp"
 #include "gfx-events-dock.hpp"
 #include "gfx-events.hpp"
@@ -20,6 +21,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-live.hpp"
 #include "gfx-settings.hpp"
 #include "gfx-theme.hpp"
+#include "gfx-viewers.hpp"
 
 #include <obs-module.h>
 #include <plugin-support.h>
@@ -122,8 +124,16 @@ GfxDock::GfxDock(QWidget *parent) : QWidget(parent), reactions_(this)
 	connect(&stateTimer_, &QTimer::timeout, this, [this] { pollState(); });
 	// Hourly: a release that lands mid-session is downloaded long before the
 	// streamer closes OBS (the check itself is one small cached request).
-	aimTimer_.setInterval(3000);
+	// 1 s: moving / resizing the goal in OBS re-aims the Coin Drop almost at once
+	// (only an actual move is sent — see reportCoinAim).
+	aimTimer_.setInterval(1000);
 	connect(&aimTimer_, &QTimer::timeout, this, [this] { reportCoinAim(); });
+	// Moving / resizing / showing / hiding a source in the on-air scene re-aims
+	// right away (once the drag settles), so an alert fired just after the move
+	// already flies to the new spot.
+	aimSoon_.setSingleShot(true);
+	aimSoon_.setInterval(150);
+	connect(&aimSoon_, &QTimer::timeout, this, [this] { reportCoinAim(); });
 	updateTimer_.setInterval(60 * 60 * 1000);
 	connect(&updateTimer_, &QTimer::timeout, this, [this] { checkForUpdate(); });
 	msgClear_.setSingleShot(true);
@@ -139,6 +149,8 @@ GfxDock::GfxDock(QWidget *parent) : QWidget(parent), reactions_(this)
 	clockTimer_.start();
 	chatTimer_.setSingleShot(true);
 	connect(&chatTimer_, &QTimer::timeout, this, [this] { pollChat(); });
+	connect(&viewersTimer_, &QTimer::timeout, this, [this] { pollViewers(); });
+	viewersTimer_.start(30000);
 
 	Auth::instance().load();
 	if (Auth::instance().connected())
@@ -186,10 +198,14 @@ void GfxDock::buildUi()
 	menuBtn_->setPopupMode(QToolButton::InstantPopup);
 	theme::setRole(menuBtn_, "ghost");
 	auto *menu = new QMenu(menuBtn_);
-	connect(menu->addAction(QStringLiteral("Settings…")), &QAction::triggered, this, [this] { openSettings(); });
-	connect(menu->addAction(QStringLiteral("Show the Events dock")), &QAction::triggered, this,
+	connect(menu->addAction(QStringLiteral("⚙   Settings…")), &QAction::triggered, this,
+		[this] { openSettings(); });
+	menu->addSection(QStringLiteral("Docks"));
+	connect(menu->addAction(QStringLiteral("📋   Events")), &QAction::triggered, this,
 		[this] { revealEventsDock(true); });
-	connect(menu->addAction(QStringLiteral("Show the Multistream dock")), &QAction::triggered, this, [this] {
+	connect(menu->addAction(QStringLiteral("💬   MultiChat")), &QAction::triggered, this,
+		[this] { revealChatDock(); });
+	connect(menu->addAction(QStringLiteral("📡   Multistream")), &QAction::triggered, this, [this] {
 		QDockWidget *frame = nullptr;
 		for (QWidget *w = msDock_ ? msDock_->parentWidget() : nullptr; w && !frame; w = w->parentWidget())
 			frame = qobject_cast<QDockWidget *>(w);
@@ -198,19 +214,21 @@ void GfxDock::buildUi()
 			frame->raise();
 		}
 	});
-	connect(menu->addAction(QStringLiteral("What's new")), &QAction::triggered, this,
-		[this] { changelog::show(this); });
-	connect(menu->addAction(QStringLiteral("Manage connected devices…")), &QAction::triggered, this,
-		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/obs"))); });
-	connect(menu->addAction(QStringLiteral("Open GoalForgeX dashboard")), &QAction::triggered, this,
+	menu->addSection(QStringLiteral("goalforgex.com"));
+	connect(menu->addAction(QStringLiteral("🌐   Open my dashboard")), &QAction::triggered, this,
 		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/dashboard"))); });
-	connect(menu->addAction(QStringLiteral("Check for updates")), &QAction::triggered, this, [this] {
+	connect(menu->addAction(QStringLiteral("🖥   Connected OBS devices…")), &QAction::triggered, this,
+		[] { QDesktopServices::openUrl(QUrl(baseUrl() + QStringLiteral("/obs"))); });
+	menu->addSection(QStringLiteral("Plugin"));
+	connect(menu->addAction(QStringLiteral("✨   What's new")), &QAction::triggered, this,
+		[this] { changelog::show(this); });
+	connect(menu->addAction(QStringLiteral("⬆   Check for updates")), &QAction::triggered, this, [this] {
 		verCheck_ = VerCheck::Checking;
 		renderVersion();
 		checkForUpdate();
 	});
 	menu->addSeparator();
-	disconnectAct_ = menu->addAction(QStringLiteral("Disconnect this OBS"));
+	disconnectAct_ = menu->addAction(QStringLiteral("⏏   Disconnect this OBS"));
 	connect(disconnectAct_, &QAction::triggered, this, [this] { disconnectAccount(); });
 	menuBtn_->setMenu(menu);
 	head->addWidget(brandLbl_);
@@ -312,7 +330,8 @@ void GfxDock::buildUi()
 			"<table cellspacing='0' cellpadding='3'>"
 			"<tr><td style='color:%1'>▸</td><td>Widgets added to your scenes, already sized and placed</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>Live controls and OBS hotkeys for timers, goals and alerts</td></tr>"
-			"<tr><td style='color:%1'>▸</td><td>Twitch, Kick, YouTube and TikTok chat in one MultiChat feed</td></tr>"
+			"<tr><td style='color:%1'>▸</td><td>Twitch, Kick, YouTube, TikTok and Xive chat in one MultiChat feed</td></tr>"
+			"<tr><td style='color:%1'>▸</td><td>Go live on several platforms at once with the Multistream dock</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>Gift bombs with every recipient, channel points and watch streaks</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>Reactions that switch scenes when alerts fire</td></tr>"
 			"<tr><td style='color:%1'>▸</td><td>A health check that fixes setup problems in one click</td></tr>"
@@ -409,6 +428,19 @@ void GfxDock::buildUi()
 		reconnectTwitch();
 	};
 	chatPanel_ = new GfxChatPanel(tabs_);
+	viewersPanel_ = new GfxViewerPanel(this);
+	viewersPanel_->hide(); // the MultiChat dock adopts it (attachChatDock)
+	viewersPanel_->setOpenHandler(
+		[this](const QString &platform, const QString &login) { chatPanel_->openChatter(platform, login); });
+	viewersPanel_->setModHandler(
+		[this](const QString &platform, const QString &login) { chatPanel_->openChatterMenu(platform, login); });
+	const auto viewersChanged = [this] {
+		if (chatDock_)
+			chatDock_->applyViewers();
+		chatPanel_->refresh();
+	};
+	viewersPanel_->onLayoutChanged = viewersChanged;
+	chatPanel_->onViewersToggled = viewersChanged;
 	chatPanel_->setSendHandler(
 		[this](const QStringList &platforms, const QString &text) { sendChat(platforms, text); });
 	chatPanel_->setModHandler([this](const QString &platform, const QString &action, const QString &login,
@@ -577,8 +609,13 @@ void GfxDock::rebuildTabs()
 		eventsDock_->setPanel(eventsPanel_);
 	else if (!s.tabEvents)
 		eventsPanel_->hide();
-	if (s.tabChat)
+	// MultiChat: always its own OBS dock; a tab here only if OBS couldn't add that dock.
+	if (chatDock_)
+		chatDock_->setPanel(s.tabChat ? chatPanel_ : nullptr);
+	else if (s.tabChat)
 		tabs_->addTab(chatPanel_, QStringLiteral("MultiChat"));
+	if (!s.tabChat)
+		chatPanel_->hide();
 	if (s.tabWidgets)
 		tabs_->addTab(widgetsPage_, QStringLiteral("Widgets"));
 	if (s.tabReactions)
@@ -587,12 +624,23 @@ void GfxDock::rebuildTabs()
 		tabs_->addTab(healthPanel_, QStringLiteral("Health"));
 	if (tabs_->count() == 0)
 		tabs_->addTab(widgetsPage_, QStringLiteral("Widgets")); // never leave the dock empty
+	// The pages are children of tabs_ itself until addTab() adopts them. One that
+	// was never a tab (switched off in Layout → Tabs before OBS started) would
+	// otherwise show as a stray child at tabs_'s top-left — on top of the tab bar
+	// and the open tab. Events / MultiChat are hidden above for the same reason.
+	for (QWidget *p : {static_cast<QWidget *>(livePanel_), widgetsPage_, static_cast<QWidget *>(reactionsPanel_),
+			   static_cast<QWidget *>(healthPanel_)})
+		if (tabs_->indexOf(p) < 0)
+			p->hide();
 	const int i = tabs_->indexOf(current);
 	if (i >= 0)
 		tabs_->setCurrentIndex(i);
 	livePanel_->applySettings();
 	eventsPanel_->applySettings();
 	chatPanel_->refresh();
+	viewersPanel_->refresh();
+	if (chatDock_)
+		chatDock_->applyViewers();
 	updateChatTabTitle();
 	updateEventsTabTitle();
 }
@@ -652,24 +700,38 @@ void GfxDock::openSettings(const QString &startPage)
 
 	// ── General ──
 	QVBoxLayout *gen = page(QStringLiteral("General"));
-	group(gen, QStringLiteral("Tabs"),
+	// ── Layout: which tabs and Live cards show ──
+	QVBoxLayout *lay = page(QStringLiteral("Layout"));
+	group(lay, QStringLiteral("Tabs"),
 	      {{QStringLiteral("Live"), &s.tabLive},
 	       {QStringLiteral("Events tab (only when Events aren't in their own dock — see the Events page)"),
 		&s.tabEvents},
-	       {QStringLiteral("MultiChat (Twitch, Kick, YouTube, TikTok)"), &s.tabChat},
 	       {QStringLiteral("Widgets"), &s.tabWidgets},
 	       {QStringLiteral("Reactions"), &s.tabReactions},
 	       {QStringLiteral("Health"), &s.tabHealth}});
-	group(gen, QStringLiteral("Live tab"),
+	group(lay, QStringLiteral("Live tab cards"),
 	      {{QStringLiteral("Stream stats line"), &s.cardStats},
 	       {QStringLiteral("Subathon timer"), &s.cardTimer},
 	       {QStringLiteral("Intro timer"), &s.cardActionTimer},
 	       {QStringLiteral("Goal"), &s.cardGoal},
 	       {QStringLiteral("Spin wheel"), &s.cardWheel},
 	       {QStringLiteral("Counters"), &s.cardCounters},
-	       {QStringLiteral("Presets (switch Sub Goal / Follower Goal looks)"), &s.cardPresets},
+	       {QStringLiteral("Presets (switch saved goal looks)"), &s.cardPresets},
 	       {QStringLiteral("Alerts (test / replay / clear chat)"), &s.cardAlerts},
 	       {QStringLiteral("Activity feed"), &s.cardActivity}});
+	note(lay,
+	     QStringLiteral("Tip: click a card's title on the Live tab to fold it away — it stays folded next time."));
+	if (!s.liveCollapsed.isEmpty()) {
+		auto *unfold = new QPushButton(QStringLiteral("Unfold every Live card"), lay->parentWidget());
+		theme::setRole(unfold, "ghost");
+		lay->addWidget(unfold, 0, Qt::AlignLeft);
+		connect(unfold, &QPushButton::clicked, unfold, [unfold] {
+			settings().liveCollapsed.clear();
+			unfold->setEnabled(false);
+			unfold->setText(QStringLiteral("All cards unfold when you press OK"));
+		});
+	}
+	lay->addStretch(1);
 	group(gen, QStringLiteral("Automation"),
 	      {{QStringLiteral("Start / resume the subathon timer when I start streaming"), &s.autoStartTimer},
 	       {QStringLiteral("Pause the subathon timer when I stop streaming"), &s.autoPauseTimer}});
@@ -684,11 +746,35 @@ void GfxDock::openSettings(const QString &startPage)
 
 	// ── MultiChat ──
 	QVBoxLayout *mc = page(QStringLiteral("MultiChat"));
+	group(mc, QStringLiteral("Dock"),
+	      {{QStringLiteral("MultiChat on (its own “GoalForgeX MultiChat” dock)"), &s.tabChat},
+	       {QStringLiteral("Online / offline and viewers for each platform above the chat"), &s.chatStats},
+	       {QStringLiteral("…as big cards with uptime, category and chat pace (takes chat room)"),
+		&s.chatStatsCards}});
+	note(mc, QStringLiteral("Docks menu → GoalForgeX MultiChat shows the dock if you closed it."));
+	group(mc, QStringLiteral("Who's here (the list beside the chat)"),
+	      {{QStringLiteral("Show Who's here"), &s.chatViewers},
+	       {QStringLiteral("On the left of the chat instead of the right"), &s.vwLeft},
+	       {QStringLiteral("Include lurkers"), &s.vwLurkers},
+	       {QStringLiteral("Hide bots"), &s.vwHideBots},
+	       {QStringLiteral("Newest arrivals first (off = A to Z)"), &s.vwNewestFirst},
+	       {QStringLiteral("Highlight people who just arrived"), &s.vwArrivals},
+	       {QStringLiteral("Platform icons"), &s.vwPlatformIcons},
+	       {QStringLiteral("Role badges"), &s.vwRoleBadges},
+	       {QStringLiteral("Chatting / lurking labels"), &s.vwActivity},
+	       {QStringLiteral("Chatters' own name colours"), &s.vwNameColors},
+	       {QStringLiteral("Compact rows"), &s.vwCompact}});
+	note(mc, QStringLiteral("Twitch lists everyone in your chat. Kick, YouTube, TikTok and Xive don't share a viewer "
+				"list, so people there appear once they chat. The list hides itself when the dock is "
+				"narrower than 460 px."));
 	group(mc, QStringLiteral("Platforms"),
 	      {{QStringLiteral("YouTube chat (read + reply)"), &s.chatYouTube},
-	       {QStringLiteral("TikTok LIVE chat (read-only)"), &s.chatTikTok}});
+	       {QStringLiteral("TikTok LIVE chat (read-only)"), &s.chatTikTok},
+	       {QStringLiteral("Xive chat (read + reply as the GoalForgeX bot)"), &s.chatXive}});
 	note(mc, QStringLiteral("Twitch and Kick are always included. Each platform shows up once it's connected on "
-				"goalforgex.com → Account. YouTube and TikTok chat appear while you're live there."));
+				"goalforgex.com → Account. YouTube and TikTok chat appear while you're live there. "
+				"Xive chat needs the GoalForgeX bot added to your Xive channel (Xive dashboard → "
+				"GoalForgeX Bot)."));
 	group(mc, QStringLiteral("Look"),
 	      {{QStringLiteral("Platform icon on each message"), &s.chatIcons},
 	       {QStringLiteral("HOST / MOD / VIP / SUB badges"), &s.chatBadges},
@@ -696,8 +782,7 @@ void GfxDock::openSettings(const QString &startPage)
 	       {QStringLiteral("Chatters' own name colours"), &s.chatNameColors},
 	       {QStringLiteral("Show the time next to each message"), &s.chatTimestamps},
 	       {QStringLiteral("Compact lines"), &s.chatCompact},
-	       {QStringLiteral("Shade every other message"), &s.chatAltRows},
-	       {QStringLiteral("Viewers, uptime and stream info per platform"), &s.chatStats}});
+	       {QStringLiteral("Shade every other message"), &s.chatAltRows}});
 	group(mc, QStringLiteral("Behaviour"),
 	      {{QStringLiteral("Highlight messages that mention me or my highlight words"), &s.chatHighlightMentions},
 	       {QStringLiteral("Quick moderation buttons on each message (delete / 10 min timeout)"), &s.chatQuickMod},
@@ -749,8 +834,9 @@ void GfxDock::openSettings(const QString &startPage)
 			     QStringLiteral("minimal"));
 	noticeStyle->setCurrentIndex(qMax(0, noticeStyle->findData(s.noticeStyle)));
 	auto *noticeTint = new QComboBox(mc->parentWidget());
-	noticeTint->addItem(QStringLiteral("Platform colour — Twitch purple, Kick green, YouTube red, TikTok pink"),
-			    QStringLiteral("platform"));
+	noticeTint->addItem(
+		QStringLiteral("Platform colour — Twitch purple, Kick green, YouTube red, TikTok pink, Xive violet"),
+		QStringLiteral("platform"));
 	noticeTint->addItem(QStringLiteral("Event colour — gifts pink, raids red, streaks orange…"),
 			    QStringLiteral("event"));
 	noticeTint->addItem(QStringLiteral("My accent colour (Appearance)"), QStringLiteral("accent"));
@@ -886,9 +972,10 @@ void GfxDock::openSettings(const QString &startPage)
 	auto *resetBtn = new QPushButton(QStringLiteral("Reset appearance"), apParent);
 	theme::setRole(resetBtn, "ghost");
 	ap->addWidget(resetBtn, 0, Qt::AlignLeft);
-	note(ap, QStringLiteral(
-			 "Changes show on the dock right away; Cancel puts everything back. Live / ON-AIR red and "
-			 "the Twitch, Kick, YouTube and TikTok colours always stay the same so they're easy to spot."));
+	note(ap,
+	     QStringLiteral(
+		     "Changes show on the dock right away; Cancel puts everything back. Live / ON-AIR red and "
+		     "the Twitch, Kick, YouTube, TikTok and Xive colours always stay the same so they're easy to spot."));
 	ap->addStretch(1);
 
 	// Live preview: write straight into the settings, restyle; Cancel restores `before`.
@@ -969,6 +1056,8 @@ void GfxDock::applyAppearance()
 	chatPanel_->refresh();
 	if (eventsDock_)
 		eventsDock_->applyAppearance();
+	if (chatDock_)
+		chatDock_->applyAppearance();
 	if (msDock_)
 		msDock_->applyAppearance();
 	// Rich-text labels that carry the accent colour.
@@ -996,6 +1085,52 @@ void GfxDock::attachEventsDock(GfxEventsDock *dock)
 	};
 	dock->setConnected(state_ == State::Connected || state_ == State::NeedsReconnect);
 	rebuildTabs();
+}
+
+void GfxDock::attachChatDock(GfxChatDock *dock)
+{
+	chatDock_ = dock;
+	if (!dock)
+		return;
+	dock->onViewersShown = [this] { QTimer::singleShot(300, this, [this] { pollViewers(); }); };
+	dock->setViewers(viewersPanel_);
+	dock->onShown = [this] {
+		if (chatDock_ && chatDock_->panel()) {
+			chatUnread_ = 0;
+			updateChatTabTitle();
+			scheduleChat(0); // the fast cadence right away
+		}
+	};
+	dock->setConnected(state_ == State::Connected || state_ == State::NeedsReconnect);
+	rebuildTabs();
+}
+
+bool GfxDock::chatVisibleNow() const
+{
+	if (chatDock_)
+		return chatDock_->showingChat();
+	return isVisible() && tabs_->currentWidget() == chatPanel_;
+}
+
+void GfxDock::revealChatDock()
+{
+	QDockWidget *chat = chatDock_ ? chatDock_->dockFrame() : nullptr;
+	if (!chat)
+		return;
+	if (!chat->isVisible()) {
+		// Beside this dock (full height for the chat) when this one is docked; otherwise OBS decides.
+		QDockWidget *mine = nullptr;
+		for (QWidget *w = parentWidget(); w && !mine; w = w->parentWidget())
+			mine = qobject_cast<QDockWidget *>(w);
+		auto *mainWin = static_cast<QMainWindow *>(obs_frontend_get_main_window());
+		if (mainWin && mine && mine->isVisible() && !mine->isFloating() &&
+		    mainWin->dockWidgetArea(mine) != Qt::NoDockWidgetArea) {
+			chat->setFloating(false);
+			mainWin->splitDockWidget(mine, chat, Qt::Horizontal);
+		}
+		chat->show();
+	}
+	chat->raise();
 }
 
 bool GfxDock::eventsVisibleNow() const
@@ -1107,11 +1242,14 @@ void GfxDock::setState(State s, const QString &message, bool isError)
 	requiredPanel_->setVisible(updateRequired_ && s != State::Linking);
 	if (eventsDock_)
 		eventsDock_->setConnected((s == State::Connected || s == State::NeedsReconnect) && !updateRequired_);
+	if (chatDock_)
+		chatDock_->setConnected((s == State::Connected || s == State::NeedsReconnect) && !updateRequired_);
 	if (s == State::Connected) {
 		statusTimer_.start();
 		stateTimer_.start();
 		aimTimer_.start();
 		lastAim_.clear(); // (re)connected: tell the site where things are now
+		aimOff_ = false;  // …and ask again even if the site said no last time
 		scheduleChat(300);
 	} else {
 		stateTimer_.stop();
@@ -1522,6 +1660,16 @@ void GfxDock::performAction(const QString &id, const QJsonValue &arg)
 		ok = QStringLiteral("🎨 %1 switched to “%2” — live on your OBS source.")
 			     .arg(follower ? QStringLiteral("Follower Goal") : QStringLiteral("Sub Goal"),
 				  a.value(QStringLiteral("name")).toString());
+	} else if (id == QLatin1String("preset.alerts")) {
+		// Live tab → Presets → Alerts: the whole Alert Manager switches; an
+		// open /alerts editor reloads onto it instead of saving over it.
+		const QJsonObject a = arg.toObject();
+		const QString pid = a.value(QStringLiteral("id")).toString();
+		if (pid.isEmpty())
+			return;
+		path = QStringLiteral("/api/alert-presets/%1/apply")
+			       .arg(QString::fromUtf8(QUrl::toPercentEncoding(pid)));
+		ok = QStringLiteral("🔔 Alerts switched to “%1”.").arg(a.value(QStringLiteral("name")).toString());
 	} else if (id == QLatin1String("alert.test")) {
 		path = QStringLiteral("/api/obs/alerts/test");
 		body.insert(QStringLiteral("type"), arg.toString());
@@ -1659,18 +1807,17 @@ void GfxDock::checkForUpdate()
 			}
 			verCheck_ = VerCheck::Done;
 			const UpdateInfo info = UpdateInfo::fromJson(r.json());
-			if (info.version != update_.version)
-				upd_ = Upd::None; // a newer release replaced the one we knew about
+			if (info.key() != update_.key())
+				upd_ = Upd::None; // a newer release (or a fix build) replaced the one we knew about
 			update_ = info;
-			const bool newer = !info.version.isEmpty() &&
-					   versionNewer(info.version, QString::fromUtf8(PLUGIN_VERSION));
-			latestVersion_ = newer ? info.version : QString();
+			const bool newer = info.newer(); // newer version, or this version with a fix
+			latestVersion_ = newer ? info.label() : QString();
 			if (info.required() && !updateRequired_)
 				enterUpdateRequired(QString());
 			const bool autoOn = info.installable() && (settings().autoInstallUpdates || updateRequired_);
 			if (newer && upd_ == Upd::None) {
 				upd_ = Upd::Available;
-				updatePath_ = installerPath(info.version);
+				updatePath_ = installerPath(info.key());
 				// Background download so it's ready to install on exit.
 				if (autoOn)
 					startUpdateDownload();
@@ -1688,7 +1835,11 @@ void GfxDock::checkForUpdate()
 
 void GfxDock::renderVersion()
 {
-	const QString current = QStringLiteral("v%1").arg(QString::fromUtf8(PLUGIN_VERSION));
+	// Build number too: fixes ship under the same version, so it's what tells them apart.
+	const QString current =
+		thisBuild() > 0
+			? QStringLiteral("v%1 (build %2)").arg(QString::fromUtf8(PLUGIN_VERSION)).arg(thisBuild())
+			: QStringLiteral("v%1").arg(QString::fromUtf8(PLUGIN_VERSION));
 	QString status;
 	const char *tone = "muted";
 	switch (verCheck_) {
@@ -1745,6 +1896,38 @@ void GfxDock::renderAirChip()
 
 // ── Chat tab ─────────────────────────────────────────────────────
 
+// Runs only while the list is on screen: the server asks Twitch for every
+// chatter, which is real work on a big channel.
+void GfxDock::pollViewers()
+{
+	if (state_ != State::Connected || updateRequired_ || viewersInFlight_ || !chatDock_ ||
+	    !chatDock_->showingViewers())
+		return;
+	viewersInFlight_ = true;
+	const QString path = QStringLiteral("/api/obs/chat/viewers?platforms=%1")
+				     .arg(GfxChatPanel::wantedPlatforms().join(QLatin1Char(',')));
+	runAsync(
+		this, [path] { return apiGet(path); },
+		[this](const ApiResult &r) {
+			viewersInFlight_ = false;
+			if (r.token == TokenStatus::NeedsReconnect)
+				return;
+			if (r.http.status == 403 && r.http.errorCode() == QLatin1String("pro_required")) {
+				viewersPanel_->setNote(r.http.serverMessage());
+				return;
+			}
+			if (r.http.status == 404 && r.http.errorCode().isEmpty()) {
+				viewersPanel_->setNote(QStringLiteral("Who's here needs a newer GoalForgeX site."));
+				return;
+			}
+			if (!r.ok()) {
+				viewersPanel_->setNote(QStringLiteral("Couldn't refresh the list. Trying again shortly."));
+				return;
+			}
+			viewersPanel_->applyPoll(r.http.json());
+		});
+}
+
 void GfxDock::scheduleChat(int ms)
 {
 	if (state_ != State::Connected || !settings().tabChat || updateRequired_) {
@@ -1765,7 +1948,7 @@ void GfxDock::pollChat()
 		return;
 	chatInFlight_ = true;
 	// The platforms list also tells the server which chats to keep connected
-	// (YouTube / TikTok only while switched on here).
+	// (YouTube / TikTok / Xive only while switched on here).
 	// watch= lists other people's channels to show (empty releases them).
 	// notices=1: subs / gifts / raids / shoutouts… as lines in the feed (2.7+ server; older ones ignore it).
 	QString path = QStringLiteral("/api/obs/chat?feed=%1&since=%2&platforms=%3&watch=%4&wait=12&notices=1")
@@ -1784,7 +1967,7 @@ void GfxDock::pollChat()
 		this, [path] { return apiGet(path); },
 		[this](const ApiResult &r) {
 			chatInFlight_ = false;
-			const bool onTab = isVisible() && tabs_->currentWidget() == chatPanel_;
+			const bool onTab = chatVisibleNow();
 			if (r.token == TokenStatus::NeedsReconnect)
 				return; // the state poll shows Reconnect
 			if (handleUpdateRequired(r.http.status, r.http.serverMessage()))
@@ -1851,6 +2034,7 @@ void GfxDock::sendChat(const QStringList &platforms, const QString &text)
 					failed << QStringLiteral("%1: %2").arg(
 						it.key() == QLatin1String("kick")      ? QStringLiteral("Kick")
 						: it.key() == QLatin1String("youtube") ? QStringLiteral("YouTube")
+						: it.key() == QLatin1String("xive")    ? QStringLiteral("Xive")
 										       : QStringLiteral("Twitch"),
 						one.value(QStringLiteral("error")).toString());
 			}
@@ -1910,6 +2094,8 @@ void GfxDock::chatMod(const QString &platform, const QString &action, const QStr
 
 void GfxDock::updateChatTabTitle()
 {
+	if (chatDock_)
+		chatDock_->setUnread(chatDock_->panel() ? chatUnread_ : 0);
 	const int i = chatPanel_ ? tabs_->indexOf(chatPanel_) : -1;
 	if (i < 0)
 		return;
@@ -1923,7 +2109,7 @@ void GfxDock::renderUpdate()
 {
 	const bool show = upd_ != Upd::None && (settings().checkUpdates || updateRequired_ || upd_ == Upd::Ready);
 	updateRow_->setVisible(show && !updateRequired_);
-	const QString v = update_.version.toHtmlEscaped();
+	const QString v = update_.label().toHtmlEscaped();
 	updateBtn_->setEnabled(upd_ != Upd::Downloading);
 	switch (upd_) {
 	case Upd::None:
@@ -1939,7 +2125,7 @@ void GfxDock::renderUpdate()
 	case Upd::Ready:
 		updateLbl_->setText(
 			!settings().autoInstallUpdates ? QStringLiteral("✅ Version %1 is ready to install.").arg(v)
-			: settings().updateDeclined == update_.version
+			: settings().updateDeclined == update_.key()
 				? QStringLiteral(
 					  "⚠ Version %1 didn't install last time — Windows asked to allow it and it "
 					  "wasn't approved. Close OBS and click Yes, or Restart now.")
@@ -1979,7 +2165,7 @@ void GfxDock::startUpdateDownload()
 	runAsync(
 		this, [info, path] { return downloadAndVerify(info, path); },
 		[this, info](const QString &err) {
-			if (info.version != update_.version)
+			if (info.key() != update_.key())
 				return; // superseded while downloading
 			if (err.isEmpty()) {
 				upd_ = Upd::Ready;
@@ -2007,7 +2193,7 @@ void GfxDock::restartAndUpdate()
 		    this, QStringLiteral("Update GoalForgeX"),
 		    QStringLiteral(
 			    "OBS will close, update GoalForgeX to version %1 and open again.\n\nWindows will ask to allow the installer — click Yes.")
-			    .arg(update_.version)) != QMessageBox::Yes)
+			    .arg(update_.label())) != QMessageBox::Yes)
 		return;
 	QString err;
 	if (!launchInstaller(updatePath_, true, &err)) {
@@ -2379,11 +2565,16 @@ void GfxDock::reportCoinAim()
 	const QString account = Auth::instance().credentials().username;
 	if (account.isEmpty())
 		return;
-	double x = 0.0, y = 0.0;
-	QString scene;
-	const bool found = sources::coinTarget(account, &x, &y, &scene);
+	double x = 0.0, y = 0.0, w = 0.0, h = 0.0;
+	QString scene, widget;
+	const bool found = sources::coinTarget(account, &x, &y, &scene, &w, &h, &widget);
 	// half-percent steps: sub-pixel jitter never counts as a move
-	const QString key = found ? QStringLiteral("%1|%2|%3").arg(qRound(x * 2)).arg(qRound(y * 2)).arg(scene)
+	const QString key = found ? QStringLiteral("%1|%2|%3|%4|%5|%6")
+					    .arg(qRound(x * 2))
+					    .arg(qRound(y * 2))
+					    .arg(qRound(w * 2))
+					    .arg(qRound(h * 2))
+					    .arg(scene, widget)
 				  : QStringLiteral("none");
 	if (key == lastAim_)
 		return;
@@ -2394,6 +2585,10 @@ void GfxDock::reportCoinAim()
 		body.insert(QStringLiteral("x"), qRound(x * 10) / 10.0);
 		body.insert(QStringLiteral("y"), qRound(y * 10) / 10.0);
 		body.insert(QStringLiteral("scene"), scene.left(80));
+		// the goal's size + which one, so the site can aim at the number inside it
+		body.insert(QStringLiteral("w"), qRound(w * 10) / 10.0);
+		body.insert(QStringLiteral("h"), qRound(h * 10) / 10.0);
+		body.insert(QStringLiteral("widget"), widget.left(60));
 	}
 	runAsync(
 		this, [body] { return apiPost(QStringLiteral("/api/goal/coin-target"), body); },
@@ -2403,6 +2598,46 @@ void GfxDock::reportCoinAim()
 			else if (!r.ok())
 				lastAim_.clear(); // try again on the next tick
 		});
+}
+
+// Alert Coin Drop: the 1 s check catches every move, but an alert fired right
+// after the streamer drags the Alerts source (or the goal) somewhere else would
+// still fly to the old spot. Listening to the scene on air re-aims at once.
+static const char *const kAimSignals[] = {"item_transform", "item_add", "item_remove", "item_visible"};
+
+void GfxDock::onAimSceneChanged(void *data, calldata_t *)
+{
+	auto *self = static_cast<GfxDock *>(data);
+	// OBS can signal from any thread; the aim is worked out on the UI thread.
+	QMetaObject::invokeMethod(self, [self] { self->aimSoon_.start(); }, Qt::QueuedConnection);
+}
+
+void GfxDock::watchAimScene()
+{
+	obs_source_t *scene = obs_frontend_get_current_scene();
+	if (scene && scene == aimScene_) {
+		obs_source_release(scene); // already watching it
+		return;
+	}
+	unwatchAimScene();
+	if (!scene)
+		return;
+	aimScene_ = scene; // keeps the reference until unwatched
+	signal_handler_t *sh = obs_source_get_signal_handler(scene);
+	for (const char *sig : kAimSignals)
+		signal_handler_connect(sh, sig, onAimSceneChanged, this);
+}
+
+void GfxDock::unwatchAimScene()
+{
+	aimSoon_.stop();
+	if (!aimScene_)
+		return;
+	signal_handler_t *sh = obs_source_get_signal_handler(aimScene_);
+	for (const char *sig : kAimSignals)
+		signal_handler_disconnect(sh, sig, onAimSceneChanged, this);
+	obs_source_release(aimScene_);
+	aimScene_ = nullptr;
 }
 
 // One click: alerts + chat box (full canvas), goal top-left, timer top-right.
@@ -2596,6 +2831,13 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 			saveSettings();
 			QTimer::singleShot(0, this, [this] { revealEventsDock(false); });
 		}
+		// 2.12 moved MultiChat out of this dock into its own: show it once so nobody loses their chat.
+		if (!settings().chatDockIntroduced && chatDock_) {
+			settings().chatDockIntroduced = true;
+			saveSettings();
+			if (settings().tabChat)
+				QTimer::singleShot(150, this, [this] { revealChatDock(); });
+		}
 		// 2.8 added the Multistream dock: show it once, tabbed with the Events dock when that's docked.
 		if (!settings().msDockIntroduced && msDock_) {
 			settings().msDockIntroduced = true;
@@ -2632,13 +2874,16 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 		if (obs_frontend_recording_active() && !recordStartMs_)
 			recordStartMs_ = QDateTime::currentMSecsSinceEpoch();
 		renderAirChip();
+		watchAimScene();
 		break;
 	case OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED:
 	case OBS_FRONTEND_EVENT_SCENE_CHANGED:
 		refreshScenes();
+		watchAimScene(); // follow the scene on air
 		reportCoinAim(); // a new scene can put the goal somewhere else — re-aim at once
 		break;
 	case OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED:
+		watchAimScene();
 		loaded_ = true;
 		sceneCombo_->clear();
 		refreshScenes();
@@ -2651,6 +2896,7 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 	case OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGING:
 	case OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP:
 		// Sources are being torn down — stop touching them until CHANGED.
+		unwatchAimScene(); // let go of the scene on air too
 		loaded_ = false;
 		sceneCombo_->blockSignals(true);
 		sceneCombo_->clear();
@@ -2691,6 +2937,7 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 			checkForUpdate();
 		break;
 	case OBS_FRONTEND_EVENT_EXIT:
+		unwatchAimScene();
 		if (msDock_)
 			msDock_->shutdown(); // stop every multistream output while OBS can still clean up
 		// Downloaded + verified update: install it now that OBS is closing
@@ -2701,7 +2948,7 @@ void GfxDock::onFrontendEvent(enum obs_frontend_event event)
 			installerLaunched_ = launchInstaller(updatePath_, false, &err);
 			// Declined at Windows' prompt (or couldn't start): say so next time,
 			// it'll ask again on the next close. Launched: nothing to remember.
-			settings().updateDeclined = installerLaunched_ ? QString() : update_.version;
+			settings().updateDeclined = installerLaunched_ ? QString() : update_.key();
 			saveSettings();
 		}
 		loaded_ = false;

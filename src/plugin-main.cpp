@@ -17,6 +17,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 */
 
 #include "gfx-dock.hpp"
+#include "gfx-chat-dock.hpp"
 #include "gfx-events-dock.hpp"
 #include "gfx-multistream.hpp"
 #include "gfx-hotkeys.hpp"
@@ -68,6 +69,15 @@ bool obs_module_load(void)
 		obs_log(LOG_WARNING, "Could not add the GoalForgeX Events dock — Events stay a tab");
 		delete eventsDock;
 	}
+	// "GoalForgeX MultiChat" — the chat as its own dock (2.12). If OBS won't add
+	// it, MultiChat falls back to a tab in the main dock.
+	auto *chatDock = new GfxChatDock();
+	if (obs_frontend_add_dock_by_id("goalforgex_chat_dock", "GoalForgeX MultiChat", chatDock)) {
+		dock->attachChatDock(chatDock);
+	} else {
+		obs_log(LOG_WARNING, "Could not add the GoalForgeX MultiChat dock — MultiChat stays a tab");
+		delete chatDock;
+	}
 	// "GoalForgeX Multistream" — go live on several platforms at once (2.8).
 	auto *msDock = new GfxMultistreamDock();
 	if (obs_frontend_add_dock_by_id("goalforgex_multistream_dock", "GoalForgeX Multistream", msDock)) {
@@ -82,7 +92,7 @@ bool obs_module_load(void)
 		if (g_dock)
 			g_dock->performAction(id, arg);
 	});
-	obs_log(LOG_INFO, "GoalForgeX loaded (version %s, server %s)", PLUGIN_VERSION,
+	obs_log(LOG_INFO, "GoalForgeX loaded (version %s build %s, server %s)", PLUGIN_VERSION, PLUGIN_BUILD,
 		gfx::baseUrl().toUtf8().constData());
 	return true;
 }

@@ -11,7 +11,9 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-api.hpp"
 #include "gfx-auth.hpp"
 #include "gfx-http.hpp"
+#include "gfx-images.hpp"
 #include "gfx-notice.hpp"
+#include "gfx-settings.hpp"
 #include "gfx-theme.hpp"
 
 #include <obs-module.h>
@@ -31,22 +33,27 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPair>
 #include <QPixmap>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QScrollArea>
+#include <QSet>
 #include <QSpinBox>
 #include <QToolButton>
 #include <QUrl>
 #include <QUuid>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <iterator>
 
 #ifdef _WIN32
@@ -64,6 +71,17 @@ using namespace gfx;
 
 namespace {
 
+// Small uppercase heading over a group of controls (matches the Live tab cards).
+QLabel *sectionHead(const QString &text, QWidget *parent)
+{
+	auto *l = new QLabel(text.toUpper(), parent);
+	l->setObjectName(QStringLiteral("gfxSectionHead"));
+	QFont f = l->font();
+	f.setLetterSpacing(QFont::PercentageSpacing, 108);
+	l->setFont(f);
+	return l;
+}
+
 // ── Platforms ───────────────────────────────────────────────────
 struct PlatformPreset {
 	const char *key;
@@ -77,8 +95,7 @@ const PlatformPreset kPlatforms[] = {
 	{"kick", "Kick", "rtmps://fa723fc1b171.global-contribute.live-video.net/app",
 	 "Kick → Creator Dashboard → Settings → Stream URL & Key. Copy both."},
 	{"youtube", "YouTube", "rtmp://a.rtmp.youtube.com/live2", "YouTube Studio → Go live → Stream → Stream key."},
-	{"tiktok", "TikTok", "",
-	 "TikTok LIVE Producer → Server URL and Stream key (new every stream)."},
+	{"tiktok", "TikTok", "", "TikTok LIVE Producer → Server URL and Stream key (new every stream)."},
 	{"custom", "Custom RTMP", "", "Any RTMP / RTMPS server: paste its server URL and stream key."},
 };
 const PlatformPreset *preset(const QString &k)
@@ -415,8 +432,7 @@ void GfxMultistreamDock::buildUi()
 	auto *ic = new QVBoxLayout(infoCard_);
 	ic->setContentsMargins(10, 8, 10, 10);
 	ic->setSpacing(6);
-	auto *icHead = new QLabel(QStringLiteral("<b>Title &amp; category everywhere</b>"), infoCard_);
-	icHead->setTextFormat(Qt::RichText);
+	auto *icHead = sectionHead(QStringLiteral("Title & category everywhere"), infoCard_);
 	ic->addWidget(icHead);
 	title_ = new QLineEdit(infoCard_);
 	title_->setPlaceholderText(QStringLiteral("Stream title"));
@@ -447,9 +463,97 @@ void GfxMultistreamDock::buildUi()
 	root->addWidget(infoCard_);
 	connect(pushBtn_, &QPushButton::clicked, this, [this] { pushStreamInfo(); });
 
+	// Category box: matching games (Twitch / Kick search + your own list) appear
+	// right under it while typing — part of a name is enough ("valo" → VALORANT).
+	category_->setPlaceholderText(QStringLiteral("Search a game or category, e.g. valo, just chat…"));
+	searchNote_ = new QLabel(infoCard_);
+	searchNote_->setObjectName(QStringLiteral("gfxMuted"));
+	searchNote_->hide();
+	results_ = new QListWidget(infoCard_);
+	results_->setObjectName(QStringLiteral("gfxGameResults"));
+	results_->setIconSize(QSize(22, 30));
+	results_->setUniformItemSizes(true);
+	results_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+	results_->setCursor(Qt::PointingHandCursor);
+	results_->hide();
+	ic->insertWidget(ic->indexOf(category_) + 1, results_);
+	ic->insertWidget(ic->indexOf(category_) + 1, searchNote_);
+	connect(results_, &QListWidget::itemClicked, this,
+		[this](QListWidgetItem *it) { pickGame(it->data(Qt::UserRole).toString()); });
+	searchTimer_.setSingleShot(true);
+	searchTimer_.setInterval(250);
+	connect(&searchTimer_, &QTimer::timeout, this, [this] { searchGames(); });
+	connect(category_, &QLineEdit::textEdited, this, [this](const QString &t) {
+		if (t.trimmed().size() < 2) {
+			searchTimer_.stop();
+			results_->hide();
+			searchNote_->hide();
+			return;
+		}
+		showResults(QJsonArray(), t.trimmed(), false); // your own games show at once
+		searchTimer_.start();
+	});
+	// Enter = take the top result (or push when nothing is listed).
+	connect(category_, &QLineEdit::returnPressed, this, [this] {
+		if (results_->isVisible() && results_->count() > 0)
+			pickGame(results_->item(0)->data(Qt::UserRole).toString());
+		else
+			pushStreamInfo();
+	});
+
+	// ── Your games: one click = that game on every ticked platform ──
+	gamesHead_ = sectionHead(QStringLiteral("Your games"), infoCard_);
+	ic->addWidget(gamesHead_);
+	gamesBox_ = new QVBoxLayout();
+	gamesBox_->setSpacing(4);
+	ic->addLayout(gamesBox_);
+	gamesEmpty_ = new QLabel(QStringLiteral("Games you switch to show up here — one click puts that game back on "
+						"every platform."),
+				 infoCard_);
+	gamesEmpty_->setObjectName(QStringLiteral("gfxMuted"));
+	gamesEmpty_->setWordWrap(true);
+	ic->addWidget(gamesEmpty_);
+	gamesMore_ = new QPushButton(infoCard_);
+	theme::setRole(gamesMore_, "ghost");
+	gamesMore_->setCursor(Qt::PointingHandCursor);
+	gamesMore_->hide();
+	ic->addWidget(gamesMore_, 0, Qt::AlignLeft);
+	connect(gamesMore_, &QPushButton::clicked, this, [this] {
+		gamesAll_ = !gamesAll_;
+		renderGames();
+	});
+	gameAlerts_ =
+		new QCheckBox(QStringLiteral("Switch my alerts too (alert preset labelled with that game)"), infoCard_);
+	gameAlerts_->setToolTip(
+		QStringLiteral("Label an alert preset with a game on goalforgex.com → Alerts → "
+			       "Presets. Switching to that game here then switches your alerts to it."));
+	gameAlerts_->setChecked(settings().msGameAlertPreset);
+	gameAlerts_->hide();
+	ic->addWidget(gameAlerts_);
+	connect(gameAlerts_, &QCheckBox::toggled, this, [this](bool on) {
+		settings().msGameAlertPreset = on;
+		saveSettings();
+		renderGames();
+	});
+	RemoteImages::instance().subscribe(this, [this](const QString &url) {
+		for (int i = 0; i < results_->count(); ++i) {
+			QListWidgetItem *it = results_->item(i);
+			if (it->data(Qt::UserRole + 1).toString() == url) {
+				const QImage img = RemoteImages::instance().get(url);
+				if (!img.isNull())
+					it->setIcon(QIcon(QPixmap::fromImage(img)));
+			}
+		}
+		for (qsizetype i = 0; i < games_.size(); ++i)
+			if (games_.at(i).toObject().value(QStringLiteral("art")).toString() == url) {
+				renderGames();
+				return;
+			}
+	});
+	renderGames();
+
 	// ── Main stream: whatever is set in OBS → Settings → Stream ──
-	auto *mh = new QLabel(QStringLiteral("<b>Main stream</b>"), inner);
-	mh->setTextFormat(Qt::RichText);
+	auto *mh = sectionHead(QStringLiteral("Main stream"), inner);
 	root->addWidget(mh);
 	auto *mainBox = new QFrame(inner);
 	mainBox->setObjectName(QStringLiteral("gfxStatCard"));
@@ -490,7 +594,7 @@ void GfxMultistreamDock::buildUi()
 
 	// ── Destinations ──
 	auto *dh = new QHBoxLayout();
-	auto *dhl = new QLabel(QStringLiteral("<b>Destinations</b>"), inner);
+	auto *dhl = sectionHead(QStringLiteral("Destinations"), inner);
 	dhl->setTextFormat(Qt::RichText);
 	auto *addBtn = new QPushButton(QStringLiteral("+ Add"), inner);
 	theme::setRole(addBtn, "soft");
@@ -1363,6 +1467,8 @@ void GfxMultistreamDock::loadStreamInfo()
 				title_->setEnabled(false);
 				category_->setEnabled(false);
 				pushBtn_->setEnabled(false);
+				gamesHead_->hide();
+				gamesEmpty_->hide();
 				return;
 			}
 			if (!r.ok())
@@ -1377,10 +1483,11 @@ void GfxMultistreamDock::loadStreamInfo()
 				title_->setText(first.value(QStringLiteral("title")).toString());
 			if (category_->text().isEmpty())
 				category_->setText(first.value(QStringLiteral("category")).toString());
+			takeGames(o);
 		});
 }
 
-void GfxMultistreamDock::pushStreamInfo()
+void GfxMultistreamDock::pushStreamInfo(const QString &game)
 {
 	QJsonArray platforms;
 	if (toTwitch_->isVisible() && toTwitch_->isChecked())
@@ -1392,9 +1499,12 @@ void GfxMultistreamDock::pushStreamInfo()
 		return;
 	}
 	QJsonObject body;
-	body.insert(QStringLiteral("title"), title_->text().trimmed());
-	body.insert(QStringLiteral("category"), category_->text().trimmed());
+	body.insert(QStringLiteral("title"), game.isEmpty() ? title_->text().trimmed() : QString());
+	body.insert(QStringLiteral("category"), game.isEmpty() ? category_->text().trimmed() : game);
 	body.insert(QStringLiteral("platforms"), platforms);
+	body.insert(QStringLiteral("alertPreset"), !gameAlerts_->isHidden() && gameAlerts_->isChecked());
+	if (!game.isEmpty())
+		category_->setText(game);
 	pushBtn_->setEnabled(false);
 	runAsync(
 		this, [body] { return apiPost(QStringLiteral("/api/obs/stream-info"), body); },
@@ -1404,7 +1514,8 @@ void GfxMultistreamDock::pushStreamInfo()
 				setMsg(r.http.serverMessage().isEmpty() ? describe(r) : r.http.serverMessage(), true);
 				return;
 			}
-			const QJsonObject res = r.http.json().value(QStringLiteral("results")).toObject();
+			const QJsonObject full = r.http.json();
+			const QJsonObject res = full.value(QStringLiteral("results")).toObject();
 			QStringList done, failed;
 			bool reconnect = false;
 			for (auto it = res.begin(); it != res.end(); ++it) {
@@ -1426,8 +1537,18 @@ void GfxMultistreamDock::pushStreamInfo()
 								  : QString());
 				}
 			}
+			if (full.contains(QStringLiteral("games")))
+				takeGames(full);
+			const QString preset = full.value(QStringLiteral("alertPreset"))
+						       .toObject()
+						       .value(QStringLiteral("name"))
+						       .toString();
+			const QString alerts = preset.isEmpty()
+						       ? QString()
+						       : QStringLiteral(" 🔔 Alerts switched to “%1”.").arg(preset);
 			if (failed.isEmpty())
-				setMsg(QStringLiteral("✓ Updated on %1.").arg(done.join(QStringLiteral(" and "))));
+				setMsg(QStringLiteral("✓ Updated on %1.").arg(done.join(QStringLiteral(" and "))) +
+				       alerts);
 			else
 				setMsg((done.isEmpty() ? QString()
 						       : QStringLiteral("Updated on %1. ")
@@ -1437,6 +1558,183 @@ void GfxMultistreamDock::pushStreamInfo()
 				       true);
 			if (reconnect)
 				reconnectTwitch();
+		});
+}
+
+void GfxMultistreamDock::takeGames(const QJsonObject &o)
+{
+	games_ = o.value(QStringLiteral("games")).toArray();
+	gameAlerts_->setVisible(o.value(QStringLiteral("alertPresets")).toBool());
+	renderGames();
+}
+
+void GfxMultistreamDock::renderGames()
+{
+	while (QLayoutItem *it = gamesBox_->takeAt(0)) {
+		if (it->widget())
+			it->widget()->deleteLater();
+		delete it;
+	}
+	const QString current = category_->text().trimmed();
+	const qsizetype total = games_.size();
+	const qsizetype shown = gamesAll_ ? total : std::min<qsizetype>(total, 6);
+	const bool presets = !gameAlerts_->isHidden() && gameAlerts_->isChecked();
+	for (qsizetype i = 0; i < shown; ++i) {
+		const QJsonObject g = games_.at(i).toObject();
+		const QString name = g.value(QStringLiteral("name")).toString();
+		if (name.isEmpty())
+			continue;
+		const bool pinned = g.value(QStringLiteral("pinned")).toBool();
+		const bool now = name.compare(current, Qt::CaseInsensitive) == 0;
+		auto *row = new QFrame(infoCard_);
+		auto *h = new QHBoxLayout(row);
+		h->setContentsMargins(0, 0, 0, 0);
+		h->setSpacing(6);
+		auto *art = new QLabel(row);
+		art->setFixedSize(22, 30);
+		art->setAlignment(Qt::AlignCenter);
+		const QString url = g.value(QStringLiteral("art")).toString();
+		const QImage img = RemoteImages::allowed(url) ? RemoteImages::instance().get(url) : QImage();
+		if (!img.isNull())
+			art->setPixmap(QPixmap::fromImage(img).scaled(art->size(), Qt::KeepAspectRatioByExpanding,
+								      Qt::SmoothTransformation));
+		else
+			art->setText(QStringLiteral("🎮"));
+		auto *lbl = new QLabel(row);
+		lbl->setTextFormat(Qt::RichText);
+		lbl->setText((pinned ? QStringLiteral("★ ") : QString()) + name.toHtmlEscaped() +
+			     (presets && g.value(QStringLiteral("alertPreset")).toBool() ? QStringLiteral(" 🔔")
+											 : QString()));
+		if (presets && g.value(QStringLiteral("alertPreset")).toBool())
+			lbl->setToolTip(
+				QStringLiteral("Has an alert preset — switching here switches your alerts too"));
+		lbl->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+		auto *go = new QPushButton(now ? QStringLiteral("Current") : QStringLiteral("Switch"), row);
+		go->setEnabled(!now);
+		go->setCursor(Qt::PointingHandCursor);
+		go->setToolTip(QStringLiteral("Change the category to %1 on every ticked platform").arg(name));
+		theme::setRole(go, now ? "ghost" : "soft");
+		connect(go, &QPushButton::clicked, this, [this, name] { pushStreamInfo(name); });
+		auto *more = new QToolButton(row);
+		more->setText(QStringLiteral("⋯"));
+		more->setPopupMode(QToolButton::InstantPopup);
+		theme::setRole(more, "ghost");
+		auto *menu = new QMenu(more);
+		connect(menu->addAction(pinned ? QStringLiteral("Unpin") : QStringLiteral("★ Pin to the top")),
+			&QAction::triggered, this, [this, name, pinned] {
+				editGame(pinned ? QStringLiteral("unpin") : QStringLiteral("pin"), name);
+			});
+		connect(menu->addAction(QStringLiteral("Remove from the list")), &QAction::triggered, this,
+			[this, name] { editGame(QStringLiteral("remove"), name); });
+		more->setMenu(menu);
+		h->addWidget(art);
+		h->addWidget(lbl, 1);
+		h->addWidget(go);
+		h->addWidget(more);
+		gamesBox_->addWidget(row);
+	}
+	gamesEmpty_->setVisible(total == 0);
+	gamesMore_->setVisible(total > 6);
+	gamesMore_->setText(gamesAll_ ? QStringLiteral("Show fewer") : QStringLiteral("Show all %1").arg(total));
+}
+
+void GfxMultistreamDock::searchGames()
+{
+	const QString q = category_->text().trimmed();
+	if (q.size() < 2 || !Auth::instance().connected())
+		return;
+	lastSearch_ = q;
+	searchNote_->setText(QStringLiteral("Searching…"));
+	searchNote_->show();
+	const QString path =
+		QStringLiteral("/api/obs/games/search?q=%1").arg(QString::fromUtf8(QUrl::toPercentEncoding(q)));
+	runAsync(
+		this, [path] { return apiGet(path); },
+		[this, q](const ApiResult &r) {
+			if (category_->text().trimmed() != q)
+				return; // the streamer kept typing — a newer search is on its way
+			if (!r.ok()) {
+				searchNote_->setText(
+					r.http.status == 404
+						? QStringLiteral("Game search needs a newer GoalForgeX site — type "
+								 "the name and hit Update.")
+						: (r.http.serverMessage().isEmpty() ? describe(r)
+										    : r.http.serverMessage()));
+				searchNote_->show();
+				return;
+			}
+			showResults(r.http.json().value(QStringLiteral("games")).toArray(), q, true);
+		});
+}
+
+void GfxMultistreamDock::showResults(const QJsonArray &found, const QString &query, bool searched)
+{
+	// Your own games that match first, then what Twitch / Kick found (no repeats).
+	QList<QPair<QString, QString>> rows; // name, box art
+	QSet<QString> seen;
+	const auto add = [&rows, &seen](const QString &name, const QString &art) {
+		const QString key = name.toLower();
+		if (name.isEmpty() || seen.contains(key) || rows.size() >= 8)
+			return;
+		seen.insert(key);
+		rows.append({name, art});
+	};
+	for (qsizetype i = 0; i < games_.size(); ++i) {
+		const QJsonObject g = games_.at(i).toObject();
+		const QString n = g.value(QStringLiteral("name")).toString();
+		if (n.contains(query, Qt::CaseInsensitive))
+			add(n, g.value(QStringLiteral("art")).toString());
+	}
+	for (qsizetype i = 0; i < found.size(); ++i) {
+		const QJsonObject g = found.at(i).toObject();
+		add(g.value(QStringLiteral("name")).toString(), g.value(QStringLiteral("art")).toString());
+	}
+	results_->clear();
+	for (const auto &row : rows) {
+		auto *it = new QListWidgetItem(row.first, results_);
+		it->setData(Qt::UserRole, row.first);
+		it->setData(Qt::UserRole + 1, row.second);
+		const QImage img = RemoteImages::allowed(row.second) ? RemoteImages::instance().get(row.second)
+								     : QImage();
+		it->setIcon(img.isNull() ? QIcon() : QIcon(QPixmap::fromImage(img)));
+		it->setToolTip(QStringLiteral("Use %1 (then hit Update everywhere, or press Enter)").arg(row.first));
+	}
+	results_->setVisible(!rows.isEmpty());
+	if (!rows.isEmpty()) {
+		const int rowH = qMax(34, results_->sizeHintForRow(0));
+		results_->setFixedHeight(rowH * static_cast<int>(qMin<qsizetype>(rows.size(), 5)) + 8);
+		searchNote_->setVisible(!searched);
+	} else if (searched) {
+		searchNote_->setText(QStringLiteral("No games found for “%1” — try fewer letters.").arg(query));
+		searchNote_->show();
+	}
+}
+
+void GfxMultistreamDock::pickGame(const QString &name)
+{
+	if (name.isEmpty())
+		return;
+	searchTimer_.stop();
+	category_->setText(name);
+	results_->hide();
+	searchNote_->setText(QStringLiteral("✓ %1 — hit Update everywhere to put it live.").arg(name));
+	searchNote_->show();
+	renderGames();
+}
+
+void GfxMultistreamDock::editGame(const QString &action, const QString &name)
+{
+	QJsonObject body;
+	body.insert(QStringLiteral("action"), action);
+	body.insert(QStringLiteral("name"), name);
+	runAsync(
+		this, [body] { return apiPost(QStringLiteral("/api/obs/games"), body); },
+		[this](const ApiResult &r) {
+			if (!r.ok()) {
+				setMsg(r.http.serverMessage().isEmpty() ? describe(r) : r.http.serverMessage(), true);
+				return;
+			}
+			takeGames(r.http.json());
 		});
 }
 

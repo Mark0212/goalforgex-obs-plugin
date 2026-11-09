@@ -57,6 +57,7 @@ UpdateInfo UpdateInfo::fromJson(const QJsonObject &o)
 	u.installerUrl = o.value(QStringLiteral("installerUrl")).toString();
 	u.sha256 = o.value(QStringLiteral("sha256")).toString().toLower();
 	u.minVersion = o.value(QStringLiteral("minVersion")).toString();
+	u.build = qMax(0, o.value(QStringLiteral("build")).toInt(0));
 	if (!kVersionRe.match(u.version).hasMatch())
 		u.version.clear();
 	if (!kVersionRe.match(u.minVersion).hasMatch())
@@ -73,10 +74,35 @@ static bool trustedInstallerUrl(const QString &s)
 	       u.path().endsWith(QLatin1String("-windows-x64-installer.exe"));
 }
 
+int thisBuild()
+{
+	return qMax(0, QString::fromUtf8(PLUGIN_BUILD).toInt());
+}
+
+bool UpdateInfo::newer() const
+{
+	if (version.isEmpty())
+		return false;
+	const QString mine = QString::fromUtf8(PLUGIN_VERSION);
+	// Same version, higher build: a fix. A local build (0) only updates to a newer version.
+	return versionNewer(version, mine) || (version == mine && thisBuild() > 0 && build > thisBuild());
+}
+
 bool UpdateInfo::installable() const
 {
-	return !version.isEmpty() && versionNewer(version, QString::fromUtf8(PLUGIN_VERSION)) &&
-	       trustedInstallerUrl(installerUrl) && kShaRe.match(sha256).hasMatch();
+	return newer() && trustedInstallerUrl(installerUrl) && kShaRe.match(sha256).hasMatch();
+}
+
+QString UpdateInfo::key() const
+{
+	return build > 0 ? QStringLiteral("%1-b%2").arg(version).arg(build) : version;
+}
+
+QString UpdateInfo::label() const
+{
+	if (build > 0 && version == QString::fromUtf8(PLUGIN_VERSION))
+		return QStringLiteral("%1 (fix, build %2)").arg(version).arg(build);
+	return version;
 }
 
 bool UpdateInfo::required() const

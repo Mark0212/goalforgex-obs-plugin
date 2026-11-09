@@ -63,6 +63,91 @@ const Note k280[] = {
 	{"✏️", "One title, every platform",
 	 "Change your stream title and category on Twitch and Kick at once from the Multistream dock (Pro)."},
 };
+const Note k2130[] = {
+	{"👥", "Who's here, right beside your chat",
+	 "MultiChat now has a live viewer list: broadcaster, mods, VIPs, chatters and Twitch lurkers, with search, "
+	 "filters and who just arrived. Click anyone for their card. The 👥 button shows or hides it."},
+	{"🎨", "Make it yours",
+	 "Pick the side, sort order, icons, badges, labels and name colours, hide bots or specific people, and "
+	 "drag it to the width you like. It's all in the list's ⋯ menu."},
+};
+const Note k2122[] = {
+	{"🧩", "Dock no longer jumbled",
+	 "With a tab switched off in Layout → Tabs, that page could pile up on top of the others at the top of the "
+	 "GoalForgeX dock, covering the tabs. Pages you've switched off now stay out of sight."},
+	{"🐝", "Clearer Xive send errors", "A message that couldn't be sent to Xive now says Xive instead of Twitch."},
+	{"⚡", "Quick fixes, delivered automatically",
+	 "Small fixes can now arrive as a new build of the same version — the dock shows it as “2.12.2 (fix, build "
+	 "N)” and updates like any other release. Your build number is next to the version at the bottom of the dock."},
+};
+const Note k2121[] = {
+	{"🐝", "Xive chat in MultiChat",
+	 "Your Xive chat now shows up in MultiChat next to Twitch, Kick, YouTube and TikTok, with its own filter chip, "
+	 "live / offline status and a Xive button to reply (posted by the GoalForgeX bot). Needs the GoalForgeX bot "
+	 "added to your Xive channel; ⚙ Settings → MultiChat turns it off."},
+};
+const Note k2120[] = {
+	{"💬", "MultiChat has its own dock",
+	 "MultiChat moved out of the GoalForgeX dock into its own GoalForgeX MultiChat dock (Docks menu), so you can "
+	 "put it anywhere and give it the full height — no more sharing room with the Live tab."},
+	{"🟢", "Online / offline at a glance",
+	 "A slim row on top of the chat shows whether you're live or offline on Twitch, Kick, YouTube and TikTok, with "
+	 "viewers. Hover for uptime, title and category; ⋯ → big cards brings the old cards back."},
+	{"📏", "More room for chat",
+	 "Thinner edges and spacing and the slim status row leave far more of the dock for messages."},
+};
+const Note k2114[] = {
+	{"📍", "Alerts you can place anywhere",
+	 "Turn on Place alerts in OBS on the GoalForgeX alerts page and Add → Alerts gives you a source the size of your "
+	 "alerts instead of a full-screen layer. Drag and resize it in each scene — every alert fires right there."},
+	{"🔊", "Alert sound in the Audio Mixer",
+	 "Alert sounds and video alerts with sound play through the Alerts source, so its slider in OBS's Audio Mixer "
+	 "sets how loud they are."},
+};
+
+const Note k2113[] = {
+	{"🪙", "Coin Drop follows your alerts instantly",
+	 "Move or resize your Alerts or goal source in OBS and the very next alert's coins fly to the new spot — no "
+	 "waiting for the next check."},
+};
+
+const Note k2112[] = {
+	{"✨", "A brand-new Events feed",
+	 "Every event is now its own card: a coloured tile with the event and platform, the time on the right, what "
+	 "happened, what the viewer wrote and, for gift bombs, who got one. Cards have proper space between them, "
+	 "and right-click still copies names or a thank-you message."},
+	{"💬", "Room to breathe in MultiChat",
+	 "Event cards in MultiChat no longer touch — there's a clear gap between each one."},
+	{"⚡", "Snappier buttons",
+	 "Test alerts and every other button in the dock now reuse the connection GoalForgeX already has open "
+	 "instead of starting a new one each click, so they react noticeably faster."},
+	{"🎯", "Coin Drop keeps up with your goal",
+	 "Move or resize your Sub Goal in OBS and the Alert Coin Drop re-aims within a second."},
+};
+const Note k2111[] = {
+	{"🎮", "Find any game in a couple of letters",
+	 "In the Multistream dock, start typing a category (\"valo\", \"just chat\") and matching games show up "
+	 "right under the box with their box art — click one or press Enter. Every game you switch to lands in "
+	 "Your games, and Switch puts it on Twitch and Kick at once. Pin your regulars with ★ (Pro)."},
+	{"💬", "Cleaner chat and event cards",
+	 "MultiChat and the Events dock got a tidy-up: rounded event cards with a slim colour edge, clear event "
+	 "labels, and neat rounded MOD / VIP / SUB badges."},
+};
+const Note k2110[] = {
+	{"🧹", "A cleaner, tidier dock",
+	 "Fresh look across the dock: card titles inside each card, rounded tabs and calmer colours. Click any Live "
+	 "card's title to fold it away (it stays folded), and the cards you use most now come first. The ⚙ menu is "
+	 "grouped, and Settings has a new Layout page for which tabs and cards show."},
+	{"🎮", "Your games, one click away",
+	 "The Multistream dock now keeps a list of your games. Start typing a category and pick it from the suggestions; "
+	 "every game you switch to lands in Your games, and Switch puts it on Twitch and Kick at once. Pin your regulars "
+	 "to the top with ★ (Pro)."},
+};
+const Note k2102[] = {
+	{"🎯", "Finds your overlays more reliably",
+	 "GoalForgeX now recognises your goal and alert sources in OBS even when you added them by hand or put them "
+	 "inside a nested scene, and tells the site exactly where they sit — so on-screen effects line up."},
+};
 const Note k2100[] = {
 	{"🎨", "Switch presets from OBS",
 	 "New Presets card on the Live tab: pick one of your saved Sub Goal or Follower Goal looks and hit Apply — it "
@@ -139,7 +224,17 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
-	{"2.10.0", "October 2026", k2100, static_cast<int>(std::size(k2100))},
+	{"2.13.0", "November 2026", k2130, static_cast<int>(std::size(k2130))},
+	{"2.12.2", "November 2026", k2122, static_cast<int>(std::size(k2122))},
+	{"2.12.1", "November 2026", k2121, static_cast<int>(std::size(k2121))},
+	{"2.12.0", "November 2026", k2120, static_cast<int>(std::size(k2120))},
+	{"2.11.4", "October 2026", k2114, static_cast<int>(std::size(k2114))},
+	{"2.11.3", "October 2026", k2113, static_cast<int>(std::size(k2113))},
+	{"2.11.2", "October 2026", k2112, static_cast<int>(std::size(k2112))},
+	{"2.11.1", "October 2026", k2111, static_cast<int>(std::size(k2111))},
+	{"2.11.0", "October 2026", k2110, static_cast<int>(std::size(k2110))},
+	{"2.10.2", "October 2026", k2102, static_cast<int>(std::size(k2102))},
+	{"2.10.1", "October 2026", k2100, static_cast<int>(std::size(k2100))},
 	{"2.9.1", "October 2026", k291, static_cast<int>(std::size(k291))},
 	{"2.9.0", "October 2026", k290, static_cast<int>(std::size(k290))},
 	{"2.8.2", "October 2026", k282, static_cast<int>(std::size(k282))},

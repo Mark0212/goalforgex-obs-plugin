@@ -24,7 +24,9 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QTimer>
 #include <QWidget>
 
+class GfxChatDock;
 class GfxChatPanel;
+class GfxViewerPanel;
 class GfxEventsDock;
 class GfxMultistreamDock;
 class GfxEventsPanel;
@@ -53,6 +55,9 @@ public:
 	// The separate "GoalForgeX Events" dock (plugin-main adds it to OBS). The
 	// Events panel moves there while Settings → Events → own dock is on.
 	void attachEventsDock(GfxEventsDock *dock);
+	// The "GoalForgeX MultiChat" dock (2.12): the MultiChat panel lives there
+	// instead of a tab; this dock keeps polling and sending for it.
+	void attachChatDock(GfxChatDock *dock);
 	// The "GoalForgeX Multistream" dock: gets OBS stream start/stop and appearance changes from here.
 	void attachMultistreamDock(GfxMultistreamDock *dock);
 
@@ -83,10 +88,15 @@ private:
 	// MultiChat tab (Twitch / Kick / YouTube / TikTok): adaptive poll of /api/obs/chat, send as the streamer
 	void scheduleChat(int ms);
 	void pollChat();
+	void pollViewers();
 	void sendChat(const QStringList &platforms, const QString &text);
 	void chatMod(const QString &platform, const QString &action, const QString &login, int seconds,
 		     const QString &messageId, const QString &displayName);
 	void updateChatTabTitle();
+	// The streamer can see the chat right now (its dock, or the fallback tab).
+	bool chatVisibleNow() const;
+	// Shows the MultiChat dock (beside this one when this one is docked).
+	void revealChatDock();
 
 	// Account linking (RFC 8628 device flow)
 	void startConnect();
@@ -156,8 +166,11 @@ private:
 	GfxReactionsPanel *reactionsPanel_ = nullptr;
 	GfxHealthPanel *healthPanel_ = nullptr;
 	GfxChatPanel *chatPanel_ = nullptr;
+	GfxViewerPanel *viewersPanel_ = nullptr;
+	bool viewersInFlight_ = false;
 	GfxEventsPanel *eventsPanel_ = nullptr;
 	GfxEventsDock *eventsDock_ = nullptr;
+	GfxChatDock *chatDock_ = nullptr;      // owned by OBS (a dock)
 	GfxMultistreamDock *msDock_ = nullptr; // owned by OBS (a dock), lives as long as this one
 	QLabel *heroMark_ = nullptr;           // welcome card's big brand mark (re-drawn on accent change)
 	int eventsUnread_ = 0;
@@ -182,7 +195,12 @@ private:
 	QTimer pollTimer_;
 	QTimer stateTimer_;
 	QTimer updateTimer_;
-	QTimer aimTimer_;     // Alert Coin Drop aim, every few seconds while connected
+	QTimer aimTimer_;                  // Alert Coin Drop aim, every second while connected
+	QTimer aimSoon_;                   // …and right after a source in the on-air scene moves
+	obs_source_t *aimScene_ = nullptr; // the on-air scene being watched (own reference)
+	void watchAimScene();
+	void unwatchAimScene();
+	static void onAimSceneChanged(void *data, calldata_t *cd);
 	QString lastAim_;     // what was last reported ("" = report next tick)
 	bool aimOff_ = false; // the site doesn't take aim reports (older server) — stop asking
 	QTimer msgClear_;
@@ -190,6 +208,7 @@ private:
 	qint64 streamStartMs_ = 0;
 	qint64 recordStartMs_ = 0;
 	QTimer chatTimer_; // single-shot; re-armed after every poll
+	QTimer viewersTimer_; // 30 s; polls only while the list is on screen
 	QString chatFeed_;
 	qint64 chatSeq_ = 0;
 	bool chatInFlight_ = false;

@@ -11,8 +11,10 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include "gfx-state.hpp"
 
+#include <QHash>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QPair>
 #include <QStringList>
 #include <QTimer>
 #include <QWidget>
@@ -22,6 +24,7 @@ the Free Software Foundation; either version 2 of the License, or
 class QCheckBox;
 class QComboBox;
 class QGroupBox;
+class QHBoxLayout;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -53,9 +56,17 @@ private:
 	void syncPresets();
 	void syncPresetBox(QComboBox *box, QPushButton *apply, const QList<gfx::PresetState> &list, QString &sig);
 	void refreshPresetApply(QComboBox *box, QPushButton *apply, const QList<gfx::PresetState> &list);
-	void applyPreset(bool follower);
+	// kind: 0 = Sub Goal, 1 = Follower Goal, 2 = Alerts
+	const QList<gfx::PresetState> &presetList(int kind) const;
+	void applyPreset(int kind);
 	void act(const QString &id, const QJsonValue &arg = QJsonValue());
-	QGroupBox *makeCard(const QString &title, QVBoxLayout **body);
+	// A Live tab card: an uppercase title row (click = fold / unfold, kept in
+	// Settings::liveCollapsed under `key`) above the body layout it returns.
+	QGroupBox *makeCard(const QString &icon, const QString &title, const QString &key, QVBoxLayout **body);
+	// Puts a small widget (status chip…) on the card's title row, before the chevron.
+	void addToCardHead(QGroupBox *card, QWidget *w);
+	QHash<QGroupBox *, QHBoxLayout *> cardHeads_;
+	QList<QPair<QString, std::function<void(bool)>>> cardFolds_; // key → fold / unfold
 	QPushButton *lockLine(QWidget *parent, const QString &text);
 	void sendIntro(const QJsonObject &changes);
 	void startIntroFor(int seconds);
@@ -119,10 +130,14 @@ private:
 	QWidget *folPresetRow_ = nullptr;
 	QComboBox *folPresetBox_ = nullptr;
 	QPushButton *folPresetApply_ = nullptr;
+	QWidget *alertPresetRow_ = nullptr;
+	QComboBox *alertPresetBox_ = nullptr;
+	QPushButton *alertPresetApply_ = nullptr;
 	QLabel *presetsEmpty_ = nullptr;
 	QPushButton *presetsLock_ = nullptr;
 	QString goalPresetSig_; // ids|names|active the combo was last built from
 	QString folPresetSig_;
+	QString alertPresetSig_;
 
 	QGroupBox *alertsCard_ = nullptr;
 	QWidget *alertsCtl_ = nullptr;

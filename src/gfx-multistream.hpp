@@ -11,6 +11,7 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include <QHash>
 #include <cstdint>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
 #include <QPointer>
@@ -22,6 +23,7 @@ the Free Software Foundation; either version 2 of the License, or
 
 class QCheckBox;
 class QComboBox;
+class QListWidget;
 class QFrame;
 class QLabel;
 class QLineEdit;
@@ -36,7 +38,10 @@ class QVBoxLayout;
 //  • "Own encoder" encodes again at its own bitrate (more CPU/GPU, but can run
 //    on its own).
 // GoalForgeX extras (Pro): stream keys filled in from the connected Twitch /
-// Kick accounts, and one title / category pushed to every platform.
+// Kick accounts, one title / category pushed to every platform, and a game
+// list — every game switched to lands there, one click puts it back on every
+// platform (and, for accounts with alert presets, the preset labelled with
+// that game).
 // Destinations and keys are saved per OBS install, keys encrypted (DPAPI).
 class GfxMultistreamDock : public QWidget {
 public:
@@ -87,8 +92,17 @@ private:
 	// Pro extras (need the main GoalForgeX dock connected).
 	void fetchKeys(std::function<void(const QJsonObject &keys, const QString &error)> done);
 	void loadStreamInfo();
-	void pushStreamInfo();
+	// game empty = title + category from the boxes; otherwise just that game.
+	void pushStreamInfo(const QString &game = QString());
 	void reconnectTwitch();
+	// Game list
+	void takeGames(const QJsonObject &o); // { games, alertPresets } from the server
+	void renderGames();
+	void searchGames();
+	// Search results under the category box (box art + name); click = use that game.
+	void showResults(const QJsonArray &found, const QString &query, bool searched);
+	void pickGame(const QString &name);
+	void editGame(const QString &action, const QString &name);
 
 	QList<Destination> dests_;
 	QHash<QString, Runner *> runners_;
@@ -136,4 +150,16 @@ private:
 	QPushButton *pushBtn_ = nullptr;
 	QLabel *infoNote_ = nullptr;
 	bool infoLoaded_ = false;
+	// Game list
+	QLabel *gamesHead_ = nullptr;
+	QVBoxLayout *gamesBox_ = nullptr;
+	QLabel *gamesEmpty_ = nullptr;
+	QPushButton *gamesMore_ = nullptr;
+	QCheckBox *gameAlerts_ = nullptr;
+	QJsonArray games_;
+	bool gamesAll_ = false;
+	QListWidget *results_ = nullptr;
+	QLabel *searchNote_ = nullptr;
+	QTimer searchTimer_;
+	QString lastSearch_;
 };

@@ -28,6 +28,44 @@ static std::atomic<bool> g_shutdown{false};
 static std::atomic<int> g_inflight{0};
 static std::once_flag g_curlInit;
 
+// One pool of open connections (+ DNS answers and TLS sessions) shared by every
+// request: a button press reuses the connection the 2 s state poll already has
+// open instead of a fresh DNS + TCP + TLS handshake through Cloudflare each
+// time (a few hundred ms per click). Never freed — it lives as long as OBS.
+static std::mutex g_shareLocks[CURL_LOCK_DATA_LAST];
+static std::once_flag g_shareInit;
+static CURLSH *g_share = nullptr;
+
+static void shareLock(CURL *, curl_lock_data data, curl_lock_access, void *)
+{
+	const int d = static_cast<int>(data);
+	if (d >= 0 && d < static_cast<int>(CURL_LOCK_DATA_LAST))
+		g_shareLocks[d].lock();
+}
+
+static void shareUnlock(CURL *, curl_lock_data data, void *)
+{
+	const int d = static_cast<int>(data);
+	if (d >= 0 && d < static_cast<int>(CURL_LOCK_DATA_LAST))
+		g_shareLocks[d].unlock();
+}
+
+static CURLSH *sharedPool()
+{
+	std::call_once(g_shareInit, [] {
+		CURLSH *sh = curl_share_init();
+		if (!sh)
+			return;
+		curl_share_setopt(sh, CURLSHOPT_LOCKFUNC, shareLock);
+		curl_share_setopt(sh, CURLSHOPT_UNLOCKFUNC, shareUnlock);
+		curl_share_setopt(sh, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
+		curl_share_setopt(sh, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION);
+		curl_share_setopt(sh, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT); // curl 7.57+; ignored if older
+		g_share = sh;
+	});
+	return g_share;
+}
+
 QJsonObject HttpResult::json() const
 {
 	const QJsonDocument doc = QJsonDocument::fromJson(body);
@@ -135,6 +173,9 @@ static HttpResult perform(const char *method, const QString &url, const QByteArr
 		headers = curl_slist_append(headers, auth.c_str());
 	}
 
+	if (CURLSH *sh = sharedPool())
+		curl_easy_setopt(curl, CURLOPT_SHARE, sh);
+	curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
 	curl_easy_setopt(curl, CURLOPT_URL, urlStr.c_str());
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, ua.c_str());
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);

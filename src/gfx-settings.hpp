@@ -50,9 +50,12 @@ struct Settings {
 	bool chatToTwitch = true;
 	bool chatToKick = true;
 	bool chatToYouTube = true;
+	bool chatToXive = true;
 	bool chatTimestamps = true;
-	// Viewers / uptime / title per platform above the chat
+	// Online / offline (+ viewers) per platform above the chat
 	bool chatStats = true;
+	// …as the big cards (uptime, category, chatters line) instead of one slim row
+	bool chatStatsCards = false;
 	// Highlight lines that mention the streamer or a highlight word
 	bool chatHighlightMentions = true;
 	// One-click delete / 10-minute timeout links at the start of each line
@@ -69,11 +72,15 @@ struct Settings {
 	QStringList chatHighlightWords;
 	// Other people's channels shown in the feed, read-only ("twitch:name", "kick:name", …)
 	QStringList chatWatch;
+	// Live tab cards the streamer folded away (click a card's title)
+	QStringList liveCollapsed;
 	// Which connected platforms MultiChat reads (Twitch + Kick are always on).
 	// YouTube polls Google's API and TikTok opens a live connection — only
 	// while these are on and the account has them connected on the website.
+	// Xive chat comes from the GoalForgeX bot added to the Xive channel.
 	bool chatYouTube = true;
 	bool chatTikTok = true;
+	bool chatXive = true;
 	// MultiChat look
 	bool chatIcons = true;      // platform icon at the start of each line
 	bool chatBadges = true;     // HOST / MOD / VIP / SUB tags
@@ -105,6 +112,24 @@ struct Settings {
 	bool eventsOwnDock = true;
 	bool eventsDockIntroduced = false; // shown once automatically after updating to 2.7
 	bool msDockIntroduced = false;     // Multistream dock shown once after updating to 2.8
+	// "Who's here", the list beside MultiChat
+	bool chatViewers = true;
+	bool vwLeft = false;          // left of the chat instead of right
+	bool vwLurkers = true;        // people who aren't chatting
+	bool vwHideBots = true;       // StreamElements, Nightbot, ForgeXBot…
+	bool vwNewestFirst = false;   // off = A to Z
+	bool vwArrivals = true;       // tint people who just arrived
+	bool vwPlatformIcons = true;
+	bool vwRoleBadges = true;
+	bool vwActivity = true;       // chatting / lurking / just arrived
+	bool vwNameColors = true;
+	bool vwCompact = false;
+	int vwWidth = 230;
+	QStringList vwHidden;         // logins the streamer hid from the list
+	bool chatDockIntroduced = false;   // MultiChat dock shown once after updating to 2.12
+	// Multistream → game list: switching a game also switches to the alert
+	// preset labelled with it (only shown to accounts with alert presets)
+	bool msGameAlertPreset = true;
 	// Events tab: which kinds are listed
 	bool evGiftBombs = true;
 	bool evPoints = true;

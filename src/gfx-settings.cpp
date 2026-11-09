@@ -60,8 +60,10 @@ static const BoolField kBools[] = {
 	{"chatToTwitch", &Settings::chatToTwitch},
 	{"chatToKick", &Settings::chatToKick},
 	{"chatToYouTube", &Settings::chatToYouTube},
+	{"chatToXive", &Settings::chatToXive},
 	{"chatTimestamps", &Settings::chatTimestamps},
 	{"chatStats", &Settings::chatStats},
+	{"chatStatsCards", &Settings::chatStatsCards},
 	{"chatHighlightMentions", &Settings::chatHighlightMentions},
 	{"chatQuickMod", &Settings::chatQuickMod},
 	{"chatShowDeleted", &Settings::chatShowDeleted},
@@ -69,6 +71,7 @@ static const BoolField kBools[] = {
 	{"chatPauseOnHover", &Settings::chatPauseOnHover},
 	{"chatYouTube", &Settings::chatYouTube},
 	{"chatTikTok", &Settings::chatTikTok},
+	{"chatXive", &Settings::chatXive},
 	{"chatIcons", &Settings::chatIcons},
 	{"chatBadges", &Settings::chatBadges},
 	{"chatNameColors", &Settings::chatNameColors},
@@ -92,7 +95,20 @@ static const BoolField kBools[] = {
 	{"ncOther", &Settings::ncOther},
 	{"eventsOwnDock", &Settings::eventsOwnDock},
 	{"eventsDockIntroduced", &Settings::eventsDockIntroduced},
+	{"chatDockIntroduced", &Settings::chatDockIntroduced},
+	{"chatViewers", &Settings::chatViewers},
+	{"vwLeft", &Settings::vwLeft},
+	{"vwLurkers", &Settings::vwLurkers},
+	{"vwHideBots", &Settings::vwHideBots},
+	{"vwNewestFirst", &Settings::vwNewestFirst},
+	{"vwArrivals", &Settings::vwArrivals},
+	{"vwPlatformIcons", &Settings::vwPlatformIcons},
+	{"vwRoleBadges", &Settings::vwRoleBadges},
+	{"vwActivity", &Settings::vwActivity},
+	{"vwNameColors", &Settings::vwNameColors},
+	{"vwCompact", &Settings::vwCompact},
 	{"msDockIntroduced", &Settings::msDockIntroduced},
+	{"msGameAlertPreset", &Settings::msGameAlertPreset},
 	{"evGiftBombs", &Settings::evGiftBombs},
 	{"evPoints", &Settings::evPoints},
 	{"evStreaks", &Settings::evStreaks},
@@ -134,6 +150,13 @@ void loadSettings()
 			g_settings.*(b.member) = v.toBool();
 	}
 	g_settings.chatFontSize = qBound(0, o.value(QStringLiteral("chatFontSize")).toInt(0), 24);
+	g_settings.vwWidth = qBound(170, o.value(QStringLiteral("vwWidth")).toInt(230), 600);
+	const QJsonArray vh = o.value(QStringLiteral("vwHidden")).toArray();
+	for (qsizetype i = 0; i < vh.size() && g_settings.vwHidden.size() < 200; ++i) {
+		const QString w = vh.at(i).toString().trimmed().left(60);
+		if (!w.isEmpty() && !g_settings.vwHidden.contains(w, Qt::CaseInsensitive))
+			g_settings.vwHidden << w;
+	}
 	g_settings.ncTikTokMinCoins = qBound(0, o.value(QStringLiteral("ncTikTokMinCoins")).toInt(0), 100000);
 	static const QStringList kStyles = {QStringLiteral("card"), QStringLiteral("strip"), QStringLiteral("minimal")};
 	static const QStringList kTints = {QStringLiteral("platform"), QStringLiteral("event"),
@@ -149,6 +172,12 @@ void loadSettings()
 		const QString w = hw.at(i).toString().trimmed().left(40);
 		if (!w.isEmpty() && !g_settings.chatHighlightWords.contains(w, Qt::CaseInsensitive))
 			g_settings.chatHighlightWords << w;
+	}
+	const QJsonArray lc = o.value(QStringLiteral("liveCollapsed")).toArray();
+	for (qsizetype i = 0; i < lc.size() && g_settings.liveCollapsed.size() < 32; ++i) {
+		const QString k = lc.at(i).toString().left(40);
+		if (!k.isEmpty() && !g_settings.liveCollapsed.contains(k))
+			g_settings.liveCollapsed << k;
 	}
 	const QJsonArray cw = o.value(QStringLiteral("chatWatch")).toArray();
 	for (qsizetype i = 0; i < cw.size() && g_settings.chatWatch.size() < 6; ++i) {
@@ -197,11 +226,14 @@ void saveSettings()
 	for (const BoolField &b : kBools)
 		o.insert(QLatin1String(b.key), g_settings.*(b.member));
 	o.insert(QStringLiteral("chatFontSize"), g_settings.chatFontSize);
+	o.insert(QStringLiteral("vwWidth"), g_settings.vwWidth);
+	o.insert(QStringLiteral("vwHidden"), QJsonArray::fromStringList(g_settings.vwHidden));
 	o.insert(QStringLiteral("ncTikTokMinCoins"), g_settings.ncTikTokMinCoins);
 	o.insert(QStringLiteral("noticeStyle"), g_settings.noticeStyle);
 	o.insert(QStringLiteral("noticeTint"), g_settings.noticeTint);
 	o.insert(QStringLiteral("chatHighlightWords"), QJsonArray::fromStringList(g_settings.chatHighlightWords));
 	o.insert(QStringLiteral("chatWatch"), QJsonArray::fromStringList(g_settings.chatWatch));
+	o.insert(QStringLiteral("liveCollapsed"), QJsonArray::fromStringList(g_settings.liveCollapsed));
 	o.insert(QStringLiteral("theme"), g_settings.theme);
 	o.insert(QStringLiteral("accent"), g_settings.accent);
 	o.insert(QStringLiteral("textScale"), g_settings.textScale);

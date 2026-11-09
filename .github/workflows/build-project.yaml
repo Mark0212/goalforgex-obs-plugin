@@ -5,6 +5,17 @@ on:
       pluginName:
         description: Project name detected by parsing build spec file
         value: ${{ jobs.check-event.outputs.pluginName }}
+      pluginVersion:
+        description: Version from buildspec.json
+        value: ${{ jobs.check-event.outputs.pluginVersion }}
+      buildNumber:
+        description: Build number baked into the plugin (same version, higher build = an update)
+        value: ${{ jobs.check-event.outputs.buildNumber }}
+# Build number = this workflow run's number: goes up on every push, so a fix
+# shipped under the same version is still "newer" to the docks' update check.
+# CMake reads it into PLUGIN_BUILD (cmake/common/helpers_common.cmake).
+env:
+  GFX_BUILD_NUMBER: ${{ github.run_number }}
 jobs:
   check-event:
     name: Check GitHub Event Data 🔎
@@ -19,6 +30,8 @@ jobs:
       config: ${{ steps.setup.outputs.config }}
       commitHash: ${{ steps.setup.outputs.commitHash }}
       pluginName: ${{ steps.setup.outputs.pluginName }}
+      pluginVersion: ${{ steps.setup.outputs.pluginVersion }}
+      buildNumber: ${{ steps.setup.outputs.buildNumber }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,7 +55,8 @@ jobs:
               ;;
             push)
               config_data=('codesign:true' 'notarize:false' 'package:true' 'config:RelWithDebInfo')
-              if [[ ${GITHUB_REF_NAME} =~ [0-9]+.[0-9]+.[0-9]+(-(rc|beta).+)? ]]; then
+              # Release tags and release/** branches ship to users (push.yaml publishes both).
+              if [[ ${GITHUB_REF_NAME} =~ [0-9]+.[0-9]+.[0-9]+(-(rc|beta).+)? || ${GITHUB_REF_NAME} == release/* ]]; then
                 config_data[1]='notarize:true'
                 config_data[3]='config:Release'
               fi
@@ -62,6 +76,20 @@ jobs:
           done
           echo "commitHash=${GITHUB_SHA:0:9}" >> $GITHUB_OUTPUT
 
+          # A release tag must match the version in buildspec.json — that's the
+          # version baked into the installer's name and the plugin itself, and
+          # what GoalForgeX's update check reads. A tag on an un-bumped commit
+          # (2.11.4 pointing at the 2.11.3 commit) built 2.11.3 files, so no dock
+          # ever saw an update. Fail fast instead of shipping that.
+          if [[ "${GITHUB_EVENT_NAME}" == push && "${GITHUB_REF_TYPE}" == tag ]]; then
+            spec_version="$(jq -r '.version' buildspec.json)"
+            tag_version="${GITHUB_REF_NAME#v}"
+            if [[ "${tag_version}" != "${spec_version}" ]]; then
+              echo "::error::Tag ${GITHUB_REF_NAME} does not match buildspec.json version ${spec_version}. Bump buildspec.json (and add a changelog entry), commit, then tag that commit."
+              exit 1
+            fi
+          fi
+
           plugin_name="$(grep 'name' buildspec.json | sed -E -e 's/^.+"name":[^"]+"(.+)",?$/\1/g')"
           plugin_display_name="$(grep 'displayName' buildspec.json | sed -E -e 's/^.+"displayName":[^"]+"(.+)",?$/\1/g' || echo "")"
 
@@ -70,6 +98,8 @@ jobs:
           else
             echo "pluginName=${plugin_name}" >> $GITHUB_OUTPUT
           fi
+          echo "pluginVersion=$(jq -r '.version' buildspec.json)" >> $GITHUB_OUTPUT
+          echo "buildNumber=${GFX_BUILD_NUMBER}" >> $GITHUB_OUTPUT
 
   macos-build:
     name: Build for macOS 🍏

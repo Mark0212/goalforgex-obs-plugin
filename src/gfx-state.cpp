@@ -112,6 +112,7 @@ LiveState LiveState::fromJson(const QJsonObject &o)
 				PresetState st;
 				st.id = p.value(QStringLiteral("id")).toString();
 				st.name = p.value(QStringLiteral("name")).toString();
+				st.game = p.value(QStringLiteral("game")).toString();
 				st.active = p.value(QStringLiteral("active")).toBool();
 				if (!st.id.isEmpty())
 					out.push_back(st);
@@ -119,6 +120,8 @@ LiveState LiveState::fromJson(const QJsonObject &o)
 		};
 		readList(QStringLiteral("goal"), s.goalPresets);
 		readList(QStringLiteral("follower"), s.followerPresets);
+		s.alertPresetsKnown = po.contains(QStringLiteral("alerts"));
+		readList(QStringLiteral("alerts"), s.alertPresets);
 	}
 	s.alertsLocked = o.value(QStringLiteral("alertsLocked")).toBool(true);
 	s.hasLastAlert = o.value(QStringLiteral("hasLastAlert")).toBool();

@@ -38,6 +38,12 @@ function(check_uuid uuid_string return_value)
 endfunction()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin-support.c.in")
+  # Build number (CI sets GFX_BUILD_NUMBER = the workflow run number; 0 locally).
+  # Same version + higher build = an update for the dock's update check.
+  set(PLUGIN_BUILD 0)
+  if("$ENV{GFX_BUILD_NUMBER}" MATCHES "^[0-9]+$")
+    set(PLUGIN_BUILD "$ENV{GFX_BUILD_NUMBER}")
+  endif()
   configure_file(src/plugin-support.c.in plugin-support.c @ONLY)
   add_library(plugin-support STATIC)
   target_sources(plugin-support PRIVATE plugin-support.c PUBLIC src/plugin-support.h)
