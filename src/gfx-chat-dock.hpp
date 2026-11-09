@@ -51,7 +51,7 @@ public:
 	// The OBS dock frame around this widget (set once OBS has added it).
 	QDockWidget *dockFrame() const;
 
-	std::function<void()> onShown; // became visible → the main dock clears the unread count
+	std::function<void()> onShown;        // became visible → the main dock clears the unread count
 	std::function<void()> onViewersShown; // the list just appeared → fetch it now
 
 protected:

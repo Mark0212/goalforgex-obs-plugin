@@ -50,8 +50,8 @@ constexpr int kHeaderRole = Qt::UserRole + 1; // section key; empty on a person'
 constexpr int kPlatformRole = Qt::UserRole + 2;
 constexpr int kLoginRole = Qt::UserRole + 3;
 constexpr int kColorRole = Qt::UserRole + 4;
-constexpr int kBadgeRole = Qt::UserRole + 5;    // host | mod | vip | sub | empty
-constexpr int kActivityRole = Qt::UserRole + 6; // right-hand text
+constexpr int kBadgeRole = Qt::UserRole + 5;        // host | mod | vip | sub | empty
+constexpr int kActivityRole = Qt::UserRole + 6;     // right-hand text
 constexpr int kActivityKindRole = Qt::UserRole + 7; // chatting | arrived | empty
 constexpr int kCollapsedRole = Qt::UserRole + 8;
 
@@ -111,7 +111,8 @@ private:
 		f.setPointSizeF(qMax(6.0, f.pointSizeF() - 1.0));
 		p->setFont(f);
 		p->setPen(QColor(theme::mapColor(QStringLiteral("#9aa1b0"))));
-		const QString arrow = index.data(kCollapsedRole).toBool() ? QStringLiteral("▸  ") : QStringLiteral("▾  ");
+		const QString arrow = index.data(kCollapsedRole).toBool() ? QStringLiteral("▸  ")
+									  : QStringLiteral("▾  ");
 		p->drawText(option.rect.adjusted(4, 4, -4, 0), Qt::AlignLeft | Qt::AlignVCenter,
 			    arrow + index.data(Qt::DisplayRole).toString());
 	}
@@ -476,7 +477,8 @@ void GfxViewerPanel::rebuild()
 		if (inSection.isEmpty())
 			continue;
 		const bool folded = collapsed_.contains(sec.key);
-		auto *header = new QListWidgetItem(QStringLiteral("%1  %2").arg(sec.title).arg(inSection.size()), list_);
+		auto *header =
+			new QListWidgetItem(QStringLiteral("%1  %2").arg(sec.title).arg(inSection.size()), list_);
 		header->setData(kHeaderRole, sec.key);
 		header->setData(kCollapsedRole, folded);
 		if (folded)
@@ -487,7 +489,7 @@ void GfxViewerPanel::rebuild()
 			item->setData(kLoginRole, p->login);
 			item->setData(kColorRole, p->color);
 			item->setData(kBadgeRole, !p->role.isEmpty() ? p->role
-							 : p->sub    ? QStringLiteral("sub")
+						  : p->sub           ? QStringLiteral("sub")
 								     : QString());
 			QString activity, kind;
 			if (chatting(*p)) {

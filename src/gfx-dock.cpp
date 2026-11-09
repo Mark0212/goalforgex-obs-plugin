@@ -432,8 +432,9 @@ void GfxDock::buildUi()
 	viewersPanel_->hide(); // the MultiChat dock adopts it (attachChatDock)
 	viewersPanel_->setOpenHandler(
 		[this](const QString &platform, const QString &login) { chatPanel_->openChatter(platform, login); });
-	viewersPanel_->setModHandler(
-		[this](const QString &platform, const QString &login) { chatPanel_->openChatterMenu(platform, login); });
+	viewersPanel_->setModHandler([this](const QString &platform, const QString &login) {
+		chatPanel_->openChatterMenu(platform, login);
+	});
 	const auto viewersChanged = [this] {
 		if (chatDock_)
 			chatDock_->applyViewers();
@@ -764,9 +765,10 @@ void GfxDock::openSettings(const QString &startPage)
 	       {QStringLiteral("Chatting / lurking labels"), &s.vwActivity},
 	       {QStringLiteral("Chatters' own name colours"), &s.vwNameColors},
 	       {QStringLiteral("Compact rows"), &s.vwCompact}});
-	note(mc, QStringLiteral("Twitch lists everyone in your chat. Kick, YouTube, TikTok and Xive don't share a viewer "
-				"list, so people there appear once they chat. The list hides itself when the dock is "
-				"narrower than 460 px."));
+	note(mc,
+	     QStringLiteral("Twitch lists everyone in your chat. Kick, YouTube, TikTok and Xive don't share a viewer "
+			    "list, so people there appear once they chat. The list hides itself when the dock is "
+			    "narrower than 460 px."));
 	group(mc, QStringLiteral("Platforms"),
 	      {{QStringLiteral("YouTube chat (read + reply)"), &s.chatYouTube},
 	       {QStringLiteral("TikTok LIVE chat (read-only)"), &s.chatTikTok},
@@ -1092,7 +1094,9 @@ void GfxDock::attachChatDock(GfxChatDock *dock)
 	chatDock_ = dock;
 	if (!dock)
 		return;
-	dock->onViewersShown = [this] { QTimer::singleShot(300, this, [this] { pollViewers(); }); };
+	dock->onViewersShown = [this] {
+		QTimer::singleShot(300, this, [this] { pollViewers(); });
+	};
 	dock->setViewers(viewersPanel_);
 	dock->onShown = [this] {
 		if (chatDock_ && chatDock_->panel()) {
@@ -1921,7 +1925,8 @@ void GfxDock::pollViewers()
 				return;
 			}
 			if (!r.ok()) {
-				viewersPanel_->setNote(QStringLiteral("Couldn't refresh the list. Trying again shortly."));
+				viewersPanel_->setNote(
+					QStringLiteral("Couldn't refresh the list. Trying again shortly."));
 				return;
 			}
 			viewersPanel_->applyPoll(r.http.json());

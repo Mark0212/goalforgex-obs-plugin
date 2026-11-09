@@ -207,7 +207,7 @@ private:
 	QTimer clockTimer_; // 1 s — the header's ON AIR clock
 	qint64 streamStartMs_ = 0;
 	qint64 recordStartMs_ = 0;
-	QTimer chatTimer_; // single-shot; re-armed after every poll
+	QTimer chatTimer_;    // single-shot; re-armed after every poll
 	QTimer viewersTimer_; // 30 s; polls only while the list is on screen
 	QString chatFeed_;
 	qint64 chatSeq_ = 0;

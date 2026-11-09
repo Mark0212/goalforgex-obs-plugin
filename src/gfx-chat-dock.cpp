@@ -131,7 +131,8 @@ void GfxChatDock::resizeEvent(QResizeEvent *event)
 {
 	QWidget::resizeEvent(event);
 	// Only when the width crosses the line; dragging the splitter must keep working.
-	if (viewers_ && settings().chatViewers && viewersOn_ != (panel_ && connected_ && width() >= kViewersMinDockWidth))
+	if (viewers_ && settings().chatViewers &&
+	    viewersOn_ != (panel_ && connected_ && width() >= kViewersMinDockWidth))
 		applyViewers();
 }
 
