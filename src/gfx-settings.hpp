@@ -68,6 +68,23 @@ struct Settings {
 	bool chatPauseOnHover = false;
 	// Feed text size in points; 0 = the dock's normal size
 	int chatFontSize = 0;
+	// Emote size, % of the normal size (about 2.6× the text height)
+	int chatEmoteScale = 100;
+	// HOST / MOD / VIP / SUB badge size, %
+	int chatBadgeScale = 100;
+	// Space above and below each message, px
+	int chatSpacing = 4;
+	// Name colours per role ("#rrggbb"; empty = automatic: the chatter's own colour).
+	// Viewer = anyone without a role. Order when someone has several: host, mod, VIP, sub.
+	QString colorHost;
+	QString colorMod;
+	QString colorVip;
+	QString colorSub;
+	QString colorViewer;
+	// Message text colour (empty = the theme's)
+	QString chatTextColor;
+	// TikTok likes line above the chat while TikTok is live (total, likes a minute, latest likers)
+	bool chatTikTokLikes = true;
 	// Extra words that highlight a line (besides the streamer's own name)
 	QStringList chatHighlightWords;
 	// Other people's channels shown in the feed, read-only ("twitch:name", "kick:name", …)
@@ -142,7 +159,7 @@ struct Settings {
 	bool evHypeTrain = true;  // one live card per Hype Train
 	bool evAutoExpand = true; // gift bombs open with their recipient list showing
 	// Appearance (gfx-theme): palette preset, accent colour, text size, density
-	QString theme = QStringLiteral("graphite"); // graphite | midnight | oled | slate | warm
+	QString theme = QStringLiteral("graphite"); // see theme::themes()
 	QString accent = QStringLiteral("#ffb020");
 	int textScale = 100; // percent, 80–140
 	bool compact = false;
@@ -153,6 +170,8 @@ struct Settings {
 	bool checkUpdates = true;
 	// Download updates in the background and install them when OBS closes.
 	bool autoInstallUpdates = true;
+	// "What's new" look: aurora | terminal | paper | dock
+	QString changelogTheme = QStringLiteral("aurora");
 	// The plugin version whose "What's new" popup was last shown (empty = never).
 	QString lastSeenVersion;
 	// Version whose install-on-exit was declined at Windows' "allow changes"
@@ -167,6 +186,10 @@ void loadSettings();
 // True when settings.json already existed at load — this OBS had the plugin before (an update, not a fresh install).
 bool settingsFileExisted();
 void saveSettings();
+
+// The name colour Settings → Chat style picks for a chatter with these roles
+// (host, then mod, VIP, sub; viewer = no role). Empty = automatic.
+QString roleNameColor(bool host, bool mod, bool vip, bool sub);
 
 // id → label, in display order.
 QList<QPair<QString, QString>> reactionTriggers();

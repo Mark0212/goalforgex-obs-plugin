@@ -13,11 +13,18 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include <plugin-support.h>
 
+#include <QButtonGroup>
+#include <QColor>
 #include <QDialog>
-#include <QDialogButtonBox>
+#include <QFont>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
 #include <QPushButton>
+#include <QRegularExpression>
+#include <QScrollBar>
 #include <QString>
 #include <QStringList>
 #include <QTextBrowser>
@@ -43,6 +50,30 @@ struct Release {
 	int count;
 };
 
+const Note k300[] = {
+	{"🚀", "GoalForgeX for OBS 3.0",
+	 "The biggest update yet: a brand-new Settings window, chat you can fine-tune, TikTok likes, new themes and a "
+	 "fresh What's new. Here's everything in 3.0."},
+	{"🎛", "A brand-new Settings",
+	 "⚙ Settings is rebuilt from scratch: a sidebar of pages, search across every option (Ctrl+F), smooth on / off "
+	 "switches and cards. Everything previews live on your docks as you change it, and Cancel puts it all back."},
+	{"🔠", "Sliders for your chat",
+	 "Chat style has sliders for text size, emote size, badge size and the space between messages, with a live "
+	 "chat preview right above them."},
+	{"🌈", "Name colours by role",
+	 "Pick a colour for the broadcaster, mods, VIPs, subs and everyone else, plus the message text itself. Badges "
+	 "match, and Who's here uses the same colours."},
+	{"❤️", "TikTok likes in MultiChat",
+	 "While you're live on TikTok, one slim line above the chat shows your total likes, likes a minute and who's "
+	 "tapping right now. It pulses as likes come in and takes almost no chat room."},
+	{"⚙", "Settings on every dock",
+	 "MultiChat, Events and Multistream each have a ⚙ button now, straight to the right Settings page."},
+	{"🖼", "Four new themes",
+	 "Nebula, Forest, Crimson and Ocean join the list, and Appearance shows every theme as a little preview card. "
+	 "Picking one also picks its accent unless you chose your own."},
+	{"✨", "What's new, redesigned",
+	 "This window has a timeline, search across every update and four looks: Aurora, Terminal, Paper or My dock."},
+};
 const Note k281[] = {
 	{"🎯", "Your OBS stream in Multistream",
 	 "The Multistream dock now shows the stream set in OBS → Settings → Stream at the top: which platform, the "
@@ -224,6 +255,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"3.0.0", "November 2026", k300, static_cast<int>(std::size(k300))},
 	{"2.13.0", "November 2026", k2130, static_cast<int>(std::size(k2130))},
 	{"2.12.2", "November 2026", k2122, static_cast<int>(std::size(k2122))},
 	{"2.12.1", "November 2026", k2121, static_cast<int>(std::size(k2121))},
@@ -258,79 +290,377 @@ int compareVersions(const QString &a, const QString &b)
 	return 0;
 }
 
-QString notesHtml(const QString &since)
+// ── Looks ─────────────────────────────────────────────────────────────
+// Settings → changelogTheme. "dock" follows Settings → Appearance.
+struct Look {
+	QString bg, panel, card, line, text, muted, faint, accent, accent2, font;
+	bool light = false;
+};
+
+Look lookFor(const QString &id)
 {
-	const QString accent = theme::accentColor();
-	QString h;
-	bool older = false;
+	if (id == QLatin1String("terminal"))
+		return {QStringLiteral("#050805"),
+			QStringLiteral("#0a110a"),
+			QStringLiteral("#0c160c"),
+			QStringLiteral("#1c3a1c"),
+			QStringLiteral("#c8ffc8"),
+			QStringLiteral("#6fbf73"),
+			QStringLiteral("#3d6e40"),
+			QStringLiteral("#39ff6a"),
+			QStringLiteral("#00e5ff"),
+			QStringLiteral("'Cascadia Mono', 'Consolas', 'Menlo', 'DejaVu Sans Mono', monospace"),
+			false};
+	if (id == QLatin1String("paper"))
+		return {QStringLiteral("#f6f1e7"),
+			QStringLiteral("#efe8da"),
+			QStringLiteral("#fffdf8"),
+			QStringLiteral("#e2d8c6"),
+			QStringLiteral("#2b2418"),
+			QStringLiteral("#7a6d58"),
+			QStringLiteral("#a89a82"),
+			QStringLiteral("#d9480f"),
+			QStringLiteral("#f59f00"),
+			QStringLiteral("'Georgia', 'Iowan Old Style', serif"),
+			true};
+	if (id == QLatin1String("dock")) {
+		const QString a = theme::accentColor();
+		return {theme::mapColor(QStringLiteral("#0e1014")),
+			theme::mapColor(QStringLiteral("#13161c")),
+			theme::mapColor(QStringLiteral("#181b22")),
+			theme::mapColor(QStringLiteral("#262b36")),
+			theme::mapColor(QStringLiteral("#e8eaf0")),
+			theme::mapColor(QStringLiteral("#9aa1b0")),
+			theme::mapColor(QStringLiteral("#5b6270")),
+			a,
+			QColor(a).lighter(135).name(),
+			QString(),
+			false};
+	}
+	return {QStringLiteral("#0b0d17"),
+		QStringLiteral("#10132a"),
+		QStringLiteral("#151936"),
+		QStringLiteral("#272c58"),
+		QStringLiteral("#eef0ff"),
+		QStringLiteral("#a5abd6"),
+		QStringLiteral("#646a9c"),
+		QStringLiteral("#a78bfa"),
+		QStringLiteral("#22d3ee"),
+		QString(),
+		false};
+}
+
+QString rgbaOf(const QString &hex, int alpha)
+{
+	const QColor c(hex);
+	return QStringLiteral("rgba(%1, %2, %3, %4)").arg(c.red()).arg(c.green()).arg(c.blue()).arg(alpha);
+}
+
+// Escaped text with the search term marked.
+QString marked(const QString &raw, const QString &q, const QString &markBg)
+{
+	const QString esc = raw.toHtmlEscaped();
+	if (q.isEmpty())
+		return esc;
+	const QRegularExpression re(QRegularExpression::escape(q.toHtmlEscaped()),
+				    QRegularExpression::CaseInsensitiveOption);
+	QString out;
+	qsizetype last = 0;
+	auto it = re.globalMatch(esc);
+	while (it.hasNext()) {
+		const QRegularExpressionMatch m = it.next();
+		out += esc.mid(last, m.capturedStart() - last);
+		out += QStringLiteral("<span style='background-color:%1'>%2</span>").arg(markBg, m.captured(0));
+		last = m.capturedEnd();
+	}
+	out += esc.mid(last);
+	return out;
+}
+
+bool noteMatches(const Note &n, const QString &q)
+{
+	return q.isEmpty() || QString::fromUtf8(n.title).contains(q, Qt::CaseInsensitive) ||
+	       QString::fromUtf8(n.detail).contains(q, Qt::CaseInsensitive);
+}
+
+QString notesHtml(const QString &since, const QString &q, const Look &k)
+{
+	QString h = QStringLiteral("<html><body style='color:%1;%2'>")
+			    .arg(k.text, k.font.isEmpty() ? QString() : QStringLiteral("font-family:%1;").arg(k.font));
+	bool older = false, any = false, first = true;
+	const QString markBg = rgbaOf(k.accent, k.light ? 70 : 90);
 	for (const Release &r : kReleases) {
 		const QString v = QString::fromLatin1(r.version);
-		// Releases the streamer already saw go under "Earlier", dimmed.
-		const bool seen = !since.isEmpty() && compareVersions(v, since) <= 0;
-		if (seen && !older) {
-			h += QStringLiteral("<p style='margin:18px 0 6px;color:#6b7280;font-size:8pt;font-weight:800;"
-					    "letter-spacing:1px'>EARLIER</p>");
-			older = true;
-		}
-		h += QStringLiteral(
-			     "<p style='margin:%1px 0 6px'><span style='color:%2;font-weight:800;font-size:11pt'>"
-			     "%3</span>&nbsp;&nbsp;<span style='color:#6b7280;font-size:8pt'>%4</span></p>")
-			     .arg(h.isEmpty() ? 0 : 12)
-			     .arg(seen ? QStringLiteral("#9aa1b0") : accent, v, QString::fromLatin1(r.date));
+		QString rows;
 		for (int i = 0; i < r.count; ++i) {
 			const Note &n = r.notes[i];
-			h += QStringLiteral("<p style='margin:0 0 9px'><span style='font-size:11pt'>%1</span>&nbsp; "
-					    "<b style='color:%2'>%3</b><br><span style='color:%4'>%5</span></p>")
-				     .arg(QString::fromUtf8(n.icon),
-					  seen ? QStringLiteral("#c9ced8") : QStringLiteral("#ffffff"),
-					  QString::fromUtf8(n.title).toHtmlEscaped(),
-					  seen ? QStringLiteral("#8b93a3") : QStringLiteral("#c9ced8"),
-					  QString::fromUtf8(n.detail).toHtmlEscaped());
+			if (!noteMatches(n, q))
+				continue;
+			rows += QStringLiteral(
+					"<tr><td width='44' valign='top' align='center' style='font-size:17pt'>%1</td>"
+					"<td valign='top'><span style='color:%2;font-size:10.5pt;font-weight:700'>%3</span>"
+					"<br><span style='color:%4'>%5</span></td></tr>")
+					.arg(QString::fromUtf8(n.icon), k.text,
+					     marked(QString::fromUtf8(n.title), q, markBg), k.muted,
+					     marked(QString::fromUtf8(n.detail), q, markBg));
 		}
+		if (rows.isEmpty())
+			continue;
+		any = true;
+		const bool seen = !since.isEmpty() && compareVersions(v, since) <= 0;
+		if (seen && !older && q.isEmpty()) {
+			h += QStringLiteral("<p style='margin:20px 0 8px;color:%1;font-size:8pt;font-weight:800'>"
+					    "EARLIER UPDATES&nbsp;&nbsp;·&nbsp;&nbsp;you've seen these</p>")
+				     .arg(k.faint);
+			older = true;
+		}
+		QString pill;
+		if (first && q.isEmpty())
+			pill = QStringLiteral("&nbsp;&nbsp;<span style='background-color:%1;color:%2;font-size:7.5pt;"
+					      "font-weight:800'>&nbsp;LATEST&nbsp;</span>")
+				       .arg(k.accent, k.light ? QStringLiteral("#ffffff") : k.bg);
+		else if (!since.isEmpty() && !seen)
+			pill = QStringLiteral("&nbsp;&nbsp;<span style='background-color:%1;color:%2;font-size:7.5pt;"
+					      "font-weight:800'>&nbsp;NEW&nbsp;</span>")
+				       .arg(rgbaOf(k.accent2, 60), k.accent2);
+		h += QStringLiteral(
+			     "<a name='v%1'></a>"
+			     "<table width='100%' border='1' cellspacing='0' cellpadding='14' "
+			     "style='border-color:%2;border-style:solid;background-color:%3'><tr><td>"
+			     "<span style='color:%4;font-size:15pt;font-weight:800'>%1</span>"
+			     "&nbsp;&nbsp;<span style='color:%5;font-size:8.5pt'>%6</span>%7"
+			     "<table width='100%' border='0' cellspacing='0' cellpadding='6' style='margin-top:6px'>%8"
+			     "</table></td></tr></table><p style='margin:0;font-size:5pt'>&nbsp;</p>")
+			     .arg(v, k.line, seen ? k.panel : k.card, seen ? k.muted : k.accent, k.faint,
+				  QString::fromLatin1(r.date), pill, rows);
+		first = false;
 	}
+	if (!any)
+		h += QStringLiteral("<p align='center' style='margin-top:60px;color:%1'>Nothing in the notes matches "
+				    "“%2”.</p>")
+			     .arg(k.muted, q.toHtmlEscaped());
+	h += QStringLiteral("</body></html>");
 	return h;
+}
+
+QString dialogSheet(const Look &k)
+{
+	QString qss = QStringLiteral(R"QSS(
+QDialog#gfxChangelog { background: @BG@; }
+QFrame#gfxClHero { border: none; border-bottom: 1px solid @LINE@;
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 @A40@, stop:0.5 @B15@, stop:1 @BG@); }
+QLabel#gfxClTitle { color: @TEXT@; font-size: 20pt; font-weight: 800; background: transparent; @FONT@ }
+QLabel#gfxClSub { color: @MUTED@; font-size: 9pt; background: transparent; @FONT@ }
+QLabel#gfxClNew { color: @ACC@; background: @A20@; border: 1px solid @A50@; border-radius: 11px;
+  padding: 3px 11px; font-size: 8.5pt; font-weight: 800; }
+QPushButton#gfxClLook { color: @MUTED@; background: @PANEL@; border: 1px solid @LINE@; border-radius: 10px;
+  padding: 5px 11px; font-weight: 600; }
+QPushButton#gfxClLook:hover { color: @TEXT@; }
+QPushButton#gfxClLook:checked { color: @TEXT@; background: @A20@; border: 1px solid @ACC@; }
+QFrame#gfxClSide { background: @PANEL@; border: none; border-right: 1px solid @LINE@; }
+QLabel#gfxClSideHead { color: @FAINT@; font-size: 8pt; font-weight: 800; background: transparent; }
+QListWidget#gfxClTimeline { background: transparent; border: none; outline: 0; color: @MUTED@; @FONT@ }
+QListWidget#gfxClTimeline::item { padding: 7px 8px; border-radius: 8px; margin: 1px 0; }
+QListWidget#gfxClTimeline::item:hover { background: @A10@; color: @TEXT@; }
+QListWidget#gfxClTimeline::item:selected { background: @A20@; color: @TEXT@; }
+QLineEdit#gfxClSearch { background: @CARD@; color: @TEXT@; border: 1px solid @LINE@; border-radius: 10px;
+  padding: 7px 10px; }
+QLineEdit#gfxClSearch:focus { border: 1px solid @ACC@; }
+QTextBrowser#gfxClBody { background: @BG@; border: none; }
+QFrame#gfxClFoot { background: @PANEL@; border: none; border-top: 1px solid @LINE@; }
+QLabel#gfxClFootNote { color: @FAINT@; font-size: 8.5pt; background: transparent; }
+QPushButton#gfxClClose { color: @ONACC@; background: @ACC@; border: none; border-radius: 10px; padding: 7px 18px;
+  font-weight: 800; }
+QPushButton#gfxClClose:hover { background: @ACC2@; }
+QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+QScrollBar::handle:vertical { background: @LINE@; border-radius: 4px; min-height: 30px; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+)QSS");
+	const QList<QPair<QString, QString>> tokens = {
+		{QStringLiteral("@BG@"), k.bg},
+		{QStringLiteral("@PANEL@"), k.panel},
+		{QStringLiteral("@CARD@"), k.card},
+		{QStringLiteral("@LINE@"), k.line},
+		{QStringLiteral("@TEXT@"), k.text},
+		{QStringLiteral("@MUTED@"), k.muted},
+		{QStringLiteral("@FAINT@"), k.faint},
+		{QStringLiteral("@ACC2@"), k.accent2},
+		{QStringLiteral("@ACC@"), k.accent},
+		{QStringLiteral("@ONACC@"), k.light || QColor(k.accent).lightnessF() < 0.55
+						    ? QStringLiteral("#ffffff")
+						    : QStringLiteral("#10121a")},
+		{QStringLiteral("@A10@"), rgbaOf(k.accent, 26)},
+		{QStringLiteral("@A20@"), rgbaOf(k.accent, 46)},
+		{QStringLiteral("@A40@"), rgbaOf(k.accent, k.light ? 60 : 96)},
+		{QStringLiteral("@A50@"), rgbaOf(k.accent, 128)},
+		{QStringLiteral("@B15@"), rgbaOf(k.accent2, k.light ? 30 : 40)},
+		{QStringLiteral("@FONT@"),
+		 k.font.isEmpty() ? QString() : QStringLiteral("font-family: %1;").arg(k.font)},
+	};
+	for (const auto &t : tokens)
+		qss.replace(t.first, t.second);
+	return qss;
 }
 
 void showDialog(QWidget *parent, const QString &since)
 {
 	QDialog dlg(parent);
+	dlg.setObjectName(QStringLiteral("gfxChangelog"));
 	dlg.setWindowTitle(QStringLiteral("What's new in GoalForgeX for OBS"));
-	dlg.setMinimumSize(440, 460);
+	dlg.setMinimumSize(660, 500);
+	dlg.resize(860, 640);
 	auto *root = new QVBoxLayout(&dlg);
-	root->setContentsMargins(16, 14, 16, 12);
-	root->setSpacing(10);
+	root->setContentsMargins(0, 0, 0, 0);
+	root->setSpacing(0);
 
-	auto *head = new QHBoxLayout();
-	head->setSpacing(12);
-	auto *mark = new QLabel(&dlg);
-	mark->setPixmap(theme::brandMark(40, dlg.devicePixelRatioF()));
-	mark->setFixedSize(40, 40);
+	// How many releases are new since the last one the streamer saw.
+	int fresh = 0;
+	for (const Release &r : kReleases)
+		if (!since.isEmpty() && compareVersions(QString::fromLatin1(r.version), since) > 0)
+			++fresh;
+
+	// ── Hero ──
+	auto *hero = new QFrame(&dlg);
+	hero->setObjectName(QStringLiteral("gfxClHero"));
+	auto *hl = new QHBoxLayout(hero);
+	hl->setContentsMargins(22, 18, 22, 18);
+	hl->setSpacing(14);
+	auto *mark = new QLabel(hero);
+	mark->setFixedSize(54, 54);
+	mark->setPixmap(theme::brandMark(54, dlg.devicePixelRatioF()));
 	auto *titles = new QVBoxLayout();
-	titles->setSpacing(0);
-	auto *title = new QLabel(QStringLiteral("What's new"), &dlg);
-	title->setObjectName(QStringLiteral("gfxSectionTitle"));
-	auto *sub = new QLabel(QStringLiteral("GoalForgeX for OBS %1").arg(QString::fromLatin1(PLUGIN_VERSION)), &dlg);
-	sub->setObjectName(QStringLiteral("gfxMuted"));
+	titles->setSpacing(2);
+	auto *title = new QLabel(QStringLiteral("What's new"), hero);
+	title->setObjectName(QStringLiteral("gfxClTitle"));
+	auto *sub = new QLabel(QStringLiteral("GoalForgeX for OBS %1").arg(QString::fromLatin1(PLUGIN_VERSION)), hero);
+	sub->setObjectName(QStringLiteral("gfxClSub"));
 	titles->addWidget(title);
 	titles->addWidget(sub);
-	head->addWidget(mark);
-	head->addLayout(titles, 1);
-	root->addLayout(head);
+	hl->addWidget(mark);
+	hl->addLayout(titles, 1);
+	if (fresh > 0) {
+		auto *badge = new QLabel(fresh == 1 ? QStringLiteral("✨  1 new update")
+						    : QStringLiteral("✨  %1 new updates").arg(fresh),
+					 hero);
+		badge->setObjectName(QStringLiteral("gfxClNew"));
+		hl->addWidget(badge, 0, Qt::AlignVCenter);
+	}
+	// Look switcher
+	auto *looks = new QHBoxLayout();
+	looks->setSpacing(6);
+	auto *lookGroup = new QButtonGroup(&dlg);
+	lookGroup->setExclusive(true);
+	const QList<QPair<QString, QString>> lookList = {{QStringLiteral("aurora"), QStringLiteral("🌌 Aurora")},
+							 {QStringLiteral("terminal"), QStringLiteral("💻 Terminal")},
+							 {QStringLiteral("paper"), QStringLiteral("📄 Paper")},
+							 {QStringLiteral("dock"), QStringLiteral("🎛 My dock")}};
+	QList<QPushButton *> lookBtns;
+	for (const auto &l : lookList) {
+		auto *b = new QPushButton(l.second, hero);
+		b->setObjectName(QStringLiteral("gfxClLook"));
+		b->setCheckable(true);
+		b->setCursor(Qt::PointingHandCursor);
+		b->setProperty("gfxLook", l.first);
+		b->setChecked(settings().changelogTheme == l.first);
+		b->setToolTip(QStringLiteral("Show What's new in the %1 look")
+				      .arg(l.second.mid(l.second.indexOf(QLatin1Char(' ')) + 1)));
+		lookGroup->addButton(b);
+		looks->addWidget(b);
+		lookBtns << b;
+	}
+	hl->addLayout(looks);
+	root->addWidget(hero);
 
+	// ── Timeline + notes ──
+	auto *mid = new QHBoxLayout();
+	mid->setContentsMargins(0, 0, 0, 0);
+	mid->setSpacing(0);
+	auto *side = new QFrame(&dlg);
+	side->setObjectName(QStringLiteral("gfxClSide"));
+	side->setFixedWidth(190);
+	auto *sl = new QVBoxLayout(side);
+	sl->setContentsMargins(12, 14, 10, 10);
+	sl->setSpacing(8);
+	auto *sideHead = new QLabel(QStringLiteral("TIMELINE"), side);
+	sideHead->setObjectName(QStringLiteral("gfxClSideHead"));
+	auto *timeline = new QListWidget(side);
+	timeline->setObjectName(QStringLiteral("gfxClTimeline"));
+	timeline->setFocusPolicy(Qt::NoFocus);
+	timeline->setCursor(Qt::PointingHandCursor);
+	timeline->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+	for (const Release &r : kReleases) {
+		const QString v = QString::fromLatin1(r.version);
+		const bool isNew = !since.isEmpty() && compareVersions(v, since) > 0;
+		auto *item = new QListWidgetItem(QStringLiteral("%1  %2\n      %3")
+							 .arg(isNew ? QStringLiteral("✦") : QStringLiteral("•"), v,
+							      QString::fromLatin1(r.date)),
+						 timeline);
+		item->setData(Qt::UserRole, v);
+		if (isNew) {
+			QFont f = item->font();
+			f.setBold(true);
+			item->setFont(f);
+		}
+	}
+	sl->addWidget(sideHead);
+	sl->addWidget(timeline, 1);
+	auto *right = new QVBoxLayout();
+	right->setContentsMargins(18, 14, 18, 0);
+	right->setSpacing(10);
+	auto *search = new QLineEdit(&dlg);
+	search->setObjectName(QStringLiteral("gfxClSearch"));
+	search->setPlaceholderText(QStringLiteral("🔍  Search every update — try “TikTok”, “emotes” or “themes”"));
+	search->setClearButtonEnabled(true);
 	auto *body = new QTextBrowser(&dlg);
-	body->setObjectName(QStringLiteral("gfxChatView")); // the feed's framed look
+	body->setObjectName(QStringLiteral("gfxClBody"));
 	body->setOpenLinks(false);
-	body->document()->setDocumentMargin(12);
-	body->setHtml(notesHtml(since));
-	root->addWidget(body, 1);
+	body->document()->setDocumentMargin(4);
+	right->addWidget(search);
+	right->addWidget(body, 1);
+	mid->addWidget(side);
+	mid->addLayout(right, 1);
+	root->addLayout(mid, 1);
 
-	auto *buttons = new QDialogButtonBox(&dlg);
-	QPushButton *close = buttons->addButton(QStringLiteral("Close"), QDialogButtonBox::AcceptRole);
-	theme::setRole(close, "primary");
-	close->setDefault(true);
+	// ── Footer ──
+	auto *foot = new QFrame(&dlg);
+	foot->setObjectName(QStringLiteral("gfxClFoot"));
+	auto *fl = new QHBoxLayout(foot);
+	fl->setContentsMargins(18, 10, 18, 10);
+	auto *footNote =
+		new QLabel(QStringLiteral("Shows after every update · open it any time from ⚙ → What's new"), foot);
+	footNote->setObjectName(QStringLiteral("gfxClFootNote"));
+	auto *close = new QPushButton(QStringLiteral("Let's go"), foot);
+	close->setObjectName(QStringLiteral("gfxClClose"));
 	close->setCursor(Qt::PointingHandCursor);
-	QObject::connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-	root->addWidget(buttons);
+	close->setDefault(true);
+	fl->addWidget(footNote, 1);
+	fl->addWidget(close);
+	root->addWidget(foot);
+
+	const auto render = [&dlg, body, search, since] {
+		const Look k = lookFor(settings().changelogTheme);
+		dlg.setStyleSheet(dialogSheet(k));
+		const int keep = body->verticalScrollBar()->value();
+		body->setHtml(notesHtml(since, search->text().trimmed(), k));
+		body->verticalScrollBar()->setValue(keep);
+	};
+	for (QPushButton *b : lookBtns)
+		QObject::connect(b, &QPushButton::clicked, &dlg, [b, render] {
+			settings().changelogTheme = b->property("gfxLook").toString();
+			saveSettings();
+			render();
+		});
+	QObject::connect(search, &QLineEdit::textChanged, &dlg, [render, body](const QString &) {
+		render();
+		body->verticalScrollBar()->setValue(0);
+	});
+	QObject::connect(timeline, &QListWidget::itemClicked, &dlg, [body, search](QListWidgetItem *item) {
+		if (!search->text().isEmpty())
+			search->clear();
+		body->scrollToAnchor(QStringLiteral("v") + item->data(Qt::UserRole).toString());
+	});
+	QObject::connect(close, &QPushButton::clicked, &dlg, &QDialog::accept);
+	render();
 	dlg.exec();
 }
 

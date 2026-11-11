@@ -83,6 +83,26 @@ Preset presetFor(const QString &name)
 		p.hue = 28.0 / 360.0;
 		p.satMul = 1.3;
 		p.satAdd = 0.04;
+	} else if (name == QLatin1String("nebula")) {
+		p.hue = 268.0 / 360.0;
+		p.satMul = 2.0;
+		p.satAdd = 0.14;
+		p.darkMul = 0.95;
+	} else if (name == QLatin1String("forest")) {
+		p.hue = 152.0 / 360.0;
+		p.satMul = 1.5;
+		p.satAdd = 0.08;
+		p.darkMul = 0.95;
+	} else if (name == QLatin1String("crimson")) {
+		p.hue = 350.0 / 360.0;
+		p.satMul = 1.6;
+		p.satAdd = 0.10;
+		p.darkMul = 0.92;
+	} else if (name == QLatin1String("ocean")) {
+		p.hue = 198.0 / 360.0;
+		p.satMul = 1.8;
+		p.satAdd = 0.12;
+		p.darkMul = 0.95;
 	}
 	return p;
 }
@@ -225,6 +245,30 @@ QString applyAppearance(QString qss)
 }
 
 } // namespace
+
+QList<ThemeInfo> themes()
+{
+	return {
+		{QStringLiteral("graphite"), QStringLiteral("Graphite"), QStringLiteral("The classic GoalForgeX look"),
+		 QStringLiteral("#ffb020")},
+		{QStringLiteral("midnight"), QStringLiteral("Midnight"), QStringLiteral("Deep blue night"),
+		 QStringLiteral("#3b82f6")},
+		{QStringLiteral("oled"), QStringLiteral("OLED"), QStringLiteral("True black, easy on the eyes"),
+		 QStringLiteral("#ffb020")},
+		{QStringLiteral("slate"), QStringLiteral("Slate"), QStringLiteral("A lighter, softer grey"),
+		 QStringLiteral("#06b6d4")},
+		{QStringLiteral("warm"), QStringLiteral("Warm"), QStringLiteral("Cosy coffee tones"),
+		 QStringLiteral("#f97316")},
+		{QStringLiteral("nebula"), QStringLiteral("Nebula"), QStringLiteral("Cosmic purple glow"),
+		 QStringLiteral("#c084fc")},
+		{QStringLiteral("forest"), QStringLiteral("Forest"), QStringLiteral("Calm evergreen"),
+		 QStringLiteral("#22c55e")},
+		{QStringLiteral("crimson"), QStringLiteral("Crimson"), QStringLiteral("Bold arena red"),
+		 QStringLiteral("#ef4444")},
+		{QStringLiteral("ocean"), QStringLiteral("Ocean"), QStringLiteral("Cool deep-sea teal"),
+		 QStringLiteral("#22d3ee")},
+	};
+}
 
 QString mapColor(const QString &hexColor)
 {

@@ -20,6 +20,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include "gfx-http.hpp"
 #include "gfx-live.hpp"
 #include "gfx-settings.hpp"
+#include "gfx-settings-dialog.hpp"
 #include "gfx-theme.hpp"
 #include "gfx-viewers.hpp"
 
@@ -442,6 +443,9 @@ void GfxDock::buildUi()
 	};
 	viewersPanel_->onLayoutChanged = viewersChanged;
 	chatPanel_->onViewersToggled = viewersChanged;
+	chatPanel_->onOpenSettings = [this] {
+		openSettings(QStringLiteral("Chat style"));
+	};
 	chatPanel_->setSendHandler(
 		[this](const QStringList &platforms, const QString &text) { sendChat(platforms, text); });
 	chatPanel_->setModHandler([this](const QString &platform, const QString &action, const QString &login,
@@ -649,398 +653,35 @@ void GfxDock::rebuildTabs()
 void GfxDock::openSettings(const QString &startPage)
 {
 	Settings &s = settings();
-	const Settings before = s; // Cancel restores this (Appearance previews live)
-	QDialog dlg(this);
-	dlg.setWindowTitle(QStringLiteral("GoalForgeX settings"));
-	dlg.setMinimumWidth(460);
-	dlg.setMinimumHeight(520);
-	auto *root = new QVBoxLayout(&dlg);
-	root->setContentsMargins(12, 10, 12, 10);
-	root->setSpacing(8);
-	auto *pages = new QTabWidget(&dlg);
-	pages->setDocumentMode(true);
-	root->addWidget(pages, 1);
-
-	struct Opt {
-		QCheckBox *box;
-		bool *value;
-	};
-	QList<Opt> opts;
-	// A scrollable page; returns its layout.
-	const auto page = [pages](const QString &title) {
-		auto *scroll = new QScrollArea(pages);
-		scroll->setWidgetResizable(true);
-		scroll->setFrameShape(QFrame::NoFrame);
-		auto *inner = new QWidget(scroll);
-		auto *l = new QVBoxLayout(inner);
-		l->setContentsMargins(2, 6, 6, 6);
-		l->setSpacing(6);
-		scroll->setWidget(inner);
-		pages->addTab(scroll, title);
-		return l;
-	};
-	const auto group = [&opts](QVBoxLayout *into, const QString &title,
-				   const QList<QPair<QString, bool *>> &items) {
-		auto *g = new QGroupBox(title, into->parentWidget());
-		auto *l = new QVBoxLayout(g);
-		for (const auto &it : items) {
-			auto *c = new QCheckBox(it.first, g);
-			c->setChecked(*it.second);
-			l->addWidget(c);
-			opts.push_back({c, it.second});
-		}
-		into->addWidget(g);
-		return l;
-	};
-	const auto note = [](QVBoxLayout *into, const QString &text) {
-		auto *lbl = new QLabel(text, into->parentWidget());
-		lbl->setWordWrap(true);
-		lbl->setObjectName(QStringLiteral("gfxMuted"));
-		into->addWidget(lbl);
-	};
-
-	// ── General ──
-	QVBoxLayout *gen = page(QStringLiteral("General"));
-	// ── Layout: which tabs and Live cards show ──
-	QVBoxLayout *lay = page(QStringLiteral("Layout"));
-	group(lay, QStringLiteral("Tabs"),
-	      {{QStringLiteral("Live"), &s.tabLive},
-	       {QStringLiteral("Events tab (only when Events aren't in their own dock — see the Events page)"),
-		&s.tabEvents},
-	       {QStringLiteral("Widgets"), &s.tabWidgets},
-	       {QStringLiteral("Reactions"), &s.tabReactions},
-	       {QStringLiteral("Health"), &s.tabHealth}});
-	group(lay, QStringLiteral("Live tab cards"),
-	      {{QStringLiteral("Stream stats line"), &s.cardStats},
-	       {QStringLiteral("Subathon timer"), &s.cardTimer},
-	       {QStringLiteral("Intro timer"), &s.cardActionTimer},
-	       {QStringLiteral("Goal"), &s.cardGoal},
-	       {QStringLiteral("Spin wheel"), &s.cardWheel},
-	       {QStringLiteral("Counters"), &s.cardCounters},
-	       {QStringLiteral("Presets (switch saved goal looks)"), &s.cardPresets},
-	       {QStringLiteral("Alerts (test / replay / clear chat)"), &s.cardAlerts},
-	       {QStringLiteral("Activity feed"), &s.cardActivity}});
-	note(lay,
-	     QStringLiteral("Tip: click a card's title on the Live tab to fold it away — it stays folded next time."));
-	if (!s.liveCollapsed.isEmpty()) {
-		auto *unfold = new QPushButton(QStringLiteral("Unfold every Live card"), lay->parentWidget());
-		theme::setRole(unfold, "ghost");
-		lay->addWidget(unfold, 0, Qt::AlignLeft);
-		connect(unfold, &QPushButton::clicked, unfold, [unfold] {
-			settings().liveCollapsed.clear();
-			unfold->setEnabled(false);
-			unfold->setText(QStringLiteral("All cards unfold when you press OK"));
-		});
-	}
-	lay->addStretch(1);
-	group(gen, QStringLiteral("Automation"),
-	      {{QStringLiteral("Start / resume the subathon timer when I start streaming"), &s.autoStartTimer},
-	       {QStringLiteral("Pause the subathon timer when I stop streaming"), &s.autoPauseTimer}});
-	group(gen, QStringLiteral("Updates"),
-	      {{QStringLiteral("Tell me when a new version of the plugin is out"), &s.checkUpdates},
-	       {QStringLiteral("Download updates automatically and install them when I close OBS"),
-		&s.autoInstallUpdates}});
-	note(gen,
-	     QStringLiteral(
-		     "Hotkeys for timers, goal, wheel, counters and alerts are in OBS → Settings → Hotkeys (search “GoalForgeX”)."));
-	gen->addStretch(1);
-
-	// ── MultiChat ──
-	QVBoxLayout *mc = page(QStringLiteral("MultiChat"));
-	group(mc, QStringLiteral("Dock"),
-	      {{QStringLiteral("MultiChat on (its own “GoalForgeX MultiChat” dock)"), &s.tabChat},
-	       {QStringLiteral("Online / offline and viewers for each platform above the chat"), &s.chatStats},
-	       {QStringLiteral("…as big cards with uptime, category and chat pace (takes chat room)"),
-		&s.chatStatsCards}});
-	note(mc, QStringLiteral("Docks menu → GoalForgeX MultiChat shows the dock if you closed it."));
-	group(mc, QStringLiteral("Who's here (the list beside the chat)"),
-	      {{QStringLiteral("Show Who's here"), &s.chatViewers},
-	       {QStringLiteral("On the left of the chat instead of the right"), &s.vwLeft},
-	       {QStringLiteral("Include lurkers"), &s.vwLurkers},
-	       {QStringLiteral("Hide bots"), &s.vwHideBots},
-	       {QStringLiteral("Newest arrivals first (off = A to Z)"), &s.vwNewestFirst},
-	       {QStringLiteral("Highlight people who just arrived"), &s.vwArrivals},
-	       {QStringLiteral("Platform icons"), &s.vwPlatformIcons},
-	       {QStringLiteral("Role badges"), &s.vwRoleBadges},
-	       {QStringLiteral("Chatting / lurking labels"), &s.vwActivity},
-	       {QStringLiteral("Chatters' own name colours"), &s.vwNameColors},
-	       {QStringLiteral("Compact rows"), &s.vwCompact}});
-	note(mc,
-	     QStringLiteral("Twitch lists everyone in your chat. Kick, YouTube, TikTok and Xive don't share a viewer "
-			    "list, so people there appear once they chat. The list hides itself when the dock is "
-			    "narrower than 460 px."));
-	group(mc, QStringLiteral("Platforms"),
-	      {{QStringLiteral("YouTube chat (read + reply)"), &s.chatYouTube},
-	       {QStringLiteral("TikTok LIVE chat (read-only)"), &s.chatTikTok},
-	       {QStringLiteral("Xive chat (read + reply as the GoalForgeX bot)"), &s.chatXive}});
-	note(mc, QStringLiteral("Twitch and Kick are always included. Each platform shows up once it's connected on "
-				"goalforgex.com → Account. YouTube and TikTok chat appear while you're live there. "
-				"Xive chat needs the GoalForgeX bot added to your Xive channel (Xive dashboard → "
-				"GoalForgeX Bot)."));
-	group(mc, QStringLiteral("Look"),
-	      {{QStringLiteral("Platform icon on each message"), &s.chatIcons},
-	       {QStringLiteral("HOST / MOD / VIP / SUB badges"), &s.chatBadges},
-	       {QStringLiteral("GoalForgeX STAFF badge on GoalForgeX team members"), &s.chatStaffBadge},
-	       {QStringLiteral("Chatters' own name colours"), &s.chatNameColors},
-	       {QStringLiteral("Show the time next to each message"), &s.chatTimestamps},
-	       {QStringLiteral("Compact lines"), &s.chatCompact},
-	       {QStringLiteral("Shade every other message"), &s.chatAltRows}});
-	group(mc, QStringLiteral("Behaviour"),
-	      {{QStringLiteral("Highlight messages that mention me or my highlight words"), &s.chatHighlightMentions},
-	       {QStringLiteral("Quick moderation buttons on each message (delete / 10 min timeout)"), &s.chatQuickMod},
-	       {QStringLiteral("Keep the text of deleted messages (struck through)"), &s.chatShowDeleted},
-	       {QStringLiteral("Pause the chat while my mouse is over it"), &s.chatPauseOnHover}});
-	auto *chatSizeRow = new QHBoxLayout();
-	auto *chatSizeLbl = new QLabel(QStringLiteral("Chat text size"), mc->parentWidget());
-	chatSizeLbl->setObjectName(QStringLiteral("gfxFieldLabel"));
-	auto *chatSize = new QComboBox(mc->parentWidget());
-	chatSize->addItem(QStringLiteral("Same as the dock"), 0);
-	for (int pt = 7; pt <= 22; ++pt)
-		chatSize->addItem(QStringLiteral("%1 pt").arg(pt), pt);
-	chatSize->setCurrentIndex(qMax(0, chatSize->findData(s.chatFontSize)));
-	chatSize->setToolTip(QStringLiteral("Also Ctrl + scroll over the chat"));
-	chatSizeRow->addWidget(chatSizeLbl);
-	chatSizeRow->addWidget(chatSize, 1);
-	mc->addLayout(chatSizeRow);
-
-	// Event notices — styled lines between chat messages, like each platform's own chat.
-	group(mc, QStringLiteral("Event notices in the chat"),
-	      {{QStringLiteral("Show event notices in MultiChat"), &s.chatNotices},
-	       {QStringLiteral("⭐  Subs, resubs, Prime, upgrades · YouTube members · TikTok subs"), &s.ncSubs},
-	       {QStringLiteral("🎁  Gifted subs and gift bombs · gifted memberships"), &s.ncGifts},
-	       {QStringLiteral("      List who got a sub under each gift bomb"), &s.ncGiftNames},
-	       {QStringLiteral("🚀  Raids"), &s.ncRaids},
-	       {QStringLiteral("💎  Cheers · Kicks · Super Chats and Super Stickers"), &s.ncCheers},
-	       {QStringLiteral("🎁  TikTok gifts"), &s.ncTikTokGifts},
-	       {QStringLiteral("➕  Twitch and Kick follows"), &s.ncFollows},
-	       {QStringLiteral("➕  TikTok follows (can be a lot)"), &s.ncTikTokFollows},
-	       {QStringLiteral("📣  Shoutouts — ForgeBot !so and Twitch /shoutout, sent and received"), &s.ncShoutouts},
-	       {QStringLiteral("🚂  Hype Trains — started, each new level, ended"), &s.ncHypeTrain},
-	       {QStringLiteral("🔥  Watch streaks"), &s.ncStreaks},
-	       {QStringLiteral("🎯  Channel point redemptions"), &s.ncPoints},
-	       {QStringLiteral("📢  Announcements (/announce)"), &s.ncAnnouncements},
-	       {QStringLiteral("ℹ  Everything else Twitch posts (bits badges, charity, pay it forward…)"),
-		&s.ncOther}});
-	auto *noticeForm = new QGridLayout();
-	noticeForm->setHorizontalSpacing(10);
-	noticeForm->setVerticalSpacing(6);
-	const auto fieldLbl = [mc](const QString &t) {
-		auto *l = new QLabel(t, mc->parentWidget());
-		l->setObjectName(QStringLiteral("gfxFieldLabel"));
-		return l;
-	};
-	auto *noticeStyle = new QComboBox(mc->parentWidget());
-	noticeStyle->addItem(QStringLiteral("Card — pill, headline and message (default)"), QStringLiteral("card"));
-	noticeStyle->addItem(QStringLiteral("Strip — one tinted line"), QStringLiteral("strip"));
-	noticeStyle->addItem(QStringLiteral("Minimal — quiet, like Twitch's own system lines"),
-			     QStringLiteral("minimal"));
-	noticeStyle->setCurrentIndex(qMax(0, noticeStyle->findData(s.noticeStyle)));
-	auto *noticeTint = new QComboBox(mc->parentWidget());
-	noticeTint->addItem(
-		QStringLiteral("Platform colour — Twitch purple, Kick green, YouTube red, TikTok pink, Xive violet"),
-		QStringLiteral("platform"));
-	noticeTint->addItem(QStringLiteral("Event colour — gifts pink, raids red, streaks orange…"),
-			    QStringLiteral("event"));
-	noticeTint->addItem(QStringLiteral("My accent colour (Appearance)"), QStringLiteral("accent"));
-	noticeTint->setCurrentIndex(qMax(0, noticeTint->findData(s.noticeTint)));
-	auto *ttMin = new QComboBox(mc->parentWidget());
-	for (const int v : {0, 5, 10, 50, 100, 500, 1000})
-		ttMin->addItem(
-			v == 0 ? QStringLiteral("Every TikTok gift") : QStringLiteral("Worth %1+ diamonds").arg(v), v);
-	ttMin->setCurrentIndex(qMax(0, ttMin->findData(s.ncTikTokMinCoins)));
-	noticeForm->addWidget(fieldLbl(QStringLiteral("Look")), 0, 0);
-	noticeForm->addWidget(noticeStyle, 0, 1);
-	noticeForm->addWidget(fieldLbl(QStringLiteral("Colour")), 1, 0);
-	noticeForm->addWidget(noticeTint, 1, 1);
-	noticeForm->addWidget(fieldLbl(QStringLiteral("TikTok gifts")), 2, 0);
-	noticeForm->addWidget(ttMin, 2, 1);
-	noticeForm->setColumnStretch(1, 1);
-	mc->addLayout(noticeForm);
-	QString soNote = QStringLiteral(
-		"Notices show only in this dock — nothing is posted to your chat or shown on stream. Click a name for "
-		"that viewer's card. The look and colour can also be switched from the chat's ⋯ menu.");
+	const bool hadOwnDock = s.eventsOwnDock;
+	GfxSettingsDialog::Options o;
+	o.startPage = startPage;
+	// Missing Twitch permissions, under Notices.
+	QStringList perms;
 	if (lastState_.shoutouts == QLatin1String("needs_reconnect") ||
 	    lastState_.shoutouts == QLatin1String("needs_scope"))
-		soNote += QStringLiteral(" Twitch's own /shoutout needs one more Twitch permission: click Reconnect "
-					 "in the Events dock and approve it. Until then only ForgeBot's !so shows.");
+		perms << QStringLiteral(
+			"Twitch's own /shoutout needs one more Twitch permission: click Reconnect in the "
+			"Events dock and approve it. Until then only ForgeBot's !so shows.");
 	if (lastState_.hypeTrain == QLatin1String("needs_reconnect"))
-		soNote += QStringLiteral(" Hype Trains need one more Twitch permission too — click Reconnect in the "
-					 "Events dock and approve it.");
-	note(mc, soNote);
-	mc->addStretch(1);
-
-	// ── Events ──
-	QVBoxLayout *ev = page(QStringLiteral("Events"));
-	group(ev, QStringLiteral("Where"),
-	      {{QStringLiteral("Show Events in their own dock (“GoalForgeX Events” in OBS's Docks menu)"),
-		&s.eventsOwnDock}});
-	group(ev, QStringLiteral("Show in the Events list"),
-	      {{QStringLiteral("🎁  Gift bombs — with the list of who got a sub"), &s.evGiftBombs},
-	       {QStringLiteral("🎯  Channel point redemptions"), &s.evPoints},
-	       {QStringLiteral("🔥  Watch streaks"), &s.evStreaks},
-	       {QStringLiteral("🔔  Sub / resub / bits / raid / follow alerts"), &s.evAlerts},
-	       {QStringLiteral("📣  Shoutouts — sent (ForgeBot !so, Twitch /shoutout) and received"), &s.evShoutouts},
-	       {QStringLiteral("🚂  Hype Trains — level, progress, top contributors, cooldown"), &s.evHypeTrain},
-	       {QStringLiteral("🎵  TikTok gifts, follows and subs"), &s.evTikTok},
-	       {QStringLiteral("▶️  YouTube Super Chats, Super Stickers and memberships"), &s.evYouTube},
-	       {QStringLiteral("⏱  Timer and spin-wheel activity"), &s.evTimers}});
-	group(ev, QStringLiteral("Gift bombs"),
-	      {{QStringLiteral("Open each gift bomb with its recipients showing"), &s.evAutoExpand}});
-	note(ev,
-	     QStringLiteral(
-		     "Right-click a gift bomb to copy every recipient's name, or a ready-made thank-you "
-		     "message. Gift bombs, redemptions and streaks can also trigger scene changes — see the Reactions tab."));
-	ev->addStretch(1);
-
-	// ── Appearance (previews live on the dock) ──
-	QVBoxLayout *ap = page(QStringLiteral("Appearance"));
-	QWidget *apParent = ap->parentWidget();
-	auto *form = new QGridLayout();
-	form->setHorizontalSpacing(10);
-	form->setVerticalSpacing(8);
-	const auto label = [apParent](const QString &t) {
-		auto *l = new QLabel(t, apParent);
-		l->setObjectName(QStringLiteral("gfxFieldLabel"));
-		return l;
-	};
-	auto *themeBox = new QComboBox(apParent);
-	const QList<QPair<QString, QString>> themes = {
-		{QStringLiteral("graphite"), QStringLiteral("Graphite (default)")},
-		{QStringLiteral("midnight"), QStringLiteral("Midnight blue")},
-		{QStringLiteral("oled"), QStringLiteral("OLED black")},
-		{QStringLiteral("slate"), QStringLiteral("Slate (lighter)")},
-		{QStringLiteral("warm"), QStringLiteral("Warm")},
-	};
-	for (const auto &t : themes)
-		themeBox->addItem(t.second, t.first);
-	themeBox->setCurrentIndex(qMax(0, themeBox->findData(s.theme)));
-	form->addWidget(label(QStringLiteral("Theme")), 0, 0);
-	form->addWidget(themeBox, 0, 1);
-
-	// Accent: swatches + a custom colour.
-	auto *swatchRow = new QHBoxLayout();
-	swatchRow->setSpacing(5);
-	const QList<QPair<QString, QString>> swatches = {
-		{QStringLiteral("#ffb020"), QStringLiteral("Amber (default)")},
-		{QStringLiteral("#8b5cf6"), QStringLiteral("Violet")},
-		{QStringLiteral("#3b82f6"), QStringLiteral("Blue")},
-		{QStringLiteral("#06b6d4"), QStringLiteral("Cyan")},
-		{QStringLiteral("#22c55e"), QStringLiteral("Green")},
-		{QStringLiteral("#ec4899"), QStringLiteral("Pink")},
-		{QStringLiteral("#ef4444"), QStringLiteral("Red")},
-		{QStringLiteral("#f97316"), QStringLiteral("Orange")},
-	};
-	QList<QPushButton *> swatchBtns;
-	const auto paintSwatch = [](QPushButton *b, const QString &color, bool selected) {
-		b->setStyleSheet(
-			QStringLiteral(
-				"QPushButton { background: %1; border: 2px solid %2; border-radius: 11px; "
-				"min-width: 18px; max-width: 18px; min-height: 18px; max-height: 18px; padding: 0; }")
-				.arg(color, selected ? QStringLiteral("#ffffff") : QStringLiteral("transparent")));
-	};
-	for (const auto &sw : swatches) {
-		auto *b = new QPushButton(apParent);
-		b->setToolTip(sw.second);
-		b->setCursor(Qt::PointingHandCursor);
-		b->setProperty("gfxColor", sw.first);
-		paintSwatch(b, sw.first, s.accent == sw.first);
-		swatchRow->addWidget(b);
-		swatchBtns << b;
-	}
-	auto *customBtn = new QPushButton(QStringLiteral("Custom…"), apParent);
-	theme::setRole(customBtn, "ghost");
-	swatchRow->addWidget(customBtn);
-	swatchRow->addStretch(1);
-	form->addWidget(label(QStringLiteral("Accent")), 1, 0);
-	form->addLayout(swatchRow, 1, 1);
-
-	auto *sizeBox = new QComboBox(apParent);
-	const QList<QPair<int, QString>> sizes = {{90, QStringLiteral("Small")},
-						  {100, QStringLiteral("Default")},
-						  {115, QStringLiteral("Large")},
-						  {130, QStringLiteral("Extra large")}};
-	for (const auto &z : sizes)
-		sizeBox->addItem(z.second, z.first);
-	sizeBox->setCurrentIndex(qMax(0, sizeBox->findData(s.textScale)));
-	form->addWidget(label(QStringLiteral("Text size")), 2, 0);
-	form->addWidget(sizeBox, 2, 1);
-
-	auto *compactBox = new QCheckBox(QStringLiteral("Compact — tighter buttons and lists"), apParent);
-	compactBox->setChecked(s.compact);
-	form->addWidget(compactBox, 3, 1);
-	form->setColumnStretch(1, 1);
-	ap->addLayout(form);
-
-	auto *resetBtn = new QPushButton(QStringLiteral("Reset appearance"), apParent);
-	theme::setRole(resetBtn, "ghost");
-	ap->addWidget(resetBtn, 0, Qt::AlignLeft);
-	note(ap,
-	     QStringLiteral(
-		     "Changes show on the dock right away; Cancel puts everything back. Live / ON-AIR red and "
-		     "the Twitch, Kick, YouTube, TikTok and Xive colours always stay the same so they're easy to spot."));
-	ap->addStretch(1);
-
-	// Live preview: write straight into the settings, restyle; Cancel restores `before`.
-	const auto preview = [this, themeBox, sizeBox, compactBox, &s] {
-		s.theme = themeBox->currentData().toString();
-		s.textScale = sizeBox->currentData().toInt();
-		s.compact = compactBox->isChecked();
+		perms << QStringLiteral(
+			"Hype Trains need one more Twitch permission too: click Reconnect in the Events "
+			"dock and approve it.");
+	o.noticesNote = perms.join(QLatin1Char(' '));
+	o.preview = [this] {
 		applyAppearance();
 	};
-	const auto setAccent = [&s, swatchBtns, paintSwatch, preview](const QString &color) {
-		s.accent = color.toLower();
-		for (QPushButton *b : swatchBtns) {
-			const QString c = b->property("gfxColor").toString();
-			paintSwatch(b, c, c == s.accent);
-		}
-		preview();
+	o.openChangelog = [this] {
+		changelog::show(this);
 	};
-	for (QPushButton *b : swatchBtns)
-		connect(b, &QPushButton::clicked, &dlg,
-			[b, setAccent] { setAccent(b->property("gfxColor").toString()); });
-	connect(customBtn, &QPushButton::clicked, &dlg, [&dlg, &s, setAccent] {
-		const QColor c = QColorDialog::getColor(QColor(s.accent), &dlg, QStringLiteral("Accent colour"));
-		if (c.isValid())
-			setAccent(c.name());
-	});
-	connect(themeBox, &QComboBox::currentIndexChanged, &dlg, [preview](int) { preview(); });
-	connect(sizeBox, &QComboBox::currentIndexChanged, &dlg, [preview](int) { preview(); });
-	connect(compactBox, &QCheckBox::toggled, &dlg, [preview](bool) { preview(); });
-	connect(resetBtn, &QPushButton::clicked, &dlg, [themeBox, sizeBox, compactBox, setAccent] {
-		const Settings d;
-		themeBox->setCurrentIndex(qMax(0, themeBox->findData(d.theme)));
-		sizeBox->setCurrentIndex(qMax(0, sizeBox->findData(d.textScale)));
-		compactBox->setChecked(d.compact);
-		setAccent(d.accent);
-	});
-
-	for (int i = 0; i < pages->count() && !startPage.isEmpty(); ++i)
-		if (pages->tabText(i) == startPage)
-			pages->setCurrentIndex(i);
-
-	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-	if (QPushButton *okBtn = buttons->button(QDialogButtonBox::Ok))
-		theme::setRole(okBtn, "primary");
-	root->addWidget(buttons);
-	connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-	connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-	if (dlg.exec() != QDialog::Accepted) {
-		s = before;
-		applyAppearance();
-		return;
-	}
-	const bool hadOwnDock = s.eventsOwnDock;
-	for (const Opt &o : opts)
-		*o.value = o.box->isChecked();
-	s.chatFontSize = chatSize->currentData().toInt();
-	s.noticeStyle = noticeStyle->currentData().toString();
-	s.noticeTint = noticeTint->currentData().toString();
-	s.ncTikTokMinCoins = ttMin->currentData().toInt();
+	GfxSettingsDialog dlg(this, o);
+	if (dlg.exec() != QDialog::Accepted)
+		return; // the dialog put everything back and re-applied it
 	saveSettings();
 	rebuildTabs();
 	applyAppearance();
 	if (s.eventsOwnDock && !hadOwnDock)
-		revealEventsDock(false); // just moved there — show it
+		revealEventsDock(false); // just moved there: show it
 	scheduleChat(0);
 	checkForUpdate();
 }
@@ -1069,6 +710,10 @@ void GfxDock::applyAppearance()
 void GfxDock::attachMultistreamDock(GfxMultistreamDock *dock)
 {
 	msDock_ = dock;
+	if (dock)
+		dock->onOpenSettings = [this] {
+			openSettings(QStringLiteral("General"));
+		};
 }
 
 void GfxDock::attachEventsDock(GfxEventsDock *dock)

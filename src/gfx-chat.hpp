@@ -122,6 +122,7 @@ public:
 	void openChatter(const QString &platform, const QString &login);
 	void openChatterMenu(const QString &platform, const QString &login);
 	std::function<void()> onViewersToggled; // the 👥 button was pressed
+	std::function<void()> onOpenSettings;   // the ⚙ button: Settings, MultiChat page
 
 protected:
 	// Stats card clicks, feed hover / Ctrl+wheel, composer keys.
@@ -147,6 +148,8 @@ private:
 	// Viewers / uptime / title per platform + chatters and messages per minute.
 	void renderStats();
 	void renderStatCard(StatCard &c);
+	// TikTok likes line (total, likes a minute, latest likers) while TikTok is live.
+	void renderLikes();
 	// Big cards (two lines) or the slim one-row Online / Offline pills (Settings → chatStatsCards).
 	void setCardLook(StatCard &c, bool big);
 	// Up to maxCols cards per row, only the platforms that are connected.
@@ -290,6 +293,10 @@ private:
 	QPushButton *pauseBtn_ = nullptr;
 	QPushButton *viewersBtn_ = nullptr;
 	QPushButton *moreBtn_ = nullptr;
+	QPushButton *settingsBtn_ = nullptr;
+	QLabel *likesBar_ = nullptr;
+	QTimer *likesPulse_ = nullptr;
+	qint64 likesShown_ = -1; // total on the line now (-1 = hidden)
 	QWidget *searchRow_ = nullptr;
 	QLineEdit *searchEdit_ = nullptr;
 	QPushButton *userChip_ = nullptr;

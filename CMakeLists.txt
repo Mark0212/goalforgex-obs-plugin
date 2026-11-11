@@ -87,6 +87,8 @@ target_sources(
     src/gfx-multistream.hpp
     src/gfx-reactions.cpp
     src/gfx-reactions.hpp
+    src/gfx-settings-dialog.cpp
+    src/gfx-settings-dialog.hpp
     src/gfx-settings.cpp
     src/gfx-settings.hpp
     src/gfx-sources.cpp

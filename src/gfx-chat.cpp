@@ -436,7 +436,7 @@ QString badgeHtml(const QString &text, const QString &color, qreal pt)
 	hex.remove(QLatin1Char('#'));
 	return QStringLiteral("<img src='gfx:badge/%1/%2/%3' style='vertical-align:middle'>&nbsp;")
 		.arg(QString::fromLatin1(text.toUtf8().toHex()), hex)
-		.arg(qBound(10, qRound(pt * 2.05), 30));
+		.arg(qBound(10, qRound(pt * 2.05), 48));
 }
 
 QString tag(const char *text, const char *color, qreal pt)
@@ -448,7 +448,7 @@ QString tag(const char *text, const char *color, qreal pt)
 QTextBlockFormat lineFormat(bool host, bool highlighted, bool firstTimer, bool shaded)
 {
 	QTextBlockFormat f;
-	const int gap = settings().chatCompact ? 2 : 4;
+	const int gap = settings().chatCompact ? qMin(2, settings().chatSpacing) : settings().chatSpacing;
 	f.setTopMargin(gap);
 	f.setBottomMargin(gap);
 	f.setLeftMargin(6);
@@ -787,6 +787,8 @@ void GfxChatPanel::buildUi()
 		QStringLiteral("Show or hide Who's here beside the chat (needs a dock at least 460 px wide)"), true);
 	viewersBtn_->setChecked(settings().chatViewers);
 	moreBtn_ = iconBtn(QStringLiteral("⋯"), QStringLiteral("Chat options"), false);
+	settingsBtn_ = iconBtn(QStringLiteral("⚙"),
+			       QStringLiteral("Settings: text and emote sizes, name colours, themes…"), false);
 	statusLbl_ = new QLabel(main_);
 	statusLbl_->setObjectName(QStringLiteral("gfxChatStatus"));
 	statusLbl_->setTextFormat(Qt::RichText);
@@ -796,6 +798,7 @@ void GfxChatPanel::buildUi()
 	tools->addWidget(pauseBtn_);
 	tools->addWidget(viewersBtn_);
 	tools->addWidget(moreBtn_);
+	tools->addWidget(settingsBtn_);
 	tools->addSpacing(3);
 	tools->addWidget(statusLbl_);
 	top->addWidget(chipsBox_, 1, Qt::AlignTop);
@@ -804,6 +807,10 @@ void GfxChatPanel::buildUi()
 	root->addLayout(top);
 	connect(pauseBtn_, &QPushButton::clicked, this, [this](bool on) { setPaused(on); });
 	connect(moreBtn_, &QPushButton::clicked, this, [this] { showOptionsMenu(); });
+	connect(settingsBtn_, &QPushButton::clicked, this, [this] {
+		if (onOpenSettings)
+			onOpenSettings();
+	});
 	connect(viewersBtn_, &QPushButton::clicked, this, [this](bool on) {
 		settings().chatViewers = on;
 		saveSettings();
@@ -892,6 +899,24 @@ void GfxChatPanel::buildUi()
 	// Its own height never forces the dock taller: a short dock hides it instead.
 	stats_->setMinimumHeight(1);
 	root->addWidget(stats_);
+
+	// TikTok likes: one slim line, only while TikTok is live (Settings → MultiChat → TikTok likes).
+	likesBar_ = new QLabel(main_);
+	likesBar_->setObjectName(QStringLiteral("gfxLikesBar"));
+	likesBar_->setTextFormat(Qt::RichText);
+	likesBar_->setWordWrap(false);
+	likesBar_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+	likesBar_->setStyleSheet(QStringLiteral(
+		"QLabel#gfxLikesBar { background: rgba(255, 77, 125, 22); border: 1px solid rgba(255, 77, 125, 60); "
+		"border-radius: 8px; padding: 2px 8px; }"
+		"QLabel#gfxLikesBar[gfxState=\"pulse\"] { background: rgba(255, 77, 125, 52); "
+		"border: 1px solid rgba(255, 77, 125, 160); }"));
+	likesBar_->hide();
+	root->addWidget(likesBar_);
+	likesPulse_ = new QTimer(this);
+	likesPulse_->setSingleShot(true);
+	likesPulse_->setInterval(650);
+	connect(likesPulse_, &QTimer::timeout, this, [this] { theme::setState(likesBar_, ""); });
 
 	// Feed
 	auto *view = new ChatView(main_);
@@ -1139,8 +1164,9 @@ void GfxChatPanel::fitChips()
 	};
 	// Room for the chips = the panel minus the tools on the right.
 	int tools = 0;
-	for (QWidget *w : {static_cast<QWidget *>(searchBtn_), static_cast<QWidget *>(pauseBtn_),
-			   static_cast<QWidget *>(moreBtn_), static_cast<QWidget *>(statusLbl_)})
+	for (QWidget *w :
+	     {static_cast<QWidget *>(searchBtn_), static_cast<QWidget *>(pauseBtn_), static_cast<QWidget *>(moreBtn_),
+	      static_cast<QWidget *>(settingsBtn_), static_cast<QWidget *>(statusLbl_)})
 		if (w->isVisibleTo(this))
 			tools += w->sizeHint().width() + 2;
 	const int room = width() - tools - 8;
@@ -1361,8 +1387,61 @@ void GfxChatPanel::layoutCards(const QStringList &visible, int maxCols)
 	}
 }
 
+void GfxChatPanel::renderLikes()
+{
+	if (!likesBar_)
+		return;
+	const QJsonObject t = streams_.value(QStringLiteral("tiktok")).toObject();
+	const Settings &s = settings();
+	const bool on = s.chatTikTokLikes && s.chatTikTok && t.value(QStringLiteral("live")).toBool() &&
+			t.value(QStringLiteral("likes")).isDouble() && !short_;
+	likesBar_->setVisible(on);
+	if (!on) {
+		likesShown_ = -1;
+		return;
+	}
+	const qint64 total = static_cast<qint64>(t.value(QStringLiteral("likes")).toDouble());
+	const qint64 perMin = static_cast<qint64>(t.value(QStringLiteral("likesPerMin")).toDouble());
+	const QJsonArray likers = t.value(QStringLiteral("likers")).toArray();
+	QStringList who, tipWho;
+	for (qsizetype i = 0; i < likers.size(); ++i) {
+		const QJsonObject l = likers.at(i).toObject();
+		const QString name = l.value(QStringLiteral("name")).toString().left(40);
+		const qint64 count = static_cast<qint64>(l.value(QStringLiteral("count")).toDouble());
+		if (name.isEmpty())
+			continue;
+		tipWho << QStringLiteral("%1 ×%2").arg(name, fmtCount(count));
+		if (who.size() < 4)
+			who << QStringLiteral(
+				       "<span style='color:#e8eaf0'>%1</span>&nbsp;<span style='color:#ff8fb1'>×%2</span>")
+					.arg(name.toHtmlEscaped(), fmtCount(count));
+	}
+	QString h = QStringLiteral("<span style='color:#ff4d7d'>❤</span>&nbsp;<b style='color:#ffffff'>%1</b>"
+				   "&nbsp;<span style='color:#c9a3b4'>likes</span>")
+			    .arg(fmtCount(total));
+	if (perMin > 0)
+		h += QStringLiteral("&nbsp;&nbsp;<span style='color:#ff8fb1;font-weight:700'>+%1/min</span>")
+			     .arg(fmtCount(perMin));
+	if (!who.isEmpty())
+		h += QStringLiteral("&nbsp;&nbsp;<span style='color:#5b6270'>·</span>&nbsp;&nbsp;") +
+		     who.join(QStringLiteral("&nbsp;&nbsp;"));
+	likesBar_->setText(h);
+	QString tip =
+		QStringLiteral("TikTok likes this stream: %1\nLast minute: %2").arg(fmtCount(total), fmtCount(perMin));
+	if (!tipWho.isEmpty())
+		tip += QStringLiteral("\n\nTapping now:\n") + tipWho.join(QLatin1Char('\n'));
+	tip += QStringLiteral("\n\nSettings → MultiChat → TikTok likes turns this line off.");
+	likesBar_->setToolTip(tip);
+	if (likesShown_ >= 0 && total > likesShown_) {
+		theme::setState(likesBar_, "pulse");
+		likesPulse_->start();
+	}
+	likesShown_ = total;
+}
+
 void GfxChatPanel::renderStats()
 {
+	renderLikes();
 	// Only connected (and switched-on) platforms get a card — no "not connected" clutter.
 	QStringList visible;
 	for (const QString &p : wantedPlatforms())
@@ -2655,7 +2734,7 @@ int GfxChatPanel::emoteSlot(const QString &url) const
 QString GfxChatPanel::partsHtml(const ChatMessage &m, qreal basePt) const
 {
 	// Emotes about 2× the text height (Twitch's own chat ratio), sharp at any size.
-	const int px = qBound(16, qRound(basePt * 2.6), 72);
+	const int px = qBound(12, qRound(basePt * 2.6 * settings().chatEmoteScale / 100.0), 160);
 	QString out;
 	for (const ChatPart &p : m.parts) {
 		if (p.image.isEmpty() || RemoteImages::instance().failed(p.image)) {
@@ -2676,9 +2755,10 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 		return noticeHtml(m);
 	const Settings &s = settings();
 	const qreal base = baseFontPt();
-	const qreal tagPt = qMax<qreal>(6.0, base * 0.78);
+	const qreal tagPt = qMax<qreal>(6.0, base * 0.78 * s.chatBadgeScale / 100.0);
 	const qreal smallPt = qMax<qreal>(6.5, base * 0.88);
 	const int iconPx = qBound(12, qRound(base * 1.65), 32);
+	const QString textColor = s.chatTextColor.isEmpty() ? QStringLiteral("#e8eaf0") : s.chatTextColor;
 	const bool validLogin = loginRe().match(m.login).hasMatch();
 	const bool validId = msgIdRe().match(m.id).hasMatch();
 	const bool own = m.channel.isEmpty();
@@ -2712,17 +2792,24 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 		     badgeHtml(QStringLiteral("GOALFORGEX STAFF"), QStringLiteral("#ffb020"), tagPt);
 	}
 	if (s.chatBadges) {
+		// A badge takes its role's name colour when one is set (Settings → Chat style).
+		const auto roleTag = [&](const char *text, const QString &custom, const char *fallback) {
+			h += badgeHtml(QString::fromLatin1(text),
+				       custom.isEmpty() ? QString::fromLatin1(fallback) : custom, tagPt);
+		};
 		if (m.host)
-			h += tag(own ? "HOST" : "STREAMER", "#ff3b4f", tagPt);
+			roleTag(own ? "HOST" : "STREAMER", s.colorHost, "#ff3b4f");
 		else if (m.mod)
-			h += tag("MOD", "#34d399", tagPt);
+			roleTag("MOD", s.colorMod, "#34d399");
 		if (m.vip)
-			h += tag("VIP", "#f472b6", tagPt);
+			roleTag("VIP", s.colorVip, "#f472b6");
 		if (m.sub)
-			h += tag(m.platform == QLatin1String("youtube") ? "MEMBER" : "SUB", "#ffb020", tagPt);
+			roleTag(m.platform == QLatin1String("youtube") ? "MEMBER" : "SUB", s.colorSub, "#ffb020");
 	}
-	const QString nameColor = (!s.chatNameColors || m.color.isEmpty()) ? QStringLiteral("#c9ced8")
-									   : readableColor(m.color);
+	QString nameColor = gfx::roleNameColor(m.host, m.mod, m.vip, m.sub);
+	if (nameColor.isEmpty())
+		nameColor = (!s.chatNameColors || m.color.isEmpty()) ? QStringLiteral("#c9ced8")
+								     : readableColor(m.color);
 	if (validLogin)
 		h += QStringLiteral("<a href='user:%1' title='Click for their card · right-click for actions' "
 				    "style='color:%2;text-decoration:none;font-weight:bold;'>%3</a>")
@@ -2748,9 +2835,9 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 			     "<s style='color:#5b6270'>%1</s> <i style='color:#5b6270;font-size:%2pt'>(deleted)</i>")
 			     .arg(m.text.toHtmlEscaped(), QString::number(smallPt, 'f', 1));
 	else if (s.chatEmotes && !m.parts.isEmpty())
-		h += QStringLiteral("<span style='color:#e8eaf0'>%1</span>").arg(partsHtml(m, base));
+		h += QStringLiteral("<span style='color:%1'>%2</span>").arg(textColor, partsHtml(m, base));
 	else
-		h += QStringLiteral("<span style='color:#e8eaf0'>%1</span>").arg(textHtml(m.text));
+		h += QStringLiteral("<span style='color:%1'>%2</span>").arg(textColor, textHtml(m.text));
 	return h;
 }
 
