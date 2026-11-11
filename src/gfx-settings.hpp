@@ -83,6 +83,12 @@ struct Settings {
 	QString colorViewer;
 	// Message text colour (empty = the theme's)
 	QString chatTextColor;
+	// How each message is laid out: classic (one line) | cozy (airier) | bubbles (a card per message)
+	QString chatLayout = QStringLiteral("cozy");
+	// ⭐ Recent in the emote picker, newest first (name, a tab, url)
+	QStringList chatRecentEmotes;
+	// ⚡ Quick replies beside the message box
+	QStringList chatQuickReplies;
 	// TikTok likes line above the chat while TikTok is live (total, likes a minute, latest likers)
 	bool chatTikTokLikes = true;
 	// Extra words that highlight a line (besides the streamer's own name)

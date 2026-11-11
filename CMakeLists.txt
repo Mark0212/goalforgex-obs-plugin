@@ -66,6 +66,8 @@ target_sources(
     src/gfx-chat.hpp
     src/gfx-events-dock.cpp
     src/gfx-events-dock.hpp
+    src/gfx-emotes.cpp
+    src/gfx-emotes.hpp
     src/gfx-events.cpp
     src/gfx-events.hpp
     src/gfx-flow.cpp

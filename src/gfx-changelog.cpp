@@ -63,6 +63,19 @@ const Note k300[] = {
 	{"🌈", "Name colours by role",
 	 "Pick a colour for the broadcaster, mods, VIPs, subs and everyone else, plus the message text itself. Badges "
 	 "match, and Who's here uses the same colours."},
+	{"😀", "Send emotes",
+	 "The new 😀 button beside the message box opens an emote picker: your Twitch channel emotes, Twitch globals "
+	 "and BTTV / FFZ / 7TV, with search and ⭐ Recent. Tab completes emote names as you type, too."},
+	{"🫧", "A roomier MultiChat",
+	 "Pick Classic, Cozy (the new default, with more space around every line) or Bubbles, where each message "
+	 "sits on its own card, in Settings → Chat style."},
+	{"❓", "Never miss a question",
+	 "The ❓ chip shows only messages with a question in them, so you can answer chat between games."},
+	{"📌", "Pin a message",
+	 "Right-click a name → Pin message keeps it on a card above the chat until you unpin it."},
+	{"⚡", "Quick replies",
+	 "Save the things you type all the time (socials, rules, schedule) and drop them in with the ⚡ button. "
+	 "Ctrl + click sends one straight away."},
 	{"❤️", "TikTok likes in MultiChat",
 	 "While you're live on TikTok, one slim line above the chat shows your total likes, likes a minute and who's "
 	 "tapping right now. It pulses as likes come in and takes almost no chat room."},

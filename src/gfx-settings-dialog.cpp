@@ -1215,6 +1215,15 @@ void GfxSettingsDialog::buildPages()
 	c->addWidget(preview_);
 	addRow(preview_, QStringLiteral("preview"), QString(), nullptr);
 
+	c = addCard(cs, QStringLiteral("🧱"), QStringLiteral("Layout"),
+		    QStringLiteral("How every message sits in the chat."));
+	addChoice(c, QStringLiteral("Message layout"),
+		  QStringLiteral("Cozy gives every line room to breathe · Bubbles puts each message on its own card"),
+		  &St::chatLayout,
+		  {{QStringLiteral("classic"), QStringLiteral("Classic")},
+		   {QStringLiteral("cozy"), QStringLiteral("Cozy")},
+		   {QStringLiteral("bubbles"), QStringLiteral("Bubbles")}});
+
 	c = addCard(cs, QStringLiteral("🔠"), QStringLiteral("Sizes"));
 	addSlider(
 		c, QStringLiteral("Text size"), QStringLiteral("Also Ctrl + scroll over the chat"), 6, 24, 1,
@@ -1517,8 +1526,13 @@ void GfxSettingsDialog::renderPreview()
 		QString nameColor = gfx::roleNameColor(m.host, m.mod, m.vip, m.sub);
 		if (nameColor.isEmpty())
 			nameColor = s.chatNameColors ? QString::fromLatin1(m.own) : col("#c9ced8");
-		line += QStringLiteral("<b style='color:%1'>%2</b><span style='color:%3'>:</span> ")
-				.arg(nameColor, QString::fromLatin1(m.name), col("#5b6270"));
+		const bool bubbles = s.chatLayout == QLatin1String("bubbles");
+		if (bubbles)
+			line += QStringLiteral("<b style='color:%1'>%2</b><br>")
+					.arg(nameColor, QString::fromLatin1(m.name));
+		else
+			line += QStringLiteral("<b style='color:%1'>%2</b><span style='color:%3'>:</span> ")
+					.arg(nameColor, QString::fromLatin1(m.name), col("#5b6270"));
 		line += QStringLiteral("<span style='color:%1'>%2</span>")
 				.arg(textColor, QString::fromUtf8(m.text).toHtmlEscaped());
 		for (int e = 0; e < m.emotes; ++e) {
@@ -1535,9 +1549,15 @@ void GfxSettingsDialog::renderPreview()
 						     e == 0 ? QStringLiteral("PogChamp") : QStringLiteral("<3"));
 			}
 		}
-		const int gap = s.chatCompact ? qMin(2, s.chatSpacing) : s.chatSpacing;
+		int gap = s.chatCompact ? qMin(2, s.chatSpacing) : s.chatSpacing;
+		if (s.chatLayout == QLatin1String("cozy"))
+			gap += 2;
 		const bool shade = s.chatAltRows && (n % 2 == 1);
-		const QString bg = m.host ? col("#1f1a10") : (shade ? col("#161920") : QString());
+		QString bg = m.host ? col("#1f1a10") : (shade ? col("#161920") : QString());
+		if (s.chatLayout == QLatin1String("bubbles")) {
+			gap = qMax(3, s.chatSpacing) + 4;
+			bg = m.host ? QStringLiteral("#2a2112") : col("#1b1f28");
+		}
 		h += QStringLiteral("<p style='margin-top:%1px;margin-bottom:%1px;%2'>%3</p>")
 			     .arg(gap)
 			     .arg(bg.isEmpty() ? QString() : QStringLiteral("background-color:%1;").arg(bg), line);

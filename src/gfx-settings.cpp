@@ -164,6 +164,23 @@ void loadSettings()
 	g_settings.colorSub = hexOrEmpty("colorSub");
 	g_settings.colorViewer = hexOrEmpty("colorViewer");
 	g_settings.chatTextColor = hexOrEmpty("chatTextColor");
+	static const QStringList kLayouts = {QStringLiteral("classic"), QStringLiteral("cozy"),
+					     QStringLiteral("bubbles")};
+	const QString lay = o.value(QStringLiteral("chatLayout")).toString();
+	if (kLayouts.contains(lay))
+		g_settings.chatLayout = lay;
+	const QJsonArray re = o.value(QStringLiteral("chatRecentEmotes")).toArray();
+	for (qsizetype i = 0; i < re.size() && g_settings.chatRecentEmotes.size() < 30; ++i) {
+		const QString e = re.at(i).toString().left(700);
+		if (e.contains(QLatin1Char('\t')) && !g_settings.chatRecentEmotes.contains(e))
+			g_settings.chatRecentEmotes << e;
+	}
+	const QJsonArray qr = o.value(QStringLiteral("chatQuickReplies")).toArray();
+	for (qsizetype i = 0; i < qr.size() && g_settings.chatQuickReplies.size() < 25; ++i) {
+		const QString r = qr.at(i).toString().trimmed().left(500);
+		if (!r.isEmpty() && !g_settings.chatQuickReplies.contains(r))
+			g_settings.chatQuickReplies << r;
+	}
 	static const QStringList kClThemes = {QStringLiteral("aurora"), QStringLiteral("terminal"),
 					      QStringLiteral("paper"), QStringLiteral("dock")};
 	const QString clt = o.value(QStringLiteral("changelogTheme")).toString();
@@ -258,6 +275,9 @@ void saveSettings()
 	o.insert(QStringLiteral("colorViewer"), g_settings.colorViewer);
 	o.insert(QStringLiteral("chatTextColor"), g_settings.chatTextColor);
 	o.insert(QStringLiteral("changelogTheme"), g_settings.changelogTheme);
+	o.insert(QStringLiteral("chatLayout"), g_settings.chatLayout);
+	o.insert(QStringLiteral("chatRecentEmotes"), QJsonArray::fromStringList(g_settings.chatRecentEmotes));
+	o.insert(QStringLiteral("chatQuickReplies"), QJsonArray::fromStringList(g_settings.chatQuickReplies));
 	o.insert(QStringLiteral("vwWidth"), g_settings.vwWidth);
 	o.insert(QStringLiteral("vwHidden"), QJsonArray::fromStringList(g_settings.vwHidden));
 	o.insert(QStringLiteral("ncTikTokMinCoins"), g_settings.ncTikTokMinCoins);

@@ -452,6 +452,21 @@ void GfxDock::buildUi()
 					 int seconds, const QString &messageId, const QString &displayName) {
 		chatMod(platform, action, login, seconds, messageId, displayName);
 	});
+	// 😀 Emote picker: the streamer's emotes (Twitch channel + global, BTTV / FFZ / 7TV).
+	chatPanel_->setEmotesHandler([this](GfxChatPanel::EmotesDone done) {
+		runAsync(
+			this, [] { return apiGet(QStringLiteral("/api/obs/chat/emotes")); },
+			[done](const ApiResult &r) {
+				if (!r.ok()) {
+					done(QJsonObject(),
+					     r.http.status == 404 && r.http.errorCode().isEmpty()
+						     ? QStringLiteral("Emotes need a newer GoalForgeX site.")
+						     : describe(r));
+					return;
+				}
+				done(r.http.json(), QString());
+			});
+	});
 	// Chatter card: what the platform knows about a chatter (account age, follow date…).
 	chatPanel_->setInfoHandler([this](const QString &platform, const QString &login, GfxChatPanel::InfoDone done) {
 		const QString path = QStringLiteral("/api/obs/chat/user?platform=%1&login=%2")
