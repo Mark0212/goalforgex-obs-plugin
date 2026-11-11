@@ -54,6 +54,7 @@ constexpr int kBadgeRole = Qt::UserRole + 5;        // host | mod | vip | sub | 
 constexpr int kActivityRole = Qt::UserRole + 6;     // right-hand text
 constexpr int kActivityKindRole = Qt::UserRole + 7; // chatting | arrived | empty
 constexpr int kCollapsedRole = Qt::UserRole + 8;
+constexpr int kRoleColorRole = Qt::UserRole + 9; // Settings → Chat style → Name colours for their role
 
 QString readable(const QString &hex)
 {
@@ -186,8 +187,10 @@ private:
 		}
 
 		const QString color = index.data(kColorRole).toString();
-		p->setPen(s.vwNameColors && !color.isEmpty() ? QColor(color)
-							     : QColor(theme::mapColor(QStringLiteral("#e8eaf0"))));
+		const QString roleColor = index.data(kRoleColorRole).toString();
+		p->setPen(s.vwNameColors && !roleColor.isEmpty() ? QColor(roleColor)
+			  : s.vwNameColors && !color.isEmpty()   ? QColor(color)
+								 : QColor(theme::mapColor(QStringLiteral("#e8eaf0"))));
 		p->drawText(QRect(x, r.top(), qMax(0, right - x), r.height()), Qt::AlignLeft | Qt::AlignVCenter,
 			    fm.elidedText(index.data(Qt::DisplayRole).toString(), Qt::ElideRight, qMax(0, right - x)));
 	}
@@ -488,6 +491,9 @@ void GfxViewerPanel::rebuild()
 			item->setData(kPlatformRole, p->platform);
 			item->setData(kLoginRole, p->login);
 			item->setData(kColorRole, p->color);
+			item->setData(kRoleColorRole, gfx::roleNameColor(p->role == QLatin1String("host"),
+									 p->role == QLatin1String("mod"),
+									 p->role == QLatin1String("vip"), p->sub));
 			item->setData(kBadgeRole, !p->role.isEmpty() ? p->role
 						  : p->sub           ? QStringLiteral("sub")
 								     : QString());

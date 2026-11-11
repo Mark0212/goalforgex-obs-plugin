@@ -78,6 +78,7 @@ static const BoolField kBools[] = {
 	{"chatCompact", &Settings::chatCompact},
 	{"chatEmotes", &Settings::chatEmotes},
 	{"chatStaffBadge", &Settings::chatStaffBadge},
+	{"chatTikTokLikes", &Settings::chatTikTokLikes},
 	{"chatNotices", &Settings::chatNotices},
 	{"ncSubs", &Settings::ncSubs},
 	{"ncGifts", &Settings::ncGifts},
@@ -150,6 +151,41 @@ void loadSettings()
 			g_settings.*(b.member) = v.toBool();
 	}
 	g_settings.chatFontSize = qBound(0, o.value(QStringLiteral("chatFontSize")).toInt(0), 24);
+	g_settings.chatEmoteScale = qBound(50, o.value(QStringLiteral("chatEmoteScale")).toInt(100), 250);
+	g_settings.chatBadgeScale = qBound(60, o.value(QStringLiteral("chatBadgeScale")).toInt(100), 180);
+	g_settings.chatSpacing = qBound(0, o.value(QStringLiteral("chatSpacing")).toInt(4), 16);
+	const auto hexOrEmpty = [&o](const char *key) {
+		const QString v = o.value(QLatin1String(key)).toString();
+		return v.size() == 7 && v.startsWith(QLatin1Char('#')) && QColor(v).isValid() ? v.toLower() : QString();
+	};
+	g_settings.colorHost = hexOrEmpty("colorHost");
+	g_settings.colorMod = hexOrEmpty("colorMod");
+	g_settings.colorVip = hexOrEmpty("colorVip");
+	g_settings.colorSub = hexOrEmpty("colorSub");
+	g_settings.colorViewer = hexOrEmpty("colorViewer");
+	g_settings.chatTextColor = hexOrEmpty("chatTextColor");
+	static const QStringList kLayouts = {QStringLiteral("classic"), QStringLiteral("cozy"),
+					     QStringLiteral("bubbles")};
+	const QString lay = o.value(QStringLiteral("chatLayout")).toString();
+	if (kLayouts.contains(lay))
+		g_settings.chatLayout = lay;
+	const QJsonArray re = o.value(QStringLiteral("chatRecentEmotes")).toArray();
+	for (qsizetype i = 0; i < re.size() && g_settings.chatRecentEmotes.size() < 30; ++i) {
+		const QString e = re.at(i).toString().left(700);
+		if (e.contains(QLatin1Char('\t')) && !g_settings.chatRecentEmotes.contains(e))
+			g_settings.chatRecentEmotes << e;
+	}
+	const QJsonArray qr = o.value(QStringLiteral("chatQuickReplies")).toArray();
+	for (qsizetype i = 0; i < qr.size() && g_settings.chatQuickReplies.size() < 25; ++i) {
+		const QString r = qr.at(i).toString().trimmed().left(500);
+		if (!r.isEmpty() && !g_settings.chatQuickReplies.contains(r))
+			g_settings.chatQuickReplies << r;
+	}
+	static const QStringList kClThemes = {QStringLiteral("aurora"), QStringLiteral("terminal"),
+					      QStringLiteral("paper"), QStringLiteral("dock")};
+	const QString clt = o.value(QStringLiteral("changelogTheme")).toString();
+	if (kClThemes.contains(clt))
+		g_settings.changelogTheme = clt;
 	g_settings.vwWidth = qBound(170, o.value(QStringLiteral("vwWidth")).toInt(230), 600);
 	const QJsonArray vh = o.value(QStringLiteral("vwHidden")).toArray();
 	for (qsizetype i = 0; i < vh.size() && g_settings.vwHidden.size() < 200; ++i) {
@@ -188,7 +224,10 @@ void loadSettings()
 	}
 	// Appearance — anything unknown or out of range falls back to the default.
 	static const QStringList kThemes = {QStringLiteral("graphite"), QStringLiteral("midnight"),
-					    QStringLiteral("oled"), QStringLiteral("slate"), QStringLiteral("warm")};
+					    QStringLiteral("oled"),     QStringLiteral("slate"),
+					    QStringLiteral("warm"),     QStringLiteral("nebula"),
+					    QStringLiteral("forest"),   QStringLiteral("crimson"),
+					    QStringLiteral("ocean")};
 	const QString th = o.value(QStringLiteral("theme")).toString();
 	if (kThemes.contains(th))
 		g_settings.theme = th;
@@ -226,6 +265,19 @@ void saveSettings()
 	for (const BoolField &b : kBools)
 		o.insert(QLatin1String(b.key), g_settings.*(b.member));
 	o.insert(QStringLiteral("chatFontSize"), g_settings.chatFontSize);
+	o.insert(QStringLiteral("chatEmoteScale"), g_settings.chatEmoteScale);
+	o.insert(QStringLiteral("chatBadgeScale"), g_settings.chatBadgeScale);
+	o.insert(QStringLiteral("chatSpacing"), g_settings.chatSpacing);
+	o.insert(QStringLiteral("colorHost"), g_settings.colorHost);
+	o.insert(QStringLiteral("colorMod"), g_settings.colorMod);
+	o.insert(QStringLiteral("colorVip"), g_settings.colorVip);
+	o.insert(QStringLiteral("colorSub"), g_settings.colorSub);
+	o.insert(QStringLiteral("colorViewer"), g_settings.colorViewer);
+	o.insert(QStringLiteral("chatTextColor"), g_settings.chatTextColor);
+	o.insert(QStringLiteral("changelogTheme"), g_settings.changelogTheme);
+	o.insert(QStringLiteral("chatLayout"), g_settings.chatLayout);
+	o.insert(QStringLiteral("chatRecentEmotes"), QJsonArray::fromStringList(g_settings.chatRecentEmotes));
+	o.insert(QStringLiteral("chatQuickReplies"), QJsonArray::fromStringList(g_settings.chatQuickReplies));
 	o.insert(QStringLiteral("vwWidth"), g_settings.vwWidth);
 	o.insert(QStringLiteral("vwHidden"), QJsonArray::fromStringList(g_settings.vwHidden));
 	o.insert(QStringLiteral("ncTikTokMinCoins"), g_settings.ncTikTokMinCoins);
@@ -259,6 +311,22 @@ void saveSettings()
 	f.write(QJsonDocument(o).toJson(QJsonDocument::Indented));
 	if (!f.commit())
 		obs_log(LOG_WARNING, "Could not save GoalForgeX settings");
+}
+
+QString roleNameColor(bool host, bool mod, bool vip, bool sub)
+{
+	const Settings &st = g_settings;
+	if (host && !st.colorHost.isEmpty())
+		return st.colorHost;
+	if (mod && !st.colorMod.isEmpty())
+		return st.colorMod;
+	if (vip && !st.colorVip.isEmpty())
+		return st.colorVip;
+	if (sub && !st.colorSub.isEmpty())
+		return st.colorSub;
+	if (!host && !mod && !vip && !sub)
+		return st.colorViewer;
+	return QString();
 }
 
 QList<QPair<QString, QString>> reactionTriggers()

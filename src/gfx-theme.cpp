@@ -83,6 +83,26 @@ Preset presetFor(const QString &name)
 		p.hue = 28.0 / 360.0;
 		p.satMul = 1.3;
 		p.satAdd = 0.04;
+	} else if (name == QLatin1String("nebula")) {
+		p.hue = 268.0 / 360.0;
+		p.satMul = 2.0;
+		p.satAdd = 0.14;
+		p.darkMul = 0.95;
+	} else if (name == QLatin1String("forest")) {
+		p.hue = 152.0 / 360.0;
+		p.satMul = 1.5;
+		p.satAdd = 0.08;
+		p.darkMul = 0.95;
+	} else if (name == QLatin1String("crimson")) {
+		p.hue = 350.0 / 360.0;
+		p.satMul = 1.6;
+		p.satAdd = 0.10;
+		p.darkMul = 0.92;
+	} else if (name == QLatin1String("ocean")) {
+		p.hue = 198.0 / 360.0;
+		p.satMul = 1.8;
+		p.satAdd = 0.12;
+		p.darkMul = 0.95;
 	}
 	return p;
 }
@@ -225,6 +245,30 @@ QString applyAppearance(QString qss)
 }
 
 } // namespace
+
+QList<ThemeInfo> themes()
+{
+	return {
+		{QStringLiteral("graphite"), QStringLiteral("Graphite"), QStringLiteral("The classic GoalForgeX look"),
+		 QStringLiteral("#ffb020")},
+		{QStringLiteral("midnight"), QStringLiteral("Midnight"), QStringLiteral("Deep blue night"),
+		 QStringLiteral("#3b82f6")},
+		{QStringLiteral("oled"), QStringLiteral("OLED"), QStringLiteral("True black, easy on the eyes"),
+		 QStringLiteral("#ffb020")},
+		{QStringLiteral("slate"), QStringLiteral("Slate"), QStringLiteral("A lighter, softer grey"),
+		 QStringLiteral("#06b6d4")},
+		{QStringLiteral("warm"), QStringLiteral("Warm"), QStringLiteral("Cosy coffee tones"),
+		 QStringLiteral("#f97316")},
+		{QStringLiteral("nebula"), QStringLiteral("Nebula"), QStringLiteral("Cosmic purple glow"),
+		 QStringLiteral("#c084fc")},
+		{QStringLiteral("forest"), QStringLiteral("Forest"), QStringLiteral("Calm evergreen"),
+		 QStringLiteral("#22c55e")},
+		{QStringLiteral("crimson"), QStringLiteral("Crimson"), QStringLiteral("Bold arena red"),
+		 QStringLiteral("#ef4444")},
+		{QStringLiteral("ocean"), QStringLiteral("Ocean"), QStringLiteral("Cool deep-sea teal"),
+		 QStringLiteral("#22d3ee")},
+	};
+}
 
 QString mapColor(const QString &hexColor)
 {
@@ -501,15 +545,15 @@ QDialogButtonBox QPushButton { min-width: 72px; }
 	// ── Chat tab ─────────────────────────────────────────────────────
 	qss += QString::fromUtf8(R"QSS(
 QPushButton#gfxSeg {
-	background: transparent; color: #8b93a3; border: 1px solid transparent; border-radius: 6px;
-	padding: 3px 10px; font-weight: 600;
+	background: transparent; color: #8b93a3; border: 1px solid transparent; border-radius: 11px;
+	padding: 3px 11px; font-weight: 600;
 }
 QPushButton#gfxSeg:hover { color: #e8eaf0; background: #1d2129; }
-QPushButton#gfxSeg:checked { color: #ffffff; background: #262b36; border-color: #3a4150; }
+QPushButton#gfxSeg:checked { color: #ffffff; background: #262b36; border-color: #ffb020; }
 QLabel#gfxChatStatus { font-size: 8pt; }
 QPushButton#gfxIconBtn {
-	background: transparent; color: #8b93a3; border: 1px solid transparent; border-radius: 6px;
-	padding: 3px 5px; min-width: 18px;
+	background: transparent; color: #8b93a3; border: 1px solid transparent; border-radius: 9px;
+	padding: 3px 6px; min-width: 18px;
 }
 QPushButton#gfxIconBtn:hover { color: #e8eaf0; background: #1d2129; }
 QPushButton#gfxIconBtn:checked { color: #ffffff; background: #3a2a0c; border-color: #ffb020; }
@@ -524,13 +568,13 @@ QFrame#gfxStatCard[gfxState="xive"] { background: #1f1230; border-color: #6d2fa3
 QLabel#gfxStatSub, QLabel#gfxStatSummary { color: #8b93a3; font-size: 8pt; }
 
 QTextBrowser#gfxChatView {
-	background: #0f1115; color: #e8eaf0; border: 1px solid #262a33; border-radius: 10px;
+	background: #0f1115; color: #e8eaf0; border: 1px solid #20242c; border-radius: 14px;
 	selection-background-color: #6b4d14;
 }
 
 QPushButton#gfxTarget {
-	background: #1a1d24; color: #6b7280; border: 1px solid #2f3541; border-radius: 6px;
-	padding: 5px 9px; font-weight: 700; font-size: 8pt;
+	background: #1a1d24; color: #6b7280; border: 1px solid #2f3541; border-radius: 10px;
+	padding: 5px 10px; font-weight: 700; font-size: 8pt;
 }
 QPushButton#gfxTarget:hover { color: #c9ced8; border-color: #3d4452; }
 QPushButton#gfxTarget[gfxState="twitch"]:checked { color: #ffffff; background: #2a1f4d; border-color: #9146ff; }
@@ -539,7 +583,10 @@ QPushButton#gfxTarget[gfxState="youtube"]:checked { color: #ffffff; background: 
 QPushButton#gfxTarget[gfxState="xive"]:checked { color: #ffffff; background: #2b1645; border-color: #a855f7; }
 QPushButton#gfxTarget:disabled { color: #3f4552; background: #15171c; border-color: #22262d; }
 
-QLineEdit#gfxChatInput { padding: 6px 10px; border-radius: 8px; background: #0f1115; }
+QLineEdit#gfxChatInput {
+	padding: 8px 12px; border-radius: 12px; background: #13161c; border: 1px solid #2a2f3a;
+}
+QLineEdit#gfxChatInput:focus { border: 1px solid #ffb020; background: #161920; }
 QLineEdit#gfxChatInput:disabled { color: #6b7280; }
 
 QFrame#gfxCard { background: #15181e; border: 1px solid #3a4150; border-radius: 12px; }

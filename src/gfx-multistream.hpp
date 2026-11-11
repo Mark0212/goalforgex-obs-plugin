@@ -50,6 +50,8 @@ public:
 
 	// Settings → Appearance changed.
 	void applyAppearance();
+	// The ⚙ button in the header: the main dock's Settings.
+	std::function<void()> onOpenSettings;
 	// OBS's own stream started / is stopping (from the frontend event callback).
 	void mainStreamStarted();
 	void mainStreamStopping();

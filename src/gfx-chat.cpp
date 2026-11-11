@@ -8,6 +8,7 @@ the Free Software Foundation; either version 2 of the License, or
 (at your option) any later version.
 */
 #include "gfx-chat.hpp"
+#include "gfx-emotes.hpp"
 #include "gfx-flow.hpp"
 #include "gfx-http.hpp"
 #include "gfx-images.hpp"
@@ -436,7 +437,7 @@ QString badgeHtml(const QString &text, const QString &color, qreal pt)
 	hex.remove(QLatin1Char('#'));
 	return QStringLiteral("<img src='gfx:badge/%1/%2/%3' style='vertical-align:middle'>&nbsp;")
 		.arg(QString::fromLatin1(text.toUtf8().toHex()), hex)
-		.arg(qBound(10, qRound(pt * 2.05), 30));
+		.arg(qBound(10, qRound(pt * 2.05), 48));
 }
 
 QString tag(const char *text, const char *color, qreal pt)
@@ -448,12 +449,36 @@ QString tag(const char *text, const char *color, qreal pt)
 QTextBlockFormat lineFormat(bool host, bool highlighted, bool firstTimer, bool shaded)
 {
 	QTextBlockFormat f;
-	const int gap = settings().chatCompact ? 2 : 4;
+	const Settings &st = settings();
+	const QString layout = st.chatLayout;
+	int gap = st.chatCompact ? qMin(2, st.chatSpacing) : st.chatSpacing;
+	if (layout == QLatin1String("bubbles")) {
+		// A rounded card per message. paintCards() pads the card into the margin,
+		// so the visible gap between cards is (margin − 12).
+		gap = 12 + qMax(3, gap);
+		f.setTopMargin(gap);
+		f.setBottomMargin(gap);
+		f.setLeftMargin(12);
+		f.setRightMargin(12);
+		f.setLineHeight(122, QTextBlockFormat::ProportionalHeight);
+		QColor card(theme::mapColor(QStringLiteral("#171a22")));
+		if (host)
+			card = QColor(QStringLiteral("#2a2112"));
+		else if (highlighted)
+			card = QColor(QStringLiteral("#3a2a0c"));
+		else if (firstTimer)
+			card = QColor(QStringLiteral("#10261d"));
+		f.setProperty(gfx::notice::kCardProp, card);
+		return f;
+	}
+	const bool cozy = layout == QLatin1String("cozy");
+	if (cozy)
+		gap += 2;
 	f.setTopMargin(gap);
 	f.setBottomMargin(gap);
-	f.setLeftMargin(6);
-	f.setRightMargin(6);
-	f.setLineHeight(112, QTextBlockFormat::ProportionalHeight);
+	f.setLeftMargin(cozy ? 9 : 6);
+	f.setRightMargin(cozy ? 9 : 6);
+	f.setLineHeight(cozy ? 126 : 112, QTextBlockFormat::ProportionalHeight);
 	QColor bg;
 	if (host)
 		bg = QColor(QStringLiteral("#1f1a10"));
@@ -758,6 +783,8 @@ void GfxChatPanel::buildUi()
 	fXive_ = seg(QStringLiteral("Xive"), QStringLiteral("xive"));
 	fWatch_ = seg(QStringLiteral("📺 Watching"), QStringLiteral("watched"));
 	fMentions_ = seg(QStringLiteral("@"), QStringLiteral("mentions"));
+	fQuestions_ = seg(QStringLiteral("❓"), QStringLiteral("questions"));
+	fQuestions_->setToolTip(QStringLiteral("Only questions: messages with a ? that aren't yours, so none slip by"));
 	for (QPushButton *b : {fTwitch_, fKick_, fYouTube_, fTikTok_, fXive_}) {
 		const QString p = b->property("gfxPlatform").toString();
 		b->setIcon(QIcon(QPixmap::fromImage(platformIcon(p, 14, devicePixelRatioF()))));
@@ -787,6 +814,8 @@ void GfxChatPanel::buildUi()
 		QStringLiteral("Show or hide Who's here beside the chat (needs a dock at least 460 px wide)"), true);
 	viewersBtn_->setChecked(settings().chatViewers);
 	moreBtn_ = iconBtn(QStringLiteral("⋯"), QStringLiteral("Chat options"), false);
+	settingsBtn_ = iconBtn(QStringLiteral("⚙"),
+			       QStringLiteral("Settings: text and emote sizes, name colours, themes…"), false);
 	statusLbl_ = new QLabel(main_);
 	statusLbl_->setObjectName(QStringLiteral("gfxChatStatus"));
 	statusLbl_->setTextFormat(Qt::RichText);
@@ -796,6 +825,7 @@ void GfxChatPanel::buildUi()
 	tools->addWidget(pauseBtn_);
 	tools->addWidget(viewersBtn_);
 	tools->addWidget(moreBtn_);
+	tools->addWidget(settingsBtn_);
 	tools->addSpacing(3);
 	tools->addWidget(statusLbl_);
 	top->addWidget(chipsBox_, 1, Qt::AlignTop);
@@ -804,6 +834,10 @@ void GfxChatPanel::buildUi()
 	root->addLayout(top);
 	connect(pauseBtn_, &QPushButton::clicked, this, [this](bool on) { setPaused(on); });
 	connect(moreBtn_, &QPushButton::clicked, this, [this] { showOptionsMenu(); });
+	connect(settingsBtn_, &QPushButton::clicked, this, [this] {
+		if (onOpenSettings)
+			onOpenSettings();
+	});
 	connect(viewersBtn_, &QPushButton::clicked, this, [this](bool on) {
 		settings().chatViewers = on;
 		saveSettings();
@@ -893,6 +927,24 @@ void GfxChatPanel::buildUi()
 	stats_->setMinimumHeight(1);
 	root->addWidget(stats_);
 
+	// TikTok likes: one slim line, only while TikTok is live (Settings → MultiChat → TikTok likes).
+	likesBar_ = new QLabel(main_);
+	likesBar_->setObjectName(QStringLiteral("gfxLikesBar"));
+	likesBar_->setTextFormat(Qt::RichText);
+	likesBar_->setWordWrap(false);
+	likesBar_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+	likesBar_->setStyleSheet(QStringLiteral(
+		"QLabel#gfxLikesBar { background: rgba(255, 77, 125, 22); border: 1px solid rgba(255, 77, 125, 60); "
+		"border-radius: 8px; padding: 2px 8px; }"
+		"QLabel#gfxLikesBar[gfxState=\"pulse\"] { background: rgba(255, 77, 125, 52); "
+		"border: 1px solid rgba(255, 77, 125, 160); }"));
+	likesBar_->hide();
+	root->addWidget(likesBar_);
+	likesPulse_ = new QTimer(this);
+	likesPulse_->setSingleShot(true);
+	likesPulse_->setInterval(650);
+	connect(likesPulse_, &QTimer::timeout, this, [this] { theme::setState(likesBar_, ""); });
+
 	// Feed
 	auto *view = new ChatView(main_);
 	view_ = view;
@@ -924,6 +976,27 @@ void GfxChatPanel::buildUi()
 	view->onImageFailed = [failRedraw] {
 		failRedraw->start();
 	};
+	// 📌 Pinned message: one card above the feed (right-click a name → Pin message).
+	pinBar_ = new QFrame(main_);
+	pinBar_->setObjectName(QStringLiteral("gfxPinBar"));
+	auto *pl = new QHBoxLayout(pinBar_);
+	pl->setContentsMargins(10, 6, 6, 6);
+	pl->setSpacing(8);
+	pinLbl_ = new QLabel(pinBar_);
+	pinLbl_->setTextFormat(Qt::RichText);
+	pinLbl_->setWordWrap(true);
+	pinLbl_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+	auto *unpin = new QPushButton(QStringLiteral("✕"), pinBar_);
+	unpin->setObjectName(QStringLiteral("gfxIconBtn"));
+	unpin->setCursor(Qt::PointingHandCursor);
+	unpin->setToolTip(QStringLiteral("Unpin"));
+	pl->addWidget(pinLbl_, 1);
+	pl->addWidget(unpin, 0, Qt::AlignTop);
+	pinBar_->setStyleSheet(QStringLiteral("QFrame#gfxPinBar { background: rgba(255, 176, 32, 20); "
+					      "border: 1px solid rgba(255, 176, 32, 70); border-radius: 10px; }"));
+	pinBar_->hide();
+	root->addWidget(pinBar_);
+	connect(unpin, &QPushButton::clicked, this, [this] { setPinned(nullptr); });
 	root->addWidget(view_, 1);
 	// Links in the feed:
 	//   user:<seq>               → the chatter's card
@@ -1055,14 +1128,26 @@ void GfxChatPanel::buildUi()
 	input_->setPlaceholderText(QStringLiteral("Send a message…"));
 	input_->setClearButtonEnabled(false);
 	input_->setMinimumWidth(60);
-	input_->setToolTip(QStringLiteral("Tab completes chatter names · ↑ / ↓ bring back what you sent"));
+	input_->setToolTip(QStringLiteral("Tab completes chatter names and emotes · ↑ / ↓ bring back what you sent"));
 	input_->installEventFilter(this);
 	sendBtn_ = new QPushButton(QStringLiteral("Send"), inputBox);
 	theme::setRole(sendBtn_, "primary");
 	sendBtn_->setCursor(Qt::PointingHandCursor);
 	sendBtn_->setToolTip(QStringLiteral("Send (Enter)"));
+	emoteBtn_ = new QPushButton(QStringLiteral("😀"), inputBox);
+	emoteBtn_->setObjectName(QStringLiteral("gfxIconBtn"));
+	emoteBtn_->setCursor(Qt::PointingHandCursor);
+	emoteBtn_->setToolTip(QStringLiteral("Emotes: your Twitch emotes, BTTV, FFZ and 7TV (Tab completes them too)"));
+	quickBtn_ = new QPushButton(QStringLiteral("⚡"), inputBox);
+	quickBtn_->setObjectName(QStringLiteral("gfxIconBtn"));
+	quickBtn_->setCursor(Qt::PointingHandCursor);
+	quickBtn_->setToolTip(QStringLiteral("Quick replies: your saved messages, one click away"));
 	il->addWidget(input_, 1);
+	il->addWidget(emoteBtn_);
+	il->addWidget(quickBtn_);
 	il->addWidget(sendBtn_);
+	connect(emoteBtn_, &QPushButton::clicked, this, [this] { openEmotePicker(); });
+	connect(quickBtn_, &QPushButton::clicked, this, [this] { showQuickReplies(); });
 	compLayout_->addWidget(targetsBox_);
 	compLayout_->addWidget(inputBox, 1);
 	root->addLayout(compLayout_);
@@ -1139,14 +1224,15 @@ void GfxChatPanel::fitChips()
 	};
 	// Room for the chips = the panel minus the tools on the right.
 	int tools = 0;
-	for (QWidget *w : {static_cast<QWidget *>(searchBtn_), static_cast<QWidget *>(pauseBtn_),
-			   static_cast<QWidget *>(moreBtn_), static_cast<QWidget *>(statusLbl_)})
+	for (QWidget *w :
+	     {static_cast<QWidget *>(searchBtn_), static_cast<QWidget *>(pauseBtn_), static_cast<QWidget *>(moreBtn_),
+	      static_cast<QWidget *>(settingsBtn_), static_cast<QWidget *>(statusLbl_)})
 		if (w->isVisibleTo(this))
 			tools += w->sizeHint().width() + 2;
 	const int room = width() - tools - 8;
 	setNames(true);
 	int need = 0, n = 0;
-	for (QPushButton *b : {fAll_, fTwitch_, fKick_, fYouTube_, fTikTok_, fXive_, fWatch_, fMentions_})
+	for (QPushButton *b : {fAll_, fTwitch_, fKick_, fYouTube_, fTikTok_, fXive_, fWatch_, fMentions_, fQuestions_})
 		if (b->isVisibleTo(this))
 			need += b->sizeHint().width() + (n++ ? 3 : 0);
 	if (need > room)
@@ -1361,8 +1447,61 @@ void GfxChatPanel::layoutCards(const QStringList &visible, int maxCols)
 	}
 }
 
+void GfxChatPanel::renderLikes()
+{
+	if (!likesBar_)
+		return;
+	const QJsonObject t = streams_.value(QStringLiteral("tiktok")).toObject();
+	const Settings &s = settings();
+	const bool on = s.chatTikTokLikes && s.chatTikTok && t.value(QStringLiteral("live")).toBool() &&
+			t.value(QStringLiteral("likes")).isDouble() && !short_;
+	likesBar_->setVisible(on);
+	if (!on) {
+		likesShown_ = -1;
+		return;
+	}
+	const qint64 total = static_cast<qint64>(t.value(QStringLiteral("likes")).toDouble());
+	const qint64 perMin = static_cast<qint64>(t.value(QStringLiteral("likesPerMin")).toDouble());
+	const QJsonArray likers = t.value(QStringLiteral("likers")).toArray();
+	QStringList who, tipWho;
+	for (qsizetype i = 0; i < likers.size(); ++i) {
+		const QJsonObject l = likers.at(i).toObject();
+		const QString name = l.value(QStringLiteral("name")).toString().left(40);
+		const qint64 count = static_cast<qint64>(l.value(QStringLiteral("count")).toDouble());
+		if (name.isEmpty())
+			continue;
+		tipWho << QStringLiteral("%1 ×%2").arg(name, fmtCount(count));
+		if (who.size() < 4)
+			who << QStringLiteral(
+				       "<span style='color:#e8eaf0'>%1</span>&nbsp;<span style='color:#ff8fb1'>×%2</span>")
+					.arg(name.toHtmlEscaped(), fmtCount(count));
+	}
+	QString h = QStringLiteral("<span style='color:#ff4d7d'>❤</span>&nbsp;<b style='color:#ffffff'>%1</b>"
+				   "&nbsp;<span style='color:#c9a3b4'>likes</span>")
+			    .arg(fmtCount(total));
+	if (perMin > 0)
+		h += QStringLiteral("&nbsp;&nbsp;<span style='color:#ff8fb1;font-weight:700'>+%1/min</span>")
+			     .arg(fmtCount(perMin));
+	if (!who.isEmpty())
+		h += QStringLiteral("&nbsp;&nbsp;<span style='color:#5b6270'>·</span>&nbsp;&nbsp;") +
+		     who.join(QStringLiteral("&nbsp;&nbsp;"));
+	likesBar_->setText(h);
+	QString tip =
+		QStringLiteral("TikTok likes this stream: %1\nLast minute: %2").arg(fmtCount(total), fmtCount(perMin));
+	if (!tipWho.isEmpty())
+		tip += QStringLiteral("\n\nTapping now:\n") + tipWho.join(QLatin1Char('\n'));
+	tip += QStringLiteral("\n\nSettings → MultiChat → TikTok likes turns this line off.");
+	likesBar_->setToolTip(tip);
+	if (likesShown_ >= 0 && total > likesShown_) {
+		theme::setState(likesBar_, "pulse");
+		likesPulse_->start();
+	}
+	likesShown_ = total;
+}
+
 void GfxChatPanel::renderStats()
 {
+	renderLikes();
 	// Only connected (and switched-on) platforms get a card — no "not connected" clutter.
 	QStringList visible;
 	for (const QString &p : wantedPlatforms())
@@ -1502,6 +1641,11 @@ void GfxChatPanel::setSendHandler(SendFn fn)
 void GfxChatPanel::setModHandler(ModFn fn)
 {
 	mod_ = std::move(fn);
+}
+
+void GfxChatPanel::setEmotesHandler(EmotesFn fn)
+{
+	emotes_ = std::move(fn);
 }
 
 void GfxChatPanel::setInfoHandler(InfoFn fn)
@@ -1651,6 +1795,11 @@ void GfxChatPanel::showUserMenu(const QString &platform, const QString &login, c
 	if (msg && !msgText.isEmpty())
 		connect(menu.addAction(QStringLiteral("📄   Copy message")), &QAction::triggered, this,
 			[msgText] { QGuiApplication::clipboard()->setText(msgText); });
+	if (msg && msg->notice.isEmpty() && !msgText.isEmpty()) {
+		const gfx::ChatMessage copy = *msg;
+		connect(menu.addAction(QStringLiteral("📌   Pin message to the top")), &QAction::triggered, this,
+			[this, copy] { setPinned(&copy); });
+	}
 
 	if (!own) {
 		menu.addSeparator();
@@ -2552,6 +2701,9 @@ bool GfxChatPanel::matches(const ChatMessage &m) const
 		return false;
 	if (filter_ == QLatin1String("mentions") && !isHighlighted(m))
 		return false;
+	if (filter_ == QLatin1String("questions") &&
+	    (!m.notice.isEmpty() || m.host || m.deleted || !m.text.contains(QLatin1Char('?'))))
+		return false;
 	if (!userFilterLogin_.isEmpty() &&
 	    (m.platform != userFilterPlatform_ || m.login.compare(userFilterLogin_, Qt::CaseInsensitive) != 0))
 		return false;
@@ -2655,7 +2807,7 @@ int GfxChatPanel::emoteSlot(const QString &url) const
 QString GfxChatPanel::partsHtml(const ChatMessage &m, qreal basePt) const
 {
 	// Emotes about 2× the text height (Twitch's own chat ratio), sharp at any size.
-	const int px = qBound(16, qRound(basePt * 2.6), 72);
+	const int px = qBound(12, qRound(basePt * 2.6 * settings().chatEmoteScale / 100.0), 160);
 	QString out;
 	for (const ChatPart &p : m.parts) {
 		if (p.image.isEmpty() || RemoteImages::instance().failed(p.image)) {
@@ -2676,9 +2828,10 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 		return noticeHtml(m);
 	const Settings &s = settings();
 	const qreal base = baseFontPt();
-	const qreal tagPt = qMax<qreal>(6.0, base * 0.78);
+	const qreal tagPt = qMax<qreal>(6.0, base * 0.78 * s.chatBadgeScale / 100.0);
 	const qreal smallPt = qMax<qreal>(6.5, base * 0.88);
 	const int iconPx = qBound(12, qRound(base * 1.65), 32);
+	const QString textColor = s.chatTextColor.isEmpty() ? QStringLiteral("#e8eaf0") : s.chatTextColor;
 	const bool validLogin = loginRe().match(m.login).hasMatch();
 	const bool validId = msgIdRe().match(m.id).hasMatch();
 	const bool own = m.channel.isEmpty();
@@ -2699,7 +2852,8 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 	// Watched channel: whose chat this came from.
 	if (!own)
 		h += badgeHtml(m.channelName, QStringLiteral("#9aa1b0"), tagPt);
-	if (s.chatTimestamps && m.ts > 0)
+	const bool bubbles = s.chatLayout == QLatin1String("bubbles");
+	if (s.chatTimestamps && m.ts > 0 && !bubbles)
 		h += QStringLiteral("<span style='color:#5b6270;font-size:%2pt;'>%1</span> ")
 			     .arg(QDateTime::fromMSecsSinceEpoch(m.ts).toString(QStringLiteral("HH:mm")),
 				  QString::number(smallPt, 'f', 1));
@@ -2712,24 +2866,39 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 		     badgeHtml(QStringLiteral("GOALFORGEX STAFF"), QStringLiteral("#ffb020"), tagPt);
 	}
 	if (s.chatBadges) {
+		// A badge takes its role's name colour when one is set (Settings → Chat style).
+		const auto roleTag = [&](const char *text, const QString &custom, const char *fallback) {
+			h += badgeHtml(QString::fromLatin1(text),
+				       custom.isEmpty() ? QString::fromLatin1(fallback) : custom, tagPt);
+		};
 		if (m.host)
-			h += tag(own ? "HOST" : "STREAMER", "#ff3b4f", tagPt);
+			roleTag(own ? "HOST" : "STREAMER", s.colorHost, "#ff3b4f");
 		else if (m.mod)
-			h += tag("MOD", "#34d399", tagPt);
+			roleTag("MOD", s.colorMod, "#34d399");
 		if (m.vip)
-			h += tag("VIP", "#f472b6", tagPt);
+			roleTag("VIP", s.colorVip, "#f472b6");
 		if (m.sub)
-			h += tag(m.platform == QLatin1String("youtube") ? "MEMBER" : "SUB", "#ffb020", tagPt);
+			roleTag(m.platform == QLatin1String("youtube") ? "MEMBER" : "SUB", s.colorSub, "#ffb020");
 	}
-	const QString nameColor = (!s.chatNameColors || m.color.isEmpty()) ? QStringLiteral("#c9ced8")
-									   : readableColor(m.color);
+	QString nameColor = gfx::roleNameColor(m.host, m.mod, m.vip, m.sub);
+	if (nameColor.isEmpty())
+		nameColor = (!s.chatNameColors || m.color.isEmpty()) ? QStringLiteral("#c9ced8")
+								     : readableColor(m.color);
 	if (validLogin)
 		h += QStringLiteral("<a href='user:%1' title='Click for their card · right-click for actions' "
 				    "style='color:%2;text-decoration:none;font-weight:bold;'>%3</a>")
 			     .arg(QString::number(m.seq), nameColor, m.user.toHtmlEscaped());
 	else
 		h += QStringLiteral("<b style='color:%1'>%2</b>").arg(nameColor, m.user.toHtmlEscaped());
-	h += QStringLiteral("<span style='color:#5b6270'>:</span> ");
+	if (bubbles) {
+		if (s.chatTimestamps && m.ts > 0)
+			h += QStringLiteral("&nbsp;&nbsp;<span style='color:#5b6270;font-size:%2pt;'>%1</span>")
+				     .arg(QDateTime::fromMSecsSinceEpoch(m.ts).toString(QStringLiteral("HH:mm")),
+					  QString::number(smallPt, 'f', 1));
+		h += QStringLiteral("<br>");
+	} else {
+		h += QStringLiteral("<span style='color:#5b6270'>:</span> ");
+	}
 	if (m.deleted && !s.chatShowDeleted) {
 		h += QStringLiteral("<i style='color:#5b6270'>message deleted</i>");
 		return h;
@@ -2748,9 +2917,9 @@ QString GfxChatPanel::lineInnerHtml(const ChatMessage &m) const
 			     "<s style='color:#5b6270'>%1</s> <i style='color:#5b6270;font-size:%2pt'>(deleted)</i>")
 			     .arg(m.text.toHtmlEscaped(), QString::number(smallPt, 'f', 1));
 	else if (s.chatEmotes && !m.parts.isEmpty())
-		h += QStringLiteral("<span style='color:#e8eaf0'>%1</span>").arg(partsHtml(m, base));
+		h += QStringLiteral("<span style='color:%1'>%2</span>").arg(textColor, partsHtml(m, base));
 	else
-		h += QStringLiteral("<span style='color:#e8eaf0'>%1</span>").arg(textHtml(m.text));
+		h += QStringLiteral("<span style='color:%1'>%2</span>").arg(textColor, textHtml(m.text));
 	return h;
 }
 
@@ -3352,6 +3521,7 @@ void GfxChatPanel::setFilter(const QString &f)
 	fXive_->setChecked(f == QLatin1String("xive"));
 	fWatch_->setChecked(f == QLatin1String("watched"));
 	fMentions_->setChecked(f == QLatin1String("mentions"));
+	fQuestions_->setChecked(f == QLatin1String("questions"));
 	follow_ = true;
 	rebuild();
 }
@@ -3410,8 +3580,132 @@ void GfxChatPanel::sendFinished(bool anyDelivered)
 	input_->setFocus();
 }
 
+void GfxChatPanel::loadEmotes(bool force)
+{
+	if (!emotes_ || emotesLoading_)
+		return;
+	if (picker_ && picker_->hasData() && !force)
+		return;
+	if (!picker_) {
+		picker_ = new GfxEmotePicker(this);
+		picker_->hide();
+		picker_->onPick = [this](const QString &name) {
+			insertAtCursor(name);
+		};
+		picker_->onRefresh = [this] {
+			emotesRetries_ = 0;
+			loadEmotes(true);
+		};
+	}
+	emotesLoading_ = true;
+	emotes_([this](const QJsonObject &r, const QString &error) {
+		emotesLoading_ = false;
+		if (!error.isEmpty())
+			return;
+		picker_->setData(r);
+		// Third-party sets fill in on the server after a restart: ask again a few times.
+		if (r.value(QStringLiteral("pending")).toBool() && emotesRetries_ < 3) {
+			++emotesRetries_;
+			QTimer::singleShot(4000, this, [this] { loadEmotes(true); });
+		}
+	});
+}
+
+void GfxChatPanel::openEmotePicker()
+{
+	loadEmotes(false);
+	if (picker_)
+		picker_->open(emoteBtn_);
+}
+
+void GfxChatPanel::insertAtCursor(const QString &text)
+{
+	QString t = input_->text();
+	int pos = input_->cursorPosition();
+	QString ins = text;
+	if (pos > 0 && !t.at(pos - 1).isSpace())
+		ins.prepend(QLatin1Char(' '));
+	if (pos >= t.size() || !t.at(pos).isSpace())
+		ins.append(QLatin1Char(' '));
+	if (t.size() + ins.size() > kMaxLen)
+		return;
+	t.insert(pos, ins);
+	input_->setText(t);
+	input_->setCursorPosition(pos + static_cast<int>(ins.size()));
+	input_->setFocus();
+}
+
+void GfxChatPanel::showQuickReplies()
+{
+	Settings &s = settings();
+	QMenu menu(this);
+	QAction *head = menu.addAction(QStringLiteral("⚡  Quick replies  ·  Ctrl + click sends straight away"));
+	head->setEnabled(false);
+	menu.addSeparator();
+	for (const QString &r : s.chatQuickReplies) {
+		const QString shown = r.size() > 60 ? r.left(57) + QStringLiteral("…") : r;
+		QAction *a = menu.addAction(shown);
+		a->setToolTip(r);
+		connect(a, &QAction::triggered, this, [this, r] {
+			if (QGuiApplication::keyboardModifiers() & Qt::ControlModifier) {
+				input_->setText(r);
+				doSend();
+			} else {
+				insertAtCursor(r);
+			}
+		});
+	}
+	if (s.chatQuickReplies.isEmpty())
+		menu.addAction(QStringLiteral("No quick replies yet: type one, then save it below"))->setEnabled(false);
+	menu.addSeparator();
+	const QString cur = input_->text().trimmed();
+	QAction *save = menu.addAction(QStringLiteral("➕   Save what's in the message box"));
+	save->setEnabled(!cur.isEmpty() && !s.chatQuickReplies.contains(cur) && s.chatQuickReplies.size() < 25);
+	connect(save, &QAction::triggered, this, [cur] {
+		settings().chatQuickReplies << cur.left(500);
+		saveSettings();
+	});
+	if (!s.chatQuickReplies.isEmpty()) {
+		QMenu *del = menu.addMenu(QStringLiteral("🗑   Remove one"));
+		for (const QString &r : s.chatQuickReplies)
+			connect(del->addAction(r.size() > 60 ? r.left(57) + QStringLiteral("…") : r),
+				&QAction::triggered, this, [r] {
+					settings().chatQuickReplies.removeAll(r);
+					saveSettings();
+				});
+	}
+	menu.exec(quickBtn_->mapToGlobal(QPoint(0, 0)) - QPoint(0, menu.sizeHint().height() + 4));
+}
+
+void GfxChatPanel::setPinned(const ChatMessage *m)
+{
+	hasPin_ = m != nullptr;
+	if (m)
+		pinned_ = *m;
+	renderPin();
+}
+
+void GfxChatPanel::renderPin()
+{
+	if (!pinBar_)
+		return;
+	pinBar_->setVisible(hasPin_);
+	if (!hasPin_)
+		return;
+	const QString text = pinned_.text.size() > 300 ? pinned_.text.left(297) + QStringLiteral("…") : pinned_.text;
+	QString nameColor = gfx::roleNameColor(pinned_.host, pinned_.mod, pinned_.vip, pinned_.sub);
+	if (nameColor.isEmpty())
+		nameColor = pinned_.color.isEmpty() ? QStringLiteral("#ffd27a") : readableColor(pinned_.color);
+	pinLbl_->setText(QStringLiteral("<span style='color:#ffb020;font-size:7.5pt;font-weight:800'>📌 PINNED</span>"
+					"&nbsp;&nbsp;<span style='color:#9aa1b0;font-size:7.5pt'>%1</span><br>"
+					"<b style='color:%2'>%3</b>&nbsp; <span style='color:#e8eaf0'>%4</span>")
+				 .arg(platformName(pinned_.platform).toHtmlEscaped(), nameColor,
+				      pinned_.user.toHtmlEscaped(), textHtml(text)));
+}
+
 void GfxChatPanel::clearChat()
 {
+	setPinned(nullptr);
 	msgs_.clear();
 	status_ = QJsonObject();
 	streams_ = QJsonObject();
@@ -3550,6 +3844,13 @@ void GfxChatPanel::completeName(bool backwards)
 			seen.insert(key);
 			tabMatches_ << (at ? QStringLiteral("@") : QString()) + name;
 		}
+		// …then emotes (not after @, which is always a name).
+		if (!at && picker_)
+			for (const QString &e : picker_->complete(prefix, 40))
+				if (!tabMatches_.contains(e))
+					tabMatches_ << e;
+		if (!at && !picker_)
+			loadEmotes(false);
 		if (tabMatches_.isEmpty())
 			return;
 		tabStart_ = start;

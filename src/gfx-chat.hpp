@@ -33,6 +33,7 @@ class QMenu;
 class QPushButton;
 class QTextBrowser;
 class QTimer;
+class GfxEmotePicker;
 
 namespace gfx {
 
@@ -96,6 +97,9 @@ public:
 	// Chatter card lookup (GET /api/obs/chat/user). done(info, error) on the UI thread.
 	using InfoDone = std::function<void(const QJsonObject &info, const QString &error)>;
 	using InfoFn = std::function<void(const QString &platform, const QString &login, InfoDone done)>;
+	// Emote picker list (GET /api/obs/chat/emotes). done(response, error) on the UI thread.
+	using EmotesDone = std::function<void(const QJsonObject &response, const QString &error)>;
+	using EmotesFn = std::function<void(EmotesDone done)>;
 
 	explicit GfxChatPanel(QWidget *parent = nullptr);
 
@@ -108,6 +112,7 @@ public:
 	void setSendHandler(SendFn fn);
 	void setModHandler(ModFn fn);
 	void setInfoHandler(InfoFn fn);
+	void setEmotesHandler(EmotesFn fn);
 	// Applies one poll response. Returns how many new messages arrived that the
 	// current filter shows (for the unread badge on the tab).
 	int applyPoll(const QJsonObject &response);
@@ -122,6 +127,7 @@ public:
 	void openChatter(const QString &platform, const QString &login);
 	void openChatterMenu(const QString &platform, const QString &login);
 	std::function<void()> onViewersToggled; // the 👥 button was pressed
+	std::function<void()> onOpenSettings;   // the ⚙ button: Settings, MultiChat page
 
 protected:
 	// Stats card clicks, feed hover / Ctrl+wheel, composer keys.
@@ -147,6 +153,8 @@ private:
 	// Viewers / uptime / title per platform + chatters and messages per minute.
 	void renderStats();
 	void renderStatCard(StatCard &c);
+	// TikTok likes line (total, likes a minute, latest likers) while TikTok is live.
+	void renderLikes();
 	// Big cards (two lines) or the slim one-row Online / Offline pills (Settings → chatStatsCards).
 	void setCardLook(StatCard &c, bool big);
 	// Up to maxCols cards per row, only the platforms that are connected.
@@ -217,6 +225,13 @@ private:
 	void showWatchDialog();
 	void updateWatchStatus(const QJsonArray &watch);
 	void showOptionsMenu();
+	// 😀 emote picker, ⚡ quick replies, 📌 pinned message (3.0).
+	void loadEmotes(bool force);
+	void openEmotePicker();
+	void showQuickReplies();
+	void insertAtCursor(const QString &text);
+	void setPinned(const gfx::ChatMessage *m);
+	void renderPin();
 	// Composer: ↑/↓ recall sent messages, Tab completes chatter names.
 	bool composerKey(QKeyEvent *e);
 	void completeName(bool backwards);
@@ -235,6 +250,12 @@ private:
 	SendFn send_;
 	ModFn mod_;
 	InfoFn info_;
+	EmotesFn emotes_;
+	GfxEmotePicker *picker_ = nullptr;
+	bool emotesLoading_ = false;
+	int emotesRetries_ = 0;
+	bool hasPin_ = false;
+	gfx::ChatMessage pinned_;
 	QJsonArray watchStatus_;
 	bool sending_ = false;
 
@@ -286,10 +307,19 @@ private:
 	QPushButton *fTikTok_ = nullptr;
 	QPushButton *fXive_ = nullptr;
 	QPushButton *fMentions_ = nullptr;
+	QPushButton *fQuestions_ = nullptr;
+	QPushButton *emoteBtn_ = nullptr;
+	QPushButton *quickBtn_ = nullptr;
+	QFrame *pinBar_ = nullptr;
+	QLabel *pinLbl_ = nullptr;
 	QPushButton *searchBtn_ = nullptr;
 	QPushButton *pauseBtn_ = nullptr;
 	QPushButton *viewersBtn_ = nullptr;
 	QPushButton *moreBtn_ = nullptr;
+	QPushButton *settingsBtn_ = nullptr;
+	QLabel *likesBar_ = nullptr;
+	QTimer *likesPulse_ = nullptr;
+	qint64 likesShown_ = -1; // total on the line now (-1 = hidden)
 	QWidget *searchRow_ = nullptr;
 	QLineEdit *searchEdit_ = nullptr;
 	QPushButton *userChip_ = nullptr;

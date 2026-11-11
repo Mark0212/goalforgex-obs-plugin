@@ -418,6 +418,16 @@ void GfxMultistreamDock::buildUi()
 	head->addWidget(title);
 	head->addStretch(1);
 	head->addWidget(summary_);
+	auto *gear = new QToolButton(inner);
+	gear->setText(QStringLiteral("⚙"));
+	gear->setToolTip(QStringLiteral("GoalForgeX settings"));
+	gear->setCursor(Qt::PointingHandCursor);
+	theme::setRole(gear, "ghost");
+	connect(gear, &QToolButton::clicked, this, [this] {
+		if (onOpenSettings)
+			onOpenSettings();
+	});
+	head->addWidget(gear);
 	root->addLayout(head);
 
 	bandwidth_ = new QLabel(inner);

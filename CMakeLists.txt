@@ -66,6 +66,8 @@ target_sources(
     src/gfx-chat.hpp
     src/gfx-events-dock.cpp
     src/gfx-events-dock.hpp
+    src/gfx-emotes.cpp
+    src/gfx-emotes.hpp
     src/gfx-events.cpp
     src/gfx-events.hpp
     src/gfx-flow.cpp
@@ -87,6 +89,8 @@ target_sources(
     src/gfx-multistream.hpp
     src/gfx-reactions.cpp
     src/gfx-reactions.hpp
+    src/gfx-settings-dialog.cpp
+    src/gfx-settings-dialog.hpp
     src/gfx-settings.cpp
     src/gfx-settings.hpp
     src/gfx-sources.cpp

@@ -9,6 +9,7 @@ the Free Software Foundation; either version 2 of the License, or
 */
 #pragma once
 
+#include <QList>
 #include <QPixmap>
 #include <QString>
 
@@ -43,6 +44,15 @@ void applyTo(QWidget *dockRoot);
 // A palette colour from rich text (chat lines, event rows), remapped the
 // same way the style sheet is — e.g. mapColor("#ffb020") is the accent.
 QString mapColor(const QString &hexColor);
+
+// Settings → Appearance themes, in display order. accent = the colour it suggests.
+struct ThemeInfo {
+	QString id;
+	QString name;
+	QString blurb;
+	QString accent;
+};
+QList<ThemeInfo> themes();
 QString accentColor();
 
 // The GoalForgeX mark: a red→accent tile with a broadcast ring, drawn in code
