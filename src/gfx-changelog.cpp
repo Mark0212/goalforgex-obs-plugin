@@ -78,6 +78,9 @@ const Note k300[] = {
 	 "(with its timer), the Hype Train with a live progress bar, polls with live votes and predictions with points "
 	 "and odds. Right-click a name → Pin on Twitch pins it for everyone; the ✕ unpins it. Switch it off in Settings "
 	 "→ Notices."},
+	{"✅", "Remove a timeout",
+	 "Timed someone out by mistake? Right-click their name → Timeout → Remove timeout (or use the Timeout menu on "
+	 "their chatter card) and they can chat again right away, on Twitch and Kick."},
 	{"⚡", "Quick replies",
 	 "Save the things you type all the time (socials, rules, schedule) and drop them in with the ⚡ button. "
 	 "Ctrl + click sends one straight away."},

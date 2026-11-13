@@ -1724,7 +1724,8 @@ void GfxDock::chatMod(const QString &platform, const QString &action, const QStr
 {
 	QJsonObject body;
 	body.insert(QStringLiteral("platform"), platform);
-	body.insert(QStringLiteral("action"), action);
+	// Untimeout is an unban on the wire: Twitch and Kick lift a timeout through the same call.
+	body.insert(QStringLiteral("action"), action == QLatin1String("untimeout") ? QStringLiteral("unban") : action);
 	body.insert(QStringLiteral("target"), login);
 	body.insert(QStringLiteral("seconds"), seconds);
 	body.insert(QStringLiteral("messageId"), messageId);
@@ -1742,11 +1743,15 @@ void GfxDock::chatMod(const QString &platform, const QString &action, const QStr
 		this, [body] { return apiPost(QStringLiteral("/api/obs/chat/mod"), body); },
 		[this, action, who, seconds, duration](const ApiResult &r) {
 			if (!r.ok()) {
-				const QString verb =
-					action == QLatin1String("delete")    ? QStringLiteral("delete that message")
-					: action == QLatin1String("timeout") ? QStringLiteral("time out %1").arg(who)
-					: action == QLatin1String("ban")     ? QStringLiteral("ban %1").arg(who)
-									     : QStringLiteral("unban %1").arg(who);
+				QString verb = QStringLiteral("unban %1").arg(who);
+				if (action == QLatin1String("delete"))
+					verb = QStringLiteral("delete that message");
+				else if (action == QLatin1String("timeout"))
+					verb = QStringLiteral("time out %1").arg(who);
+				else if (action == QLatin1String("untimeout"))
+					verb = QStringLiteral("remove the timeout on %1").arg(who);
+				else if (action == QLatin1String("ban"))
+					verb = QStringLiteral("ban %1").arg(who);
 				showMessage(QStringLiteral("Couldn't %1: %2").arg(verb, describe(r)), true);
 				return;
 			}
@@ -1756,6 +1761,8 @@ void GfxDock::chatMod(const QString &platform, const QString &action, const QStr
 				showMessage(QStringLiteral("⏱ %1 timed out for %2.").arg(who, duration(seconds)));
 			else if (action == QLatin1String("ban"))
 				showMessage(QStringLiteral("🚫 %1 banned.").arg(who));
+			else if (action == QLatin1String("untimeout"))
+				showMessage(QStringLiteral("✅ %1's timeout was removed.").arg(who));
 			else
 				showMessage(QStringLiteral("↩ %1 unbanned.").arg(who));
 			scheduleChat(300);

@@ -91,7 +91,7 @@ struct ChatMessage {
 class GfxChatPanel : public QWidget {
 public:
 	using SendFn = std::function<void(const QStringList &platforms, const QString &text)>;
-	// action: timeout | ban | unban | delete. displayName is for the confirmation line.
+	// action: timeout | untimeout | ban | unban | delete. displayName is for the confirmation line.
 	using ModFn = std::function<void(const QString &platform, const QString &action, const QString &login,
 					 int seconds, const QString &messageId, const QString &displayName)>;
 	// Pin / unpin a Twitch message as the streamer (POST /api/obs/chat/pin, 3.1).

@@ -1955,6 +1955,11 @@ void GfxChatPanel::addModActions(QMenu *menu, const QString &platform, const QSt
 				mod_(platform, QStringLiteral("timeout"), login, secs, messageId, shown);
 			});
 	}
+	timeout->addSeparator();
+	connect(timeout->addAction(QStringLiteral("✅   Remove timeout")), &QAction::triggered, this,
+		[this, platform, login, messageId, shown] {
+			mod_(platform, QStringLiteral("untimeout"), login, 0, messageId, shown);
+		});
 	connect(menu->addAction(QStringLiteral("🚫   Ban")), &QAction::triggered, this,
 		[this, platform, login, messageId, shown, platName] {
 			if (QMessageBox::question(
@@ -2259,6 +2264,11 @@ void GfxChatPanel::showChatterCard(const QString &platform, const QString &login
 						     shown);
 					});
 			}
+			m.addSeparator();
+			connect(m.addAction(QStringLiteral("✅ Remove timeout")), &QAction::triggered, this,
+				[this, platform, login, shown] {
+					mod_(platform, QStringLiteral("untimeout"), login, 0, QString(), shown);
+				});
 			if (m.exec(tb->mapToGlobal(QPoint(0, tb->height()))))
 				card->close();
 		});
