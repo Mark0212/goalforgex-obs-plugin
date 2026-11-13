@@ -1273,6 +1273,10 @@ void GfxSettingsDialog::buildPages()
 				       "in this dock — nothing is posted to your chat."));
 	c = addCard(nc, QStringLiteral("🎛"), QStringLiteral("Style"));
 	addToggle(c, QStringLiteral("Show event notices in MultiChat"), QString(), &St::chatNotices);
+	addToggle(c, QStringLiteral("Show Twitch's pinned bar"),
+		  QStringLiteral("The message you or a mod pinned, the Hype Train, polls and predictions — above "
+				 "MultiChat, like at the top of Twitch chat"),
+		  &St::chatTopBar);
 	addChoice(c, QStringLiteral("Look"), QString(), &St::noticeStyle,
 		  {{QStringLiteral("card"), QStringLiteral("Card")},
 		   {QStringLiteral("strip"), QStringLiteral("Strip")},

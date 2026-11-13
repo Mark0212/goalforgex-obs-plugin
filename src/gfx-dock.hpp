@@ -92,6 +92,8 @@ private:
 	void sendChat(const QStringList &platforms, const QString &text);
 	void chatMod(const QString &platform, const QString &action, const QString &login, int seconds,
 		     const QString &messageId, const QString &displayName);
+	// Pin / unpin a Twitch message as the streamer (3.1).
+	void chatPin(const QString &action, const QString &messageId, int seconds);
 	void updateChatTabTitle();
 	// The streamer can see the chat right now (its dock, or the fallback tab).
 	bool chatVisibleNow() const;
