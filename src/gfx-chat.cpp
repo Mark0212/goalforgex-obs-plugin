@@ -980,9 +980,9 @@ void GfxChatPanel::buildUi()
 	// the Hype Train, a poll, a prediction — from the poll's "top" (?top=1).
 	topBar_ = new QFrame(main_);
 	topBar_->setObjectName(QStringLiteral("gfxTopBar"));
-	auto *tl = new QHBoxLayout(topBar_);
-	tl->setContentsMargins(10, 6, 6, 6);
-	tl->setSpacing(8);
+	auto *topLay = new QHBoxLayout(topBar_);
+	topLay->setContentsMargins(10, 6, 6, 6);
+	topLay->setSpacing(8);
 	topLbl_ = new QLabel(topBar_);
 	topLbl_->setTextFormat(Qt::RichText);
 	topLbl_->setWordWrap(true);
@@ -991,8 +991,8 @@ void GfxChatPanel::buildUi()
 	topUnpin_->setObjectName(QStringLiteral("gfxIconBtn"));
 	topUnpin_->setCursor(Qt::PointingHandCursor);
 	topUnpin_->setToolTip(QStringLiteral("Unpin the message on Twitch"));
-	tl->addWidget(topLbl_, 1);
-	tl->addWidget(topUnpin_, 0, Qt::AlignTop);
+	topLay->addWidget(topLbl_, 1);
+	topLay->addWidget(topUnpin_, 0, Qt::AlignTop);
 	topBar_->setStyleSheet(QStringLiteral("QFrame#gfxTopBar { background: rgba(145, 70, 255, 22); "
 					      "border: 1px solid rgba(145, 70, 255, 80); border-radius: 10px; }"));
 	topBar_->hide();
