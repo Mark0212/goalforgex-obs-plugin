@@ -452,6 +452,9 @@ void GfxDock::buildUi()
 					 int seconds, const QString &messageId, const QString &displayName) {
 		chatMod(platform, action, login, seconds, messageId, displayName);
 	});
+	chatPanel_->setPinHandler([this](const QString &action, const QString &messageId, int seconds) {
+		chatPin(action, messageId, seconds);
+	});
 	// 😀 Emote picker: the streamer's emotes (Twitch channel + global, BTTV / FFZ / 7TV).
 	chatPanel_->setEmotesHandler([this](GfxChatPanel::EmotesDone done) {
 		runAsync(
@@ -1622,6 +1625,8 @@ void GfxDock::pollChat()
 			       .arg(GfxChatPanel::wantedPlatforms().join(QLatin1Char(',')))
 			       .arg(QString::fromLatin1(
 				       QUrl::toPercentEncoding(GfxChatPanel::watchList().join(QLatin1Char(',')))));
+	// top=1 (3.1): Twitch's pinned bar — sent only when it changed since toprev.
+	path += QStringLiteral("&top=1&toprev=%1").arg(chatPanel_->topRev());
 	// evseq/evfeed: the newest Events-dock event we have — a newer one answers
 	// this long-poll too, so events show at once instead of on the 2 s state timer.
 	if (!feedId_.isEmpty())
@@ -1753,6 +1758,32 @@ void GfxDock::chatMod(const QString &platform, const QString &action, const QStr
 				showMessage(QStringLiteral("🚫 %1 banned.").arg(who));
 			else
 				showMessage(QStringLiteral("↩ %1 unbanned.").arg(who));
+			scheduleChat(300);
+		});
+}
+
+// Pin / unpin on Twitch from the MultiChat name menu or the pinned bar's ✕ (POST /api/obs/chat/pin).
+// The new pin shows up through the chat long-poll, which the server answers at once.
+void GfxDock::chatPin(const QString &action, const QString &messageId, int seconds)
+{
+	QJsonObject body;
+	body.insert(QStringLiteral("action"), action);
+	body.insert(QStringLiteral("messageId"), messageId);
+	if (seconds > 0)
+		body.insert(QStringLiteral("seconds"), seconds);
+	const bool pin = action == QLatin1String("pin");
+	runAsync(
+		this, [body] { return apiPost(QStringLiteral("/api/obs/chat/pin"), body); },
+		[this, pin](const ApiResult &r) {
+			if (!r.ok()) {
+				showMessage(QStringLiteral("Couldn't %1 that message: %2")
+						    .arg(pin ? QStringLiteral("pin") : QStringLiteral("unpin"),
+							 describe(r)),
+					    true);
+				return;
+			}
+			showMessage(pin ? QStringLiteral("📌 Pinned on Twitch.")
+					: QStringLiteral("Unpinned on Twitch."));
 			scheduleChat(300);
 		});
 }

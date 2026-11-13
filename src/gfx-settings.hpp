@@ -91,6 +91,9 @@ struct Settings {
 	QStringList chatQuickReplies;
 	// TikTok likes line above the chat while TikTok is live (total, likes a minute, latest likers)
 	bool chatTikTokLikes = true;
+	// Top of chat (3.1): Twitch's pinned bar — the message you or a mod pinned, the Hype Train,
+	// polls and predictions — above the MultiChat feed.
+	bool chatTopBar = true;
 	// Extra words that highlight a line (besides the streamer's own name)
 	QStringList chatHighlightWords;
 	// Other people's channels shown in the feed, read-only ("twitch:name", "kick:name", …)

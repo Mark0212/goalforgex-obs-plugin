@@ -73,6 +73,11 @@ const Note k300[] = {
 	 "The ❓ chip shows only messages with a question in them, so you can answer chat between games."},
 	{"📌", "Pin a message",
 	 "Right-click a name → Pin message keeps it on a card above the chat until you unpin it."},
+	{"📊", "Twitch's pinned bar in MultiChat",
+	 "Whatever sits at the top of your Twitch chat shows above MultiChat too: the message you or a mod pinned "
+	 "(with its timer), the Hype Train with a live progress bar, polls with live votes and predictions with points "
+	 "and odds. Right-click a name → Pin on Twitch pins it for everyone; the ✕ unpins it. Switch it off in Settings "
+	 "→ Notices."},
 	{"⚡", "Quick replies",
 	 "Save the things you type all the time (socials, rules, schedule) and drop them in with the ⚡ button. "
 	 "Ctrl + click sends one straight away."},

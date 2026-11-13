@@ -976,6 +976,38 @@ void GfxChatPanel::buildUi()
 	view->onImageFailed = [failRedraw] {
 		failRedraw->start();
 	};
+	// Top of chat (3.1): what Twitch pins above its chat — the message you or a mod pinned,
+	// the Hype Train, a poll, a prediction — from the poll's "top" (?top=1).
+	topBar_ = new QFrame(main_);
+	topBar_->setObjectName(QStringLiteral("gfxTopBar"));
+	auto *tl = new QHBoxLayout(topBar_);
+	tl->setContentsMargins(10, 6, 6, 6);
+	tl->setSpacing(8);
+	topLbl_ = new QLabel(topBar_);
+	topLbl_->setTextFormat(Qt::RichText);
+	topLbl_->setWordWrap(true);
+	topLbl_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+	topUnpin_ = new QPushButton(QStringLiteral("✕"), topBar_);
+	topUnpin_->setObjectName(QStringLiteral("gfxIconBtn"));
+	topUnpin_->setCursor(Qt::PointingHandCursor);
+	topUnpin_->setToolTip(QStringLiteral("Unpin the message on Twitch"));
+	tl->addWidget(topLbl_, 1);
+	tl->addWidget(topUnpin_, 0, Qt::AlignTop);
+	topBar_->setStyleSheet(QStringLiteral("QFrame#gfxTopBar { background: rgba(145, 70, 255, 22); "
+					      "border: 1px solid rgba(145, 70, 255, 80); border-radius: 10px; }"));
+	topBar_->hide();
+	root->addWidget(topBar_);
+	connect(topUnpin_, &QPushButton::clicked, this, [this] {
+		if (pin_ && !topPinId_.isEmpty())
+			pin_(QStringLiteral("unpin"), topPinId_, 0);
+	});
+	auto *topTick = new QTimer(this);
+	topTick->setInterval(1000);
+	connect(topTick, &QTimer::timeout, this, [this] {
+		if (topBar_->isVisible())
+			renderTop();
+	});
+	topTick->start();
 	// 📌 Pinned message: one card above the feed (right-click a name → Pin message).
 	pinBar_ = new QFrame(main_);
 	pinBar_->setObjectName(QStringLiteral("gfxPinBar"));
@@ -1643,6 +1675,196 @@ void GfxChatPanel::setModHandler(ModFn fn)
 	mod_ = std::move(fn);
 }
 
+void GfxChatPanel::setPinHandler(PinFn fn)
+{
+	pin_ = std::move(fn);
+}
+
+// Top of chat: what Twitch pins above its chat, from the poll's "top" (server 2026-11+):
+// pin {id, user, by, text, endsAt}, hype {label, trainType, level, progress, goal, top[], expiresAt, ended},
+// poll {title, choices[{title, votes}], total, endsAt, ended}, prediction {title, status, locksAt, winner,
+// outcomes[{id, title, color, users, points}], points}. Countdowns tick once a second.
+void GfxChatPanel::renderTop()
+{
+	if (!topBar_)
+		return;
+	const qint64 now = serverNow();
+	const QLocale loc;
+	const auto str = [](const QJsonObject &o, const char *k) {
+		return o.value(QLatin1String(k)).toString();
+	};
+	const auto num = [](const QJsonObject &o, const char *k) {
+		return o.value(QLatin1String(k)).toDouble();
+	};
+	const auto left = [now](double ts) {
+		const qint64 sec = qMax<qint64>(0, (static_cast<qint64>(ts) - now + 999) / 1000);
+		if (sec >= 3600)
+			return QStringLiteral("%1h %2m").arg(sec / 3600).arg(sec % 3600 / 60);
+		return QStringLiteral("%1:%2").arg(sec / 60).arg(sec % 60, 2, 10, QLatin1Char('0'));
+	};
+	const auto pct = [](double a, double b) {
+		return b > 0 ? qBound(0, qRound(a / b * 100.0), 100) : 0;
+	};
+	// A slim progress bar: a two-cell table (QLabel rich text has no CSS widths).
+	const auto bar = [](int p, const QString &color) {
+		const QString cell =
+			QStringLiteral("<td width='%1%' bgcolor='%2'><span style='font-size:3pt'>&nbsp;</span></td>");
+		QString cells;
+		if (p > 0)
+			cells += cell.arg(QString::number(p), color);
+		if (p < 100)
+			cells += cell.arg(QString::number(100 - p), QStringLiteral("#2a2e38"));
+		return QStringLiteral("<table width='100%' cellspacing='0' cellpadding='0'><tr>") + cells +
+		       QStringLiteral("</tr></table>");
+	};
+	const auto head = [](const QString &color, const QString &text) {
+		return QStringLiteral("<span style='color:%1;font-size:7.5pt;font-weight:800'>%2</span>")
+			.arg(color, text);
+	};
+	const auto line = [](const QString &html) {
+		return QStringLiteral("<div style='color:#e8eaf0;margin-top:2px'>") + html + QStringLiteral("</div>");
+	};
+	const auto note = [](const QString &html) {
+		return QStringLiteral("<div style='color:#9aa1b0;font-size:7.5pt;margin-top:2px'>") + html +
+		       QStringLiteral("</div>");
+	};
+	QStringList parts;
+	topPinId_.clear();
+	if (settings().chatTopBar) {
+		// 📌 the pinned message
+		const QJsonObject pin = top_.value(QStringLiteral("pin")).toObject();
+		const double pinEnds = num(pin, "endsAt");
+		if (!pin.isEmpty() && (pinEnds <= 0 || pinEnds > now)) {
+			topPinId_ = str(pin, "id");
+			QString h = QStringLiteral("📌 PINNED");
+			if (!str(pin, "by").isEmpty())
+				h += QStringLiteral(" BY ") + str(pin, "by").toUpper().toHtmlEscaped();
+			if (pinEnds > 0)
+				h += QStringLiteral(" · ") + left(pinEnds);
+			QString text = str(pin, "text");
+			if (text.size() > 300)
+				text = text.left(297) + QStringLiteral("…");
+			parts << head(QStringLiteral("#c4a5ff"), h) +
+					 line(QStringLiteral("<b>") + str(pin, "user").toHtmlEscaped() +
+					      QStringLiteral("</b>&nbsp; ") + textHtml(text));
+		}
+		// 🚂 the Hype Train
+		const QJsonObject hype = top_.value(QStringLiteral("hype")).toObject();
+		if (!hype.isEmpty()) {
+			const bool ended = hype.value(QStringLiteral("ended")).toBool();
+			const int level = qRound(num(hype, "level"));
+			const QString type = str(hype, "trainType");
+			const QString color = type == QLatin1String("golden_kappa") ? QStringLiteral("#f5c542")
+					      : type == QLatin1String("treasure")   ? QStringLiteral("#22d3ee")
+										    : QStringLiteral("#a970ff");
+			const QString label = str(hype, "label").isEmpty()
+						      ? QStringLiteral("HYPE TRAIN")
+						      : str(hype, "label").toUpper().toHtmlEscaped();
+			QString h =
+				QStringLiteral("🚂 ") + label + QStringLiteral(" · LEVEL ") + QString::number(level);
+			if (ended)
+				h += QStringLiteral(" · ENDED");
+			else if (num(hype, "expiresAt") > 0)
+				h += QStringLiteral(" · ") + left(num(hype, "expiresAt"));
+			QString body;
+			if (ended) {
+				body = line(QStringLiteral("Ended at <b>level ") + QString::number(level) +
+					    QStringLiteral("</b> 🎉"));
+			} else {
+				const int p = pct(num(hype, "progress"), num(hype, "goal"));
+				body = bar(p, color) +
+				       note(loc.toString(static_cast<qint64>(num(hype, "progress"))) +
+					    QStringLiteral(" / ") +
+					    loc.toString(static_cast<qint64>(num(hype, "goal"))) +
+					    QStringLiteral(" · ") + QString::number(p) + QStringLiteral("%"));
+			}
+			QStringList tops;
+			const QJsonArray ta = hype.value(QStringLiteral("top")).toArray();
+			for (qsizetype i = 0; i < ta.size(); ++i) {
+				const QJsonObject t = ta.at(i).toObject();
+				const QString kind = str(t, "type");
+				tops << str(t, "user").toHtmlEscaped() + QStringLiteral(" ") +
+						loc.toString(static_cast<qint64>(num(t, "total"))) +
+						(kind == QLatin1String("bits")           ? QStringLiteral(" bits")
+						 : kind == QLatin1String("subscription") ? QStringLiteral(" subs")
+											 : QString());
+			}
+			if (!tops.isEmpty())
+				body += note(QStringLiteral("🏆 ") + tops.join(QStringLiteral(" · ")));
+			parts << head(color, h) + body;
+		}
+		// 📊 the poll
+		const QJsonObject poll = top_.value(QStringLiteral("poll")).toObject();
+		if (!poll.isEmpty()) {
+			const bool ended = poll.value(QStringLiteral("ended")).toBool();
+			const double total = num(poll, "total");
+			QString h = ended ? QStringLiteral("📊 POLL ENDED") : QStringLiteral("📊 POLL");
+			if (!ended && num(poll, "endsAt") > 0)
+				h += QStringLiteral(" · ") + left(num(poll, "endsAt"));
+			h += QStringLiteral(" · ") + loc.toString(static_cast<qint64>(total)) +
+			     QStringLiteral(" votes");
+			QString body = line(QStringLiteral("<b>") + str(poll, "title").toHtmlEscaped() +
+					    QStringLiteral("</b>"));
+			const QJsonArray ch = poll.value(QStringLiteral("choices")).toArray();
+			double best = 0;
+			for (qsizetype i = 0; i < ch.size(); ++i)
+				best = qMax(best, num(ch.at(i).toObject(), "votes"));
+			for (qsizetype i = 0; i < ch.size(); ++i) {
+				const QJsonObject c = ch.at(i).toObject();
+				const double v = num(c, "votes");
+				const bool win = ended && best > 0 && v >= best;
+				const int p = pct(v, total);
+				body += note((win ? QStringLiteral("🏆 ") : QString()) +
+					     str(c, "title").toHtmlEscaped() + QStringLiteral(" — ") +
+					     QString::number(p) + QStringLiteral("% (") +
+					     loc.toString(static_cast<qint64>(v)) + QStringLiteral(")")) +
+					bar(p, win ? QStringLiteral("#facc15") : QStringLiteral("#38bdf8"));
+			}
+			parts << head(QStringLiteral("#38bdf8"), h) + body;
+		}
+		// 🔮 the prediction
+		const QJsonObject pred = top_.value(QStringLiteral("prediction")).toObject();
+		if (!pred.isEmpty()) {
+			const QString status = str(pred, "status");
+			QString h = QStringLiteral("🔮 PREDICTION");
+			if (status == QLatin1String("open") && num(pred, "locksAt") > 0)
+				h += QStringLiteral(" · locks in ") + left(num(pred, "locksAt"));
+			else if (status == QLatin1String("locked"))
+				h += QStringLiteral(" · 🔒 LOCKED");
+			else if (status == QLatin1String("resolved"))
+				h += QStringLiteral(" · ✅ RESOLVED");
+			else if (status == QLatin1String("canceled"))
+				h += QStringLiteral(" · ↩ CANCELED (refunded)");
+			const double points = num(pred, "points");
+			const QString winner = str(pred, "winner");
+			QString body = line(QStringLiteral("<b>") + str(pred, "title").toHtmlEscaped() +
+					    QStringLiteral("</b>"));
+			const QJsonArray oc = pred.value(QStringLiteral("outcomes")).toArray();
+			for (qsizetype i = 0; i < oc.size(); ++i) {
+				const QJsonObject o = oc.at(i).toObject();
+				const double pts = num(o, "points");
+				const bool win = !winner.isEmpty() && winner == str(o, "id");
+				const int p = pct(pts, points);
+				const QString color = str(o, "color") == QLatin1String("pink")
+							      ? QStringLiteral("#ec4899")
+							      : QStringLiteral("#3b82f6");
+				body += note((win ? QStringLiteral("🏆 ") : QString()) +
+					     str(o, "title").toHtmlEscaped() + QStringLiteral(" — ") +
+					     QString::number(p) + QStringLiteral("% · ") +
+					     loc.toString(static_cast<qint64>(pts)) + QStringLiteral(" pts · ") +
+					     loc.toString(static_cast<qint64>(num(o, "users"))) +
+					     QStringLiteral(" 👤")) +
+					bar(p, color);
+			}
+			parts << head(QStringLiteral("#f472b6"), h) + body;
+		}
+	}
+	topBar_->setVisible(!parts.isEmpty());
+	topUnpin_->setVisible(!topPinId_.isEmpty() && pin_ && platformConnected(QStringLiteral("twitch")));
+	if (!parts.isEmpty())
+		topLbl_->setText(parts.join(QStringLiteral("<div style='font-size:4pt'>&nbsp;</div>")));
+}
+
 void GfxChatPanel::setEmotesHandler(EmotesFn fn)
 {
 	emotes_ = std::move(fn);
@@ -1797,7 +2019,23 @@ void GfxChatPanel::showUserMenu(const QString &platform, const QString &login, c
 			[msgText] { QGuiApplication::clipboard()->setText(msgText); });
 	if (msg && msg->notice.isEmpty() && !msgText.isEmpty()) {
 		const gfx::ChatMessage copy = *msg;
-		connect(menu.addAction(QStringLiteral("📌   Pin message to the top")), &QAction::triggered, this,
+		// 3.1: pin it on Twitch — everyone in your chat sees it (your own channel's Twitch messages).
+		if (own && pin_ && platform == QLatin1String("twitch") && !msg->deleted &&
+		    msgIdRe().match(msg->id).hasMatch() && platformConnected(platform)) {
+			QMenu *pm = menu.addMenu(QStringLiteral("📌   Pin on Twitch (everyone sees it)"));
+			const QList<QPair<QString, int>> lengths = {{QStringLiteral("Until the stream ends"), 0},
+								    {QStringLiteral("30 minutes"), 1800},
+								    {QStringLiteral("10 minutes"), 600},
+								    {QStringLiteral("5 minutes"), 300},
+								    {QStringLiteral("2 minutes"), 120}};
+			const QString pinId = msg->id;
+			for (const auto &l : lengths) {
+				const int secs = l.second;
+				connect(pm->addAction(l.first), &QAction::triggered, this,
+					[this, pinId, secs] { pin_(QStringLiteral("pin"), pinId, secs); });
+			}
+		}
+		connect(menu.addAction(QStringLiteral("📍   Pin here only (just for you)")), &QAction::triggered, this,
 			[this, copy] { setPinned(&copy); });
 	}
 
@@ -2487,6 +2725,12 @@ int GfxChatPanel::applyPoll(const QJsonObject &o)
 	renderStatus();
 	updateFilters();
 	updateTargets();
+	// Top of chat: only sent when it changed (?toprev=) — otherwise keep what we have.
+	if (o.contains(QStringLiteral("top"))) {
+		top_ = o.value(QStringLiteral("top")).toObject();
+		topRev_ = static_cast<qint64>(top_.value(QStringLiteral("rev")).toDouble());
+		renderTop();
+	}
 	const bool namesChanged = rebuildHighlightRe();
 
 	// reset = the server started a new feed (first connect, or it restarted
@@ -3706,6 +3950,9 @@ void GfxChatPanel::renderPin()
 void GfxChatPanel::clearChat()
 {
 	setPinned(nullptr);
+	top_ = QJsonObject();
+	topRev_ = -1;
+	renderTop();
 	msgs_.clear();
 	status_ = QJsonObject();
 	streams_ = QJsonObject();
@@ -3732,6 +3979,7 @@ void GfxChatPanel::openChatterMenu(const QString &platform, const QString &login
 void GfxChatPanel::refresh()
 {
 	viewersBtn_->setChecked(settings().chatViewers);
+	renderTop();
 	if (!settings().chatPauseOnHover && hoverPaused_)
 		hoverPaused_ = false;
 	// Watched channels removed in the dialog disappear now, not at the next poll.

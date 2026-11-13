@@ -94,6 +94,9 @@ public:
 	// action: timeout | ban | unban | delete. displayName is for the confirmation line.
 	using ModFn = std::function<void(const QString &platform, const QString &action, const QString &login,
 					 int seconds, const QString &messageId, const QString &displayName)>;
+	// Pin / unpin a Twitch message as the streamer (POST /api/obs/chat/pin, 3.1).
+	// action: pin | unpin; seconds 0 = until the stream ends.
+	using PinFn = std::function<void(const QString &action, const QString &messageId, int seconds)>;
 	// Chatter card lookup (GET /api/obs/chat/user). done(info, error) on the UI thread.
 	using InfoDone = std::function<void(const QJsonObject &info, const QString &error)>;
 	using InfoFn = std::function<void(const QString &platform, const QString &login, InfoDone done)>;
@@ -111,6 +114,9 @@ public:
 
 	void setSendHandler(SendFn fn);
 	void setModHandler(ModFn fn);
+	void setPinHandler(PinFn fn);
+	// The top-of-chat revision shown (?toprev=), -1 = none yet.
+	qint64 topRev() const { return topRev_; }
 	void setInfoHandler(InfoFn fn);
 	void setEmotesHandler(EmotesFn fn);
 	// Applies one poll response. Returns how many new messages arrived that the
@@ -232,6 +238,8 @@ private:
 	void insertAtCursor(const QString &text);
 	void setPinned(const gfx::ChatMessage *m);
 	void renderPin();
+	// Top of chat (3.1): Twitch's pinned bar from the poll's "top".
+	void renderTop();
 	// Composer: ↑/↓ recall sent messages, Tab completes chatter names.
 	bool composerKey(QKeyEvent *e);
 	void completeName(bool backwards);
@@ -249,6 +257,7 @@ private:
 	QRegularExpression highlightRe_;
 	SendFn send_;
 	ModFn mod_;
+	PinFn pin_;
 	InfoFn info_;
 	EmotesFn emotes_;
 	GfxEmotePicker *picker_ = nullptr;
@@ -312,6 +321,12 @@ private:
 	QPushButton *quickBtn_ = nullptr;
 	QFrame *pinBar_ = nullptr;
 	QLabel *pinLbl_ = nullptr;
+	QFrame *topBar_ = nullptr;
+	QLabel *topLbl_ = nullptr;
+	QPushButton *topUnpin_ = nullptr;
+	QJsonObject top_;
+	qint64 topRev_ = -1;
+	QString topPinId_;
 	QPushButton *searchBtn_ = nullptr;
 	QPushButton *pauseBtn_ = nullptr;
 	QPushButton *viewersBtn_ = nullptr;
