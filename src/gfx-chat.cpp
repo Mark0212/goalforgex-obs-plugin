@@ -527,6 +527,7 @@ const NoticeMeta kNotices[] = {
 	{"bitsbadge", "💎", "BITS BADGE", "#c084fc", "other"},
 	{"payforward", "💞", "PAY IT FORWARD", "#f472b6", "other"},
 	{"charity", "💗", "CHARITY", "#f472b6", "other"},
+	{"gfx_featured", "🏠", "GOALFORGEX", "#f5c842", "other"}, // Front Page Live (home page feature)
 	{"system", "ℹ", "NOTICE", "#9aa1b0", "other"}, // last = fallback for anything new
 };
 
