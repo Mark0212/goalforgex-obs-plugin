@@ -241,6 +241,7 @@ private:
 	qint64 linkExpiresMs_ = 0;
 	int linkGeneration_ = 0;
 	int netBackoffS_ = 5;
+	int catalogueFails_ = 0; // widget-list loads that failed in a row (quiet retries first)
 	bool loaded_ = false;
 	bool catalogueInFlight_ = false;
 	bool stateInFlight_ = false;

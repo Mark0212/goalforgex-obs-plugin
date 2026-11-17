@@ -42,6 +42,9 @@ ApiResult apiPost(const QString &path, const QJsonObject &body = QJsonObject());
 // Plain-English description of a failed call.
 QString describe(const HttpResult &h);
 QString describe(const ApiResult &r);
+// No answer, or a "try again" answer (the site restarting after an update, Cloudflare /
+// nginx gateway errors): worth retrying quietly before telling the streamer anything.
+bool isTransient(const HttpResult &h);
 
 // Runs work() on a worker thread and done(result) back on the Qt UI thread.
 // The result is dropped if `ctx` has been destroyed or OBS is shutting down.

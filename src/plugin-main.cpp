@@ -22,6 +22,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "gfx-multistream.hpp"
 #include "gfx-hotkeys.hpp"
 #include "gfx-http.hpp"
+#include "gfx-tiktok-relay.hpp"
 
 #include <obs-module.h>
 #include <obs-frontend-api.h>
@@ -44,8 +45,10 @@ static QPointer<GfxDock> g_dock;
 
 static void onFrontendEvent(enum obs_frontend_event event, void *)
 {
-	if (event == OBS_FRONTEND_EVENT_EXIT)
+	if (event == OBS_FRONTEND_EVENT_EXIT) {
 		gfx::httpBeginShutdown();
+		gfx::tiktokRelayStop();
+	}
 	if (g_dock)
 		g_dock->onFrontendEvent(event);
 }
@@ -92,6 +95,8 @@ bool obs_module_load(void)
 		if (g_dock)
 			g_dock->performAction(id, arg);
 	});
+	// TikTok LIVE through this PC (the site's server stays the backup) — gfx-tiktok-relay.cpp.
+	gfx::tiktokRelayStart();
 	obs_log(LOG_INFO, "GoalForgeX loaded (version %s build %s, server %s)", PLUGIN_VERSION, PLUGIN_BUILD,
 		gfx::baseUrl().toUtf8().constData());
 	return true;
@@ -102,6 +107,7 @@ void obs_module_unload(void)
 	obs_frontend_remove_event_callback(onFrontendEvent, nullptr);
 	gfx::unregisterHotkeys();
 	gfx::httpBeginShutdown();
+	gfx::tiktokRelayStop(); // joins its threads (they stop on the shutdown flag)
 	// Worker threads abort their transfers once shutdown is flagged; give any
 	// still in flight a moment to return before this DLL's code goes away.
 	for (int i = 0; i < 50 && gfx::httpInFlight() > 0; ++i)
