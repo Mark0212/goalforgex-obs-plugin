@@ -460,7 +460,12 @@ GfxEventsPanel::Card GfxEventsPanel::describe(const FeedEvent &e) const
 			c.platform = QStringLiteral("twitch");
 		const QString amt = trailingParen(e.text);
 		const QString &t = e.alertType;
-		if (t == QLatin1String("follower")) {
+		if (t == QLatin1String("gfx_featured")) {
+			// Front Page Live: GoalForgeX put this streamer on its home page.
+			c.type = QStringLiteral("gfx_featured");
+			c.platform.clear();
+			c.head = QString(e.text).remove(QStringLiteral("🔔 ")).remove(QStringLiteral("🏠 ")).toHtmlEscaped();
+		} else if (t == QLatin1String("follower")) {
 			c.type = QStringLiteral("follow");
 			c.head = N + QStringLiteral(" followed");
 		} else if (t == QLatin1String("subscriber")) {

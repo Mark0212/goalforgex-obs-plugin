@@ -1964,15 +1964,31 @@ void GfxDock::loadCatalogue(bool quiet)
 				return;
 			}
 			if (!r.ok()) {
-				showMessage(QStringLiteral(
-						    "%1 Widgets already in your scenes keep working. Retrying in %2s.")
-						    .arg(describe(r))
-						    .arg(netBackoffS_),
-					    true);
+				// The site restarts for a few seconds after every update (502/503), and
+				// Cloudflare sometimes times out once: retry quietly (2, 4, 6 s) before
+				// saying anything, and never cover a dock that already lists the widgets
+				// over a hiccup — only a problem that lasts gets the message.
+				++catalogueFails_;
+				const bool transient = isTransient(r.http);
+				if (transient && catalogueFails_ <= 3) {
+					catalogueTimer_.start(2000 * catalogueFails_);
+					return;
+				}
+				if (!transient || widgets_.isEmpty() || catalogueFails_ > 8)
+					showMessage(
+						QStringLiteral(
+							"%1 Widgets already in your scenes keep working. Retrying in %2s.")
+							.arg(describe(r))
+							.arg(netBackoffS_),
+						true);
 				catalogueTimer_.start(netBackoffS_ * 1000);
 				netBackoffS_ = qMin(netBackoffS_ * 2, 300);
 				return;
 			}
+			// Back after a failure: clear the message it left (if any).
+			if (catalogueFails_ > 0 && msgLbl_->text().contains(QStringLiteral("Retrying in")))
+				showMessage(QString());
+			catalogueFails_ = 0;
 			netBackoffS_ = 5;
 			QList<WidgetInfo> next;
 			const QJsonArray arr = r.http.json().value(QStringLiteral("widgets")).toArray();
@@ -2329,6 +2345,13 @@ void GfxDock::watchAimScene()
 	signal_handler_t *sh = obs_source_get_signal_handler(scene);
 	for (const char *sig : kAimSignals)
 		signal_handler_connect(sh, sig, onAimSceneChanged, this);
+}
+
+// If the dock ever goes away without OBS_FRONTEND_EVENT_EXIT (which already unwatches),
+// the scene signal must not keep pointing at it.
+GfxDock::~GfxDock()
+{
+	unwatchAimScene();
 }
 
 void GfxDock::unwatchAimScene()

@@ -44,8 +44,9 @@ target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE CURL::libcurl)
 
 if(WIN32)
   # DPAPI (CryptProtectData) — encrypts the stored refresh token per Windows user;
-  # shell32 — ShellExecuteExW("runas") to start a verified update installer.
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE crypt32 shell32)
+  # shell32 — ShellExecuteExW("runas") to start a verified update installer;
+  # ws2_32 — select() on the TikTok LIVE socket (gfx-tiktok-relay.cpp).
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE crypt32 shell32 ws2_32)
 endif()
 
 target_sources(
@@ -99,6 +100,8 @@ target_sources(
     src/gfx-state.hpp
     src/gfx-theme.cpp
     src/gfx-theme.hpp
+    src/gfx-tiktok-relay.cpp
+    src/gfx-tiktok-relay.hpp
     src/gfx-update.cpp
     src/gfx-update.hpp
     src/resources/goalforgex.qrc

@@ -40,6 +40,8 @@ HttpResult httpPostJson(const QString &url, const QJsonObject &body, const QStri
 bool httpDownload(const QString &url, const QString &path, QString *error);
 
 // Aborts in-flight transfers and makes new ones fail fast (OBS is exiting).
+// curl_global_init, once — called from obs_module_load on the UI thread.
+void httpGlobalInit();
 void httpBeginShutdown();
 bool httpShuttingDown();
 // Number of worker-thread requests still running (unload waits for 0).

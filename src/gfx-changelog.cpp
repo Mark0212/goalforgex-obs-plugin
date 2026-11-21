@@ -54,6 +54,13 @@ const Note k300[] = {
 	{"🚀", "GoalForgeX for OBS 3.0",
 	 "The biggest update yet: a brand-new Settings window, chat you can fine-tune, TikTok likes, new themes and a "
 	 "fresh What's new. Here's everything in 3.0."},
+	{"🎵", "TikTok LIVE through your PC",
+	 "While OBS is open, your PC checks for your TikTok LIVE and holds the TikTok connection over your own "
+	 "internet, so TikTok blocks and drops it far less. If OBS closes or your PC can't connect, GoalForgeX's "
+	 "server takes over by itself within seconds. Switch it off on goalforgex.com: Settings → TikTok LIVE."},
+	{"🛟", "Calmer when the site restarts",
+	 "When goalforgex.com restarts for an update, the dock quietly retries for a few seconds instead of showing "
+	 "an error, and it never covers your widget list over a short hiccup."},
 	{"🎛", "A brand-new Settings",
 	 "⚙ Settings is rebuilt from scratch: a sidebar of pages, search across every option (Ctrl+F), smooth on / off "
 	 "switches and cards. Everything previews live on your docks as you change it, and Cancel puts it all back."},

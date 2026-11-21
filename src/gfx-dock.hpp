@@ -48,6 +48,7 @@ class QToolButton;
 class GfxDock : public QWidget {
 public:
 	explicit GfxDock(QWidget *parent = nullptr);
+	~GfxDock() override;
 
 	void onFrontendEvent(enum obs_frontend_event event);
 	// Shared by the Live tab buttons, OBS hotkeys and stream automation.
@@ -241,6 +242,7 @@ private:
 	qint64 linkExpiresMs_ = 0;
 	int linkGeneration_ = 0;
 	int netBackoffS_ = 5;
+	int catalogueFails_ = 0; // widget-list loads that failed in a row (quiet retries first)
 	bool loaded_ = false;
 	bool catalogueInFlight_ = false;
 	bool stateInFlight_ = false;

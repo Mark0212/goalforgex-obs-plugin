@@ -9,7 +9,39 @@ the Free Software Foundation; either version 2 of the License, or
 */
 #include "gfx-api.hpp"
 
+#include <chrono>
+
 namespace gfx {
+
+// See uiTarget() in gfx-api.hpp. Atomic: worker / OBS threads read it while the UI
+// thread creates and deletes it.
+static std::atomic<QObject *> g_uiTarget{nullptr};
+static std::atomic<int> g_asyncLive{0};
+
+QObject *uiTarget()
+{
+	return g_uiTarget.load();
+}
+void uiTargetCreate()
+{
+	if (!g_uiTarget.load())
+		g_uiTarget.store(new QObject());
+}
+void uiTargetDestroy()
+{
+	// Cleared first, so nothing new is posted; deleting it drops whatever is still queued.
+	if (QObject *t = g_uiTarget.exchange(nullptr))
+		delete t;
+}
+std::atomic<int> &asyncLive()
+{
+	return g_asyncLive;
+}
+void asyncWait(int maxMs)
+{
+	for (int waited = 0; g_asyncLive.load() > 0 && waited < maxMs; waited += 50)
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+}
 
 ApiResult authedCall(const std::function<HttpResult(const QString &)> &call)
 {
@@ -59,10 +91,20 @@ QString describe(const HttpResult &h)
 		return QStringLiteral("Can't reach GoalForgeX — check your internet connection.");
 	if (h.status == 429)
 		return QStringLiteral("Too many requests to GoalForgeX — try again in a moment.");
+	if (isTransient(h))
+		return QStringLiteral("GoalForgeX is restarting or busy — this usually clears in a few seconds.");
 	if (h.status >= 500)
 		return QStringLiteral("GoalForgeX is having a problem right now — try again shortly.");
 	const QString m = h.serverMessage();
 	return m.isEmpty() ? QStringLiteral("GoalForgeX returned an error (HTTP %1).").arg(h.status) : m;
+}
+
+bool isTransient(const HttpResult &h)
+{
+	// 502/503/504: the site is restarting (a few seconds after every update) or busy.
+	// 520-530: Cloudflare couldn't get an answer from it in time.
+	return h.status == 0 || h.status == 502 || h.status == 503 || h.status == 504 ||
+	       (h.status >= 520 && h.status <= 530);
 }
 
 QString describe(const ApiResult &r)
