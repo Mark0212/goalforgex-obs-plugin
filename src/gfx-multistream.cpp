@@ -328,13 +328,10 @@ void post(void *data, const char *what, long long code)
 	QPointer<GfxMultistreamDock> dock = c->dock;
 	const QString id = c->id;
 	const QString w = QString::fromLatin1(what);
-	QMetaObject::invokeMethod(
-		qApp,
-		[dock, id, w, code] {
-			if (dock)
-				dock->onOutputSignal(id, w, static_cast<int>(code));
-		},
-		Qt::QueuedConnection);
+	postToUi([dock, id, w, code] {
+		if (dock)
+			dock->onOutputSignal(id, w, static_cast<int>(code));
+	});
 }
 void sigStart(void *data, calldata_t *)
 {

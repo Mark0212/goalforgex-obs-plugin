@@ -8,6 +8,7 @@ the Free Software Foundation; either version 2 of the License, or
 (at your option) any later version.
 */
 #include "gfx-hotkeys.hpp"
+#include "gfx-api.hpp" // uiTarget()
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
@@ -58,8 +59,11 @@ static void onHotkey(void *data, obs_hotkey_id, obs_hotkey_t *, bool pressed)
 	if (!pressed)
 		return;
 	const HotkeyDef *def = static_cast<const HotkeyDef *>(data);
+	QObject *target = uiTarget(); // nullptr once the plugin is unloading → ignore the press
+	if (!target)
+		return;
 	QMetaObject::invokeMethod(
-		qApp,
+		target,
 		[def] {
 			if (!g_dispatch)
 				return;

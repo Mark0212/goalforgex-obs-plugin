@@ -2347,6 +2347,13 @@ void GfxDock::watchAimScene()
 		signal_handler_connect(sh, sig, onAimSceneChanged, this);
 }
 
+// If the dock ever goes away without OBS_FRONTEND_EVENT_EXIT (which already unwatches),
+// the scene signal must not keep pointing at it.
+GfxDock::~GfxDock()
+{
+	unwatchAimScene();
+}
+
 void GfxDock::unwatchAimScene()
 {
 	aimSoon_.stop();

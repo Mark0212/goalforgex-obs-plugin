@@ -9,7 +9,39 @@ the Free Software Foundation; either version 2 of the License, or
 */
 #include "gfx-api.hpp"
 
+#include <chrono>
+
 namespace gfx {
+
+// See uiTarget() in gfx-api.hpp. Atomic: worker / OBS threads read it while the UI
+// thread creates and deletes it.
+static std::atomic<QObject *> g_uiTarget{nullptr};
+static std::atomic<int> g_asyncLive{0};
+
+QObject *uiTarget()
+{
+	return g_uiTarget.load();
+}
+void uiTargetCreate()
+{
+	if (!g_uiTarget.load())
+		g_uiTarget.store(new QObject());
+}
+void uiTargetDestroy()
+{
+	// Cleared first, so nothing new is posted; deleting it drops whatever is still queued.
+	if (QObject *t = g_uiTarget.exchange(nullptr))
+		delete t;
+}
+std::atomic<int> &asyncLive()
+{
+	return g_asyncLive;
+}
+void asyncWait(int maxMs)
+{
+	for (int waited = 0; g_asyncLive.load() > 0 && waited < maxMs; waited += 50)
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+}
 
 ApiResult authedCall(const std::function<HttpResult(const QString &)> &call)
 {

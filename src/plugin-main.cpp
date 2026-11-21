@@ -22,6 +22,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "gfx-multistream.hpp"
 #include "gfx-hotkeys.hpp"
 #include "gfx-http.hpp"
+#include "gfx-api.hpp" // uiTargetCreate / asyncWait
 #include "gfx-tiktok-relay.hpp"
 
 #include <obs-module.h>
@@ -55,6 +56,11 @@ static void onFrontendEvent(enum obs_frontend_event event, void *)
 
 bool obs_module_load(void)
 {
+	// curl's global setup isn't safe to run alongside other plugins' curl use on older
+	// libcurl builds — do it once here, on OBS's UI thread, instead of on the first
+	// worker thread that makes a request.
+	gfx::httpGlobalInit();
+	gfx::uiTargetCreate();
 	auto *dock = new GfxDock();
 	// Adds a "GoalForgeX" toggle to OBS's Docks menu (OBS 30.0+).
 	if (!obs_frontend_add_dock_by_id("goalforgex_dock", "GoalForgeX", dock)) {
@@ -112,5 +118,9 @@ void obs_module_unload(void)
 	// still in flight a moment to return before this DLL's code goes away.
 	for (int i = 0; i < 50 && gfx::httpInFlight() > 0; ++i)
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	// …and every runAsync thread to run to its very end (it can still be handing its
+	// result over after its transfer finished), then drop anything still queued for the UI.
+	gfx::asyncWait(3000);
+	gfx::uiTargetDestroy();
 	obs_log(LOG_INFO, "GoalForgeX unloaded");
 }

@@ -66,6 +66,11 @@ static CURLSH *sharedPool()
 	return g_share;
 }
 
+void httpGlobalInit()
+{
+	std::call_once(g_curlInit, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
+}
+
 QJsonObject HttpResult::json() const
 {
 	const QJsonDocument doc = QJsonDocument::fromJson(body);

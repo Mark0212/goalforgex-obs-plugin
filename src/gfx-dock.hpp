@@ -48,6 +48,7 @@ class QToolButton;
 class GfxDock : public QWidget {
 public:
 	explicit GfxDock(QWidget *parent = nullptr);
+	~GfxDock() override;
 
 	void onFrontendEvent(enum obs_frontend_event event);
 	// Shared by the Live tab buttons, OBS hotkeys and stream automation.
