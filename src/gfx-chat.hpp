@@ -37,10 +37,12 @@ class GfxEmotePicker;
 
 namespace gfx {
 
-// A piece of a message: plain text, or an emote (name + image URL).
+// A piece of a message: plain text, an emote (name + image URL), or a Twitch
+// chat GIF (title + image URL) — drawn large on its own line, and played.
 struct ChatPart {
-	QString text;  // the text, or the emote's name
+	QString text;  // the text, or the emote's name / the GIF's title
 	QString image; // empty = plain text
+	bool gif = false;
 };
 
 // One chat line from GET /api/obs/chat (Twitch, Kick, YouTube, TikTok or Xive).

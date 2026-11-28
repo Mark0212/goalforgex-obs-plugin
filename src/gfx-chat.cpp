@@ -19,6 +19,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QAbstractTextDocumentLayout>
 #include <QAction>
 #include <QBoxLayout>
+#include <QBuffer>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -47,6 +48,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <QLocale>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMovie>
 #include <QMouseEvent>
 #include <QPaintEvent>
 #include <QPainter>
@@ -246,6 +248,8 @@ QImage scaledTo(const QImage &src, int px, qreal dpr)
 // The feed: serves the platform icons to the HTML as gfx:<platform>/<px>,
 // and emotes as emote:<slot>/<px> — a transparent square until the image has
 // downloaded, then the image itself (the lines re-flow once, batched).
+// Twitch chat GIFs are gif:<slot>/<px>: the same, but drawn large, and the
+// newest few play for a while before resting on a frame.
 class ChatView : public QTextBrowser {
 public:
 	explicit ChatView(QWidget *parent) : QTextBrowser(parent)
@@ -299,6 +303,19 @@ protected:
 					waiting_[url].insert(name.toString());
 				return QVariant::fromValue(placeholder(px));
 			}
+			return QVariant::fromValue(scaled(url, img, px));
+		}
+		if (type == QTextDocument::ImageResource && name.scheme() == QLatin1String("gif")) {
+			const QStringList parts = name.path().split(QLatin1Char('/'));
+			const int px = parts.size() > 1 ? qBound(kGifMinPx, parts.at(1).toInt(), kGifMaxPx) : 120;
+			const QString url = urlFor ? urlFor(parts.value(0).toInt()) : QString();
+			const QImage img = url.isEmpty() ? QImage() : RemoteImages::instance().get(url);
+			if (img.isNull()) {
+				if (!url.isEmpty() && !RemoteImages::instance().failed(url))
+					waiting_[url].insert(name.toString());
+				return QVariant::fromValue(placeholder(px));
+			}
+			play(url, name.toString(), px);
 			return QVariant::fromValue(scaled(url, img, px));
 		}
 		return QTextBrowser::loadResource(type, name);
@@ -371,11 +388,81 @@ private:
 		}
 		for (const QString &n : names) {
 			const QUrl u(n);
-			const int px = qBound(10, u.path().section(QLatin1Char('/'), 1, 1).toInt(), 96);
+			const bool gif = u.scheme() == QLatin1String("gif");
+			const int px = qBound(gif ? kGifMinPx : 10, u.path().section(QLatin1Char('/'), 1, 1).toInt(),
+					      gif ? kGifMaxPx : 96);
 			document()->addResource(QTextDocument::ImageResource, u,
 						QVariant::fromValue(scaled(url, img, px)));
+			if (gif)
+				play(url, n, px);
 		}
 		relayout_.start();
+	}
+
+	// ── Twitch chat GIFs ──
+	// At most kGifPlaying play at once, each for kGifPlayMs, then it rests on the
+	// frame it reached: a chat dock sits beside a live stream, so it must stay cheap.
+	// Every frame goes into the document under the names already showing that GIF
+	// (same size as the still, so nothing re-flows) and the view repaints.
+	struct Gif {
+		QMovie *movie = nullptr;    // owns the buffer it reads from
+		QHash<QString, int> names; // resource name → px tall
+	};
+	void play(const QString &url, const QString &name, int px)
+	{
+		auto it = gifs_.find(url);
+		if (it != gifs_.end()) {
+			it->names.insert(name, px);
+			return;
+		}
+		const QByteArray raw = RemoteImages::instance().animation(url);
+		if (raw.isEmpty())
+			return; // an older GIF: only its still image is kept
+		while (gifOrder_.size() >= kGifPlaying)
+			stopGif(gifOrder_.takeFirst());
+		auto *data = new QBuffer();
+		data->setData(raw);
+		if (!data->open(QIODevice::ReadOnly)) {
+			delete data;
+			return;
+		}
+		Gif g;
+		g.movie = new QMovie(data, QByteArray(), this);
+		data->setParent(g.movie); // freed with the movie, and only after it
+		g.movie->setCacheMode(QMovie::CacheNone);
+		if (!g.movie->isValid()) {
+			delete g.movie;
+			return;
+		}
+		g.names.insert(name, px);
+		QMovie *movie = g.movie;
+		gifs_.insert(url, g);
+		gifOrder_.append(url);
+		connect(movie, &QMovie::frameChanged, this, [this, url] { gifFrame(url); });
+		movie->start();
+		QTimer::singleShot(kGifPlayMs, movie, [movie] { movie->setPaused(true); });
+	}
+	void gifFrame(const QString &url)
+	{
+		auto it = gifs_.constFind(url);
+		if (it == gifs_.constEnd() || !it->movie)
+			return;
+		const QImage frame = it->movie->currentImage();
+		if (frame.isNull())
+			return;
+		const qreal dpr = devicePixelRatioF();
+		for (auto n = it->names.constBegin(); n != it->names.constEnd(); ++n)
+			document()->addResource(QTextDocument::ImageResource, QUrl(n.key()),
+						QVariant::fromValue(scaledTo(frame, n.value(), dpr)));
+		viewport()->update();
+	}
+	void stopGif(const QString &url)
+	{
+		const Gif g = gifs_.take(url);
+		if (g.movie) {
+			g.movie->stop();
+			g.movie->deleteLater();
+		}
 	}
 	void relayoutNow()
 	{
@@ -399,8 +486,15 @@ private:
 		viewport()->update();
 	}
 
+	static constexpr int kGifMinPx = 40;
+	static constexpr int kGifMaxPx = 240;
+	static constexpr int kGifPlaying = 3;
+	static constexpr int kGifPlayMs = 20000;
+
 	QHash<QString, QSet<QString>> waiting_; // url → resource names showing its placeholder
 	QHash<QString, QImage> scaled_;
+	QHash<QString, Gif> gifs_; // url → the GIF playing (or resting) in the feed
+	QStringList gifOrder_;     // oldest first
 	QTimer relayout_;
 };
 
@@ -2833,7 +2927,9 @@ int GfxChatPanel::applyPoll(const QJsonObject &o)
 				part.text = pv.toString();
 			} else {
 				const QJsonObject po = pv.toObject();
-				part.text = po.value(QStringLiteral("e")).toString().left(60);
+				// gif: 1 = a Twitch chat GIF (server: obs-link.js gifRanges) — "e" is its title.
+				part.gif = po.value(QStringLiteral("gif")).toInt() == 1;
+				part.text = po.value(QStringLiteral("e")).toString().left(part.gif ? 120 : 60);
 				part.image = po.value(QStringLiteral("u")).toString();
 				if (!RemoteImages::allowed(part.image))
 					part.image.clear();
@@ -3063,10 +3159,22 @@ QString GfxChatPanel::partsHtml(const ChatMessage &m, qreal basePt) const
 {
 	// Emotes about 2× the text height (Twitch's own chat ratio), sharp at any size.
 	const int px = qBound(12, qRound(basePt * 2.6 * settings().chatEmoteScale / 100.0), 160);
+	// A Twitch chat GIF gets its own line, about five emotes tall.
+	const int gifPx = qBound(72, px * 5, 240);
 	QString out;
-	for (const ChatPart &p : m.parts) {
+	for (qsizetype k = 0; k < m.parts.size(); ++k) {
+		const ChatPart &p = m.parts.at(k);
 		if (p.image.isEmpty() || RemoteImages::instance().failed(p.image)) {
-			out += textHtml(p.text);
+			out += textHtml(p.gif ? QStringLiteral("[%1]").arg(p.text) : p.text);
+			continue;
+		}
+		if (p.gif) {
+			out += QStringLiteral("<br><img src='gif:%1/%2' height='%2' title='%3'>")
+				       .arg(emoteSlot(p.image))
+				       .arg(gifPx)
+				       .arg(p.text.toHtmlEscaped());
+			if (k + 1 < m.parts.size())
+				out += QStringLiteral("<br>");
 			continue;
 		}
 		out += QStringLiteral("<img src='emote:%1/%2' height='%2' style='vertical-align:middle' title='%3'>")

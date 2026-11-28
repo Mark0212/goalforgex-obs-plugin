@@ -21,6 +21,22 @@ constexpr int kMaxCached = 800;
 constexpr int kParallel = 6;
 constexpr int kMaxSide = 160; // emotes are ≤ 112 px; avatars are drawn small
 constexpr qsizetype kMaxBytes = 2 * 1024 * 1024;
+// Twitch chat GIFs (GIPHY) are drawn much bigger than an emote and are far
+// heavier: 1–5 MB is normal. The newest few keep their bytes so the chat can
+// play them; older ones keep only their first frame.
+constexpr int kMaxGifSide = 320;
+constexpr qsizetype kMaxGifBytes = 8 * 1024 * 1024;
+constexpr int kMaxGifsKept = 6;
+
+bool giphyHost(const QString &h)
+{
+	return h == QLatin1String("giphy.com") || h.endsWith(QLatin1String(".giphy.com"));
+}
+
+struct Loaded {
+	QImage img;
+	QByteArray raw; // the whole file, GIFs only
+};
 
 } // namespace
 
@@ -50,8 +66,21 @@ bool RemoteImages::allowed(const QString &url)
 	for (const char *e : exact)
 		if (h == QLatin1String(e))
 			return true;
+	// Twitch chat GIFs: media0–4.giphy.com, i.giphy.com (the URL comes from Twitch).
+	if (giphyHost(h))
+		return true;
 	// TikTok avatars: p16-sign-va.tiktokcdn.com, p77-sign.tiktokcdn-us.com …
 	return h.endsWith(QLatin1String(".tiktokcdn.com")) || h.endsWith(QLatin1String(".tiktokcdn-us.com"));
+}
+
+bool RemoteImages::isGif(const QString &url)
+{
+	return allowed(url) && giphyHost(QUrl(url, QUrl::StrictMode).host().toLower());
+}
+
+QByteArray RemoteImages::animation(const QString &url) const
+{
+	return gifBytes_.value(url);
 }
 
 QImage RemoteImages::get(const QString &url)
@@ -87,23 +116,28 @@ void RemoteImages::pump()
 		runAsync(
 			holder_,
 			[url] {
-				QImage img;
+				Loaded out;
+				const bool gif = RemoteImages::isGif(url);
+				const int side = gif ? kMaxGifSide : kMaxSide;
 				const HttpResult r = httpGet(url);
-				if (r.ok() && !r.body.isEmpty() && r.body.size() <= kMaxBytes) {
-					img = QImage::fromData(r.body);
-					if (!img.isNull() && (img.width() > kMaxSide || img.height() > kMaxSide))
-						img = img.scaled(kMaxSide, kMaxSide, Qt::KeepAspectRatio,
+				if (r.ok() && !r.body.isEmpty() && r.body.size() <= (gif ? kMaxGifBytes : kMaxBytes)) {
+					QImage img = QImage::fromData(r.body);
+					if (!img.isNull() && (img.width() > side || img.height() > side))
+						img = img.scaled(side, side, Qt::KeepAspectRatio,
 								 Qt::SmoothTransformation);
 					if (!img.isNull() && img.format() != QImage::Format_ARGB32_Premultiplied)
 						img = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+					out.img = img;
+					if (gif && !img.isNull())
+						out.raw = r.body;
 				}
-				return img;
+				return out;
 			},
-			[this, url](const QImage &img) { finished(url, img); });
+			[this, url](const Loaded &l) { finished(url, l.img, l.raw); });
 	}
 }
 
-void RemoteImages::finished(const QString &url, const QImage &img)
+void RemoteImages::finished(const QString &url, const QImage &img, const QByteArray &raw)
 {
 	--running_;
 	pending_.remove(url);
@@ -114,6 +148,12 @@ void RemoteImages::finished(const QString &url, const QImage &img)
 		order_.append(url);
 		while (order_.size() > kMaxCached)
 			cache_.remove(order_.takeFirst());
+		if (!raw.isEmpty()) {
+			gifBytes_.insert(url, raw);
+			gifOrder_.append(url);
+			while (gifOrder_.size() > kMaxGifsKept)
+				gifBytes_.remove(gifOrder_.takeFirst());
+		}
 	}
 	// Failures notify too: a line showing a placeholder then falls back to the name.
 	for (qsizetype i = subs_.size() - 1; i >= 0; --i) {
