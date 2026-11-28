@@ -50,6 +50,12 @@ struct Release {
 	int count;
 };
 
+const Note k310[] = {
+	{"🎞", "Twitch chat GIFs",
+	 "GIFs that Tier 2 and Tier 3 subs post in Twitch chat now show in MultiChat as the moving picture, on their "
+	 "own line, instead of just the title. The newest ones play for 20 seconds and then rest, so the dock stays "
+	 "light while you are live."},
+};
 const Note k300[] = {
 	{"🚀", "GoalForgeX for OBS 3.0",
 	 "The biggest update yet: a brand-new Settings window, chat you can fine-tune, TikTok likes, new themes and a "
@@ -283,6 +289,7 @@ const Note k270[] = {
 	{"⚡", "Instant", "Chat and events arrive the moment they happen."},
 };
 const Release kReleases[] = {
+	{"3.1.0", "November 2026", k310, static_cast<int>(std::size(k310))},
 	{"3.0.0", "November 2026", k300, static_cast<int>(std::size(k300))},
 	{"2.13.0", "November 2026", k2130, static_cast<int>(std::size(k2130))},
 	{"2.12.2", "November 2026", k2122, static_cast<int>(std::size(k2122))},

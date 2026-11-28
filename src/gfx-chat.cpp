@@ -439,7 +439,8 @@ private:
 		gifs_.insert(url, g);
 		gifOrder_.append(url);
 		connect(movie, &QMovie::frameChanged, this, [this, url] { gifFrame(url); });
-		movie->start();
+		// Started from the event loop, never from inside the paint / layout that asked for the image.
+		QTimer::singleShot(0, movie, [movie] { movie->start(); });
 		QTimer::singleShot(kGifPlayMs, movie, [movie] { movie->setPaused(true); });
 	}
 	void gifFrame(const QString &url)
